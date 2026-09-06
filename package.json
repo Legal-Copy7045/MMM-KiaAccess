@@ -1,0 +1,18 @@
+{
+  "name": "mmm-kiaaccess",
+  "version": "1.0.0",
+  "description": "MagicMirror² module that shows configurable Kia Connect / Bluelink vehicle data (built for the Kia EV9)",
+  "main": "MMM-KiaAccess.js",
+  "scripts": {
+    "test": "node test/flatten.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Legal-Copy7045/MMM-KiaAccess.git"
+  },
+  "keywords": ["MagicMirror", "MMM", "Kia", "EV9", "Bluelink", "Kia Connect", "bluelinky", "electric vehicle"],
+  "license": "MIT",
+  "dependencies": {
+    "bluelinky": "^8.4.0"
+  }
+}
