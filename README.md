@@ -208,6 +208,7 @@ Common EV9 (US) paths:
 | `visuals.battery` / `.car` / `.rowIcons` | `true` | individual widget toggles (need `visuals.enabled`) |
 | `visuals.carLabel` | `"EV9"` | text under the car's lock glyph |
 | `visuals.width` | `210` | px width of the battery gauge |
+| `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the gauge and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
@@ -223,20 +224,32 @@ toggles independently:
 ```js
 visuals: {
   enabled: true,
-  battery: true,      // horizontal battery gauge: fill % coloured green/amber/red,
-                      //   animated bolt when charging, "range · kW" caption
+  battery: true,      // battery gauge showing the charge % only, coloured
+                      //   green/amber/red, with an animated bolt when charging
   car: true,          // top-down car diagram: body outline turns green (locked) /
                       //   red (unlocked); doors, frunk, tailgate flash red + swing
                       //   open; charge port glows green charging / amber plugged;
                       //   wheels turn red on a tyre-pressure warning
   carLabel: "EV9",    // text under the lock glyph ("" hides it)
   rowIcons: true,     // Font Awesome icon before every table row
-  width: 210          // px width of the battery gauge; the car scales to match
+  width: 210,         // px width of the battery gauge; the car scales to match
+  batteryDetail: [    // readouts stacked under the gauge (and removed from the
+    "vehicle.ev_driving_range",              // table). Rendered with your
+    "vehicle.ev_charging_power",             // labels / formatters, and hidden
+    "vehicle.ev_charging_current",           // by hideWhenFalsy just like rows —
+    "vehicle.ev_estimated_current_charge_duration",   // so the charge-time
+    "vehicle.ev_estimated_fast_charge_duration",      // lines only appear while
+    "vehicle.ev_estimated_station_charge_duration",   // actually charging
+    "vehicle.ev_estimated_portable_charge_duration"
+  ]
 }
 ```
 
-The diagram always uses the real `vehicle.*` values, so it stays complete even
-if you've hidden those rows from the table.
+The gauge shows `ev_battery_percentage`; that key and every `batteryDetail` key
+are dropped from the table automatically so nothing is duplicated. The car
+diagram always reads the real `vehicle.*` values, so it stays complete even for
+attributes you've hidden — e.g. you can drop the `is_locked` row and let the
+green/red body outline show lock state.
 
 Row icons come from a built-in map (battery → battery, range → road, lock → lock,
 charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:
