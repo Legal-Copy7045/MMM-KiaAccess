@@ -57,12 +57,22 @@ Or set `pythonBin` in the module config to an absolute path.
 
 If venv creation fails on Debian/RPi OS: `sudo apt install python3-venv`.
 
-### First-login / OTP note (Kia USA)
+### One-time OTP enrollment (Kia USA)
 
-Kia USA may demand a one-time code the first time a new client logs in. If you see an
-`AuthenticationOTPRequired` error, log in once with the official Kia app on the same
-account, then let the module retry. Persistent OTP prompts are a Kia-side change, not a
-module bug.
+Kia USA requires a one-time passcode when a new client first logs in. Run the enrollment
+script **once**, on the mirror, using the module's venv Python:
+
+```bash
+cd ~/MagicMirror/modules/MMM-KiaAccess
+echo '{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA"}' \
+  | ./venv/bin/python3 enroll.py
+```
+
+It asks where to send the code (SMS / email), you paste the code back, and it writes
+`token.json` (git-ignored, `chmod 600`) next to the script. `kia_bridge.py` then reuses
+and silently refreshes that token — no more prompts until Kia expires the refresh token
+(months away), at which point just run `enroll.py` again. If the module ever shows
+*"OTP enrollment required"*, that's the signal.
 
 ## Configuration
 
