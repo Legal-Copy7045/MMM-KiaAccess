@@ -71,6 +71,11 @@ assert.ok(bg.indexOf("<svg") === 0 && bg.indexOf("82%") > 0);
 assert.strictEqual(Vis.batteryGauge(null, {}).indexOf("—") > 0, true);
 const car = Vis.carDiagram({ locked: false, doorFL: true, hood: true, tyreAny: true });
 assert.ok(car.indexOf("<svg") === 0);
+// charger strip only appears when plugged; animateMotion only when live
+assert.ok(Vis.carDiagram({ locked: true }).indexOf("animateMotion") < 0);
+assert.ok(Vis.carDiagram({ charging: true }).indexOf("animateMotion") > 0);
+assert.ok(Vis.carDiagram({ plugged: true }).indexOf("<rect x=\"200\"") > 0);
+assert.ok(Vis.carDiagram({ plugged: true }).indexOf("animateMotion") < 0);
 assert.strictEqual(Vis.iconFor("vehicle.ev_battery_percentage"), "fa-solid fa-battery-half");
 assert.strictEqual(Vis.iconFor("vehicle.front_left_door_is_open"), "fa-solid fa-car-side");
 assert.strictEqual(Vis.iconFor("vehicle.some_unknown_thing"), null);

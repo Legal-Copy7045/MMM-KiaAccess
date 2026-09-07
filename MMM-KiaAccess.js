@@ -252,6 +252,8 @@ Module.register("MMM-KiaAccess", {
       chargeKw: num("ev_charging_power"),
       charging: bool("ev_battery_is_charging"),
       plugged: bool("ev_battery_is_plugged_in"),
+      v2l: bool("ev_v2l_status"),
+      v2x: bool("ev_v2x_status"),
       locked: bool("is_locked"),
       headlights: headlights,
       doorFL: bool("front_left_door_is_open"),
@@ -317,7 +319,9 @@ Module.register("MMM-KiaAccess", {
         const c = document.createElement("div");
         c.className = "kiaaccess-carwrap";
         c.innerHTML = V.carDiagram(s, {
-          width: Math.round((vis.width || 210) * 0.95),
+          // width here sizes the CAR; the SVG ends ~18% wider for the charger
+          // strip, so scale down to keep the whole thing near the gauge width
+          width: Math.round((vis.width || 210) * 0.8),
           label: vis.carLabel != null ? vis.carLabel : "EV9"
         });
         panel.appendChild(c);
