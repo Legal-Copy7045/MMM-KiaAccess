@@ -140,29 +140,81 @@
 
   /**
    * Top-down SUV status diagram — front at the top (direction of travel = up).
+   * The canvas is a FIXED size in every state: the car body is always at the
+   * same coordinates and pixel size; only the right-hand strip changes (a
+   * charger + animated energy flow appear there when plugged in).
    * @param {object} s state flags (all bool|null): locked, doorFL, doorFR,
-   *   doorRL, doorRR, hood, trunk, charging, plugged, headlights,
+   *   doorRL, doorRR, hood, trunk, charging, plugged, v2l, v2x, headlights,
    *   tyreFL, tyreFR, tyreRL, tyreRR, tyreAny
    * @param {object} o { width, label }
    */
   function carDiagram(s, o) {
     s = s || {};
     o = o || {};
-    var w = o.width || 190;
+    var CARW = 200;
+    var VBW = 236; // fixed canvas; car occupies x 0..200, charger strip x 176..228
+    var unit = (o.width || 190) / CARW; // 1 user unit = constant px in every state
+    var w = VBW * unit;
 
     var tyre = function (which) {
       return s["tyre" + which] === true || s.tyreAny === true;
     };
 
+    var uid = "k" + Math.random().toString(36).slice(2, 8);
+    var exporting = s.v2l === true || s.v2x === true;
+    var plugged = s.charging === true || s.plugged === true || exporting;
+    var flow =
+      s.charging === true ? COL.ok : exporting ? COL.accent : COL.warn;
+
     var port =
-      s.charging === true ? COL.ok : s.plugged === true ? COL.warn : COL.dim;
-    var portAnim =
       s.charging === true
-        ? '<animate attributeName="opacity" values="0.4;1;0.4" dur="1.6s" repeatCount="indefinite"/>'
-        : "";
+        ? COL.ok
+        : exporting
+        ? COL.accent
+        : s.plugged === true
+        ? COL.warn
+        : COL.dim;
 
     var bodyStroke =
       s.locked === true ? COL.ok : s.locked === false ? COL.bad : COL.outline;
+
+    // ---- charger + cable + energy flow (right strip) ----
+    var cableD = "M 162 274 C 186 274 190 250 202 252";
+    var charger = "";
+    if (plugged) {
+      var live = s.charging === true || exporting;
+      charger =
+        '<path id="cbl' + uid + '" d="' + cableD + '" fill="none" stroke="' +
+        (live ? flow : COL.dim) +
+        '" stroke-width="3" stroke-linecap="round" opacity="0.55"/>' +
+        '<rect x="200" y="228" width="28" height="48" rx="5" fill="#17181a" stroke="' +
+        COL.outline + '" stroke-width="2"/>' +
+        '<rect x="205" y="234" width="17" height="11" rx="2" fill="' + COL.glass + '"/>' +
+        '<path d="M 216 249 l -6 9 h 5 l -3 8 l 8 -11 h -5 z" fill="' + COL.text +
+        '" opacity="0.85"/>' +
+        '<circle cx="205" cy="270" r="3" fill="' + flow + '">' +
+        (live
+          ? '<animate attributeName="opacity" values="0.3;1;0.3" dur="1.4s" repeatCount="indefinite"/>'
+          : "") +
+        "</circle>";
+      if (live) {
+        // charging = flow toward the car (keyPoints 1;0); exporting = away
+        var kp = s.charging === true ? '1;0' : '0;1';
+        for (var p = 0; p < 3; p++) {
+          charger +=
+            '<circle r="2.6" fill="' + flow + '"><animateMotion dur="1.4s" begin="' +
+            (p * 0.47).toFixed(2) + 's" repeatCount="indefinite" keyPoints="' + kp +
+            '" keyTimes="0;1" calcMode="linear"><mpath href="#cbl' + uid +
+            '" xlink:href="#cbl' + uid + '"/></animateMotion></circle>';
+        }
+      }
+    }
+    var portRing =
+      s.charging === true
+        ? '<circle cx="155" cy="274" r="5" fill="none" stroke="' + COL.ok +
+          '" stroke-width="2"><animate attributeName="r" values="4;13" dur="1.5s" repeatCount="indefinite"/>' +
+          '<animate attributeName="opacity" values="0.75;0" dur="1.5s" repeatCount="indefinite"/></circle>'
+        : "";
 
     // headlights: solid white when on, hollow outline when off/unknown
     var lampFill = s.headlights === true ? COL.text : "none";
@@ -175,7 +227,8 @@
     };
 
     return (
-      '<svg class="kiaaccess-car" viewBox="0 0 200 330" width="' + w +
+      '<svg class="kiaaccess-car" xmlns="http://www.w3.org/2000/svg" ' +
+      'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ' + VBW + ' 330" width="' + w +
       '" role="img" aria-label="Vehicle status, front at top">' +
       // body (front nose rounded, rear squarer)
       '<path d="M 40 58 Q 40 22 74 22 L 126 22 Q 160 22 160 58 L 160 284 ' +
@@ -213,15 +266,13 @@
       wheel(159, 60, tyre("FR")) +
       wheel(29, 230, tyre("RL")) +
       wheel(159, 230, tyre("RR")) +
-      // charge port — rear, passenger (right) side, in the gap between the
-      // rear wheel and the taillight
+      // charger + cable + energy flow (right strip; empty when unplugged)
+      charger +
+      // charge port — rear, passenger (right) side, between wheel and taillight
       '<rect x="148" y="266" width="14" height="16" rx="2" fill="#2a2c2e" stroke="' +
       COL.dim + '" stroke-width="1"/>' +
-      '<circle cx="155" cy="274" r="4.2" fill="' + port + '">' + portAnim + "</circle>" +
-      (s.charging === true
-        ? '<path d="M 166 274 q 12 0 13 -13" fill="none" stroke="' + COL.ok +
-          '" stroke-width="2"/>'
-        : "") +
+      portRing +
+      '<circle cx="155" cy="274" r="4.2" fill="' + port + '"/>' +
       // centre lock + label
       lockGlyph(100, 150, s.locked) +
       (o.label

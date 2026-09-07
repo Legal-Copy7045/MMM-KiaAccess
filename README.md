@@ -226,12 +226,16 @@ visuals: {
   enabled: true,
   battery: true,      // battery gauge showing the charge % only, coloured
                       //   green/amber/red, with an animated bolt when charging
-  car: true,          // top-down SUV diagram, front at the top: body outline
-                      //   green (locked) / red (unlocked); doors, frunk and
-                      //   tailgate flash red and swing open; headlights are
-                      //   solid white when on, outline when off; each wheel
-                      //   shows "!" on a per-tyre pressure warning; charge port
-                      //   (rear right) glows green charging / amber plugged
+  car: true,          // top-down SUV diagram, front at the top (fixed size —
+                      //   the car never moves or resizes between states):
+                      //   body outline green (locked) / red (unlocked); doors,
+                      //   frunk and tailgate flash red and swing open;
+                      //   headlights solid white when on, outline when off;
+                      //   per-tyre "!" on a pressure warning. When plugged in a
+                      //   wall-box + cable appear at the rear right; while
+                      //   charging the port pulses green and particles flow
+                      //   charger -> car; while exporting (V2L / V2X) the flow
+                      //   reverses in cyan; plugged-idle shows a static amber cable
   carLabel: "EV9",    // text under the lock glyph ("" hides it)
   rowIcons: true,     // Font Awesome icon before every table row
   width: 210,         // px width of the battery gauge; the car scales to match
