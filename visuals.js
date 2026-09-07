@@ -252,8 +252,9 @@
       // door mirrors (just aft of the windscreen base — a strong "front" cue)
       '<path d="M 40 98 l -9 3 l 3 7 l 6 -2 z" fill="' + COL.dim + '"/>' +
       '<path d="M 160 98 l 9 3 l -3 7 l -6 -2 z" fill="' + COL.dim + '"/>' +
-      // hood (frunk) + tailgate
-      panel(s.hood, 66, 24, 68, 20, [0, -8]) +
+      // frunk (small — it's tiny on the real car) up near the windscreen,
+      // and the full-width tailgate at the rear
+      panel(s.hood, 82, 43, 36, 14, [0, -8]) +
       panel(s.trunk, 66, 278, 68, 20, [0, 8]) +
       // doors — centred in the gap between the front and rear wheels,
       // clear of the door mirrors
