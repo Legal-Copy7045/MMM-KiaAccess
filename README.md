@@ -248,8 +248,11 @@ The car diagram:
 - **lock state = body outline colour** — green (locked) / red (unlocked) / grey
   (unknown). There is no lock icon or text; drop the `is_locked` row from the
   table and let the outline carry it.
-- **doors, frunk and tailgate** flash red (doors/tailgate also swing out) when open.
+- **doors and tailgate** flash red and swing out when open; the **frunk** (a small
+  box near the windscreen) just turns red.
 - **headlights** solid white when on, hollow outline when off/unknown.
+- **taillights** solid red when the car is running / in accessory mode
+  (`engine_is_running` / `accessory_on` / `ign3` / `remote_ignition`), outline when off.
 - **wheels** show a `!` on a per-tyre pressure warning (all four for the
   "all tyres" warning).
 - **plugged in** → a wall-box + cable appear at the rear-right charge port.
