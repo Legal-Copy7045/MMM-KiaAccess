@@ -34,6 +34,18 @@ assert.ok(!entries.some((e) => e.key === "_meta.vin"));
 entries = U.selectEntries(flat, { order: ["odometer.value"] });
 assert.strictEqual(entries[0].key, "odometer.value");
 
+// hideWhenFalsy drops false/0/null rows but keeps truthy ones
+const cond = U.flatten({
+  a: { charging: false, plugged: true, power: 0, rate: 7.2, note: "" }
+});
+entries = U.selectEntries(cond, {
+  hideWhenFalsy: ["a.charging", "a.plugged", "a.power", "a.rate", "a.note"]
+});
+assert.deepStrictEqual(entries.map((e) => e.key).sort(), ["a.plugged", "a.rate"]);
+assert.strictEqual(U.isEmptyValue(0), true);
+assert.strictEqual(U.isEmptyValue("false"), true);
+assert.strictEqual(U.isEmptyValue(3.3), false);
+
 // formatters
 assert.strictEqual(
   U.formatValue({ key: "b", rawValue: 82 }, { formatters: { b: "percent" }, decimals: 0 }),

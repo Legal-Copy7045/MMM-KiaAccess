@@ -28,6 +28,7 @@ Module.register("MMM-KiaAccess", {
     updateInterval: 30 * 60 * 1000, // 30 min. Be gentle: frequent polls drain the 12V battery.
     retryInterval: 5 * 60 * 1000,
     refresh: true, // true = ask the car for live data, false = Kia's cached copy
+    geocode: false, // true = resolve vehicle.geocode to a street address (OpenStreetMap)
 
     // ---- display ----
     header: "Kia",
@@ -36,6 +37,7 @@ Module.register("MMM-KiaAccess", {
     nullText: "—",
     include: [], // e.g. ["vehicle.ev_battery_percentage", "vehicle.*_door_is_open", "vehicle.odometer"]
     exclude: ["vehicle.data.*", "vehicle.VIN"], // raw API dump + VIN hidden by default
+    hideWhenFalsy: [], // paths/globs: drop the row when its value is false / 0 / null / "" / "—"
     order: [], // paths / globs listed here are shown first, in this order
     labels: {
       // "vehicle.ev_battery_percentage": "Battery",
@@ -110,6 +112,7 @@ Module.register("MMM-KiaAccess", {
       region: c.region,
       vin: c.vin,
       refresh: c.refresh,
+      geocode: c.geocode,
       pythonBin: c.pythonBin,
       fetchTimeout: c.fetchTimeout
     };
