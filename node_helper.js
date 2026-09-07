@@ -9,7 +9,17 @@ const Log = require("logger");
 
 let BlueLinky;
 try {
-  BlueLinky = require("bluelinky");
+  const mod = require("bluelinky");
+  // bluelinky >= 8 ships as an ESM/TS build: the constructor is `.default`.
+  // Older versions export it directly. Handle both.
+  BlueLinky =
+    typeof mod === "function"
+      ? mod
+      : mod && typeof mod.default === "function"
+      ? mod.default
+      : mod && typeof mod.BlueLinky === "function"
+      ? mod.BlueLinky
+      : null;
 } catch (err) {
   BlueLinky = null;
 }
