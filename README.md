@@ -194,11 +194,13 @@ Common EV9 (US) paths:
 | `updateInterval` | `1800000` | ms between fetches |
 | `retryInterval` | `300000` | ms before retrying after an error |
 | `refresh` | `true` | `true` wakes the car; `false` uses Kia's server cache (no battery cost) |
+| `geocode` | `false` | resolve `vehicle.geocode` to a street address via OpenStreetMap |
 | `units` | `"imperial"` | `"imperial"` or `"metric"` for distance/temp/speed formatters |
 | `decimals` | `1` | rounding for numeric formatters |
 | `nullText` | `"—"` | shown for `null` / `undefined` |
 | `include` | `[]` | glob paths to show; empty = all |
 | `exclude` | `["vehicle.data.*", "vehicle.VIN"]` | glob paths to hide |
+| `hideWhenFalsy` | `[]` | glob paths whose row is dropped when the value is `false` / `0` / `null` / `""` / `"—"` (use for "only show when true / non-zero") |
 | `order` | `[]` | glob paths shown first, in listed order |
 | `labels` | `{}` | key path → display label |
 | `formatters` | see defaults | key path → formatter name |

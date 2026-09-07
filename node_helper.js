@@ -58,7 +58,8 @@ module.exports = NodeHelper.create({
       brand: config.brand || "KIA",
       region: config.region || "USA",
       vin: config.vin || "",
-      refresh: config.refresh !== false
+      refresh: config.refresh !== false,
+      geocode: config.geocode === true
     };
 
     let stdout = "";

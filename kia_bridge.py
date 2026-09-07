@@ -120,6 +120,7 @@ def main():
         print(json.dumps({"ok": False, "error": f"unknown brand {job.get('brand')!r}"}))
         return 0
 
+    geocode = bool(job.get("geocode", False))
     try:
         vm = VehicleManager(
             region=region,
@@ -128,6 +129,8 @@ def main():
             password=job["password"],
             pin=str(job.get("pin", "")),
             token=saved_token,
+            geocode_api_enable=geocode,
+            geocode_api_use_email=geocode,
         )
         try:
             vm.check_and_refresh_token()
