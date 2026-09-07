@@ -254,6 +254,12 @@ Module.register("MMM-KiaAccess", {
       v2l: bool("ev_v2l_status"),
       v2x: bool("ev_v2x_status"),
       locked: bool("is_locked"),
+      carOn: anyTrue(
+        "engine_is_running",
+        "accessory_on",
+        "ign3",
+        "remote_ignition"
+      ),
       headlights: headlights,
       doorFL: bool("front_left_door_is_open"),
       doorFR: bool("front_right_door_is_open"),

@@ -249,6 +249,16 @@
       );
     };
 
+    // taillights: red when the car is on / in accessory, outline when off
+    var tlFill = s.carOn === true ? COL.bad : "none";
+    var tlStroke = s.carOn === true ? COL.bad : COL.outline;
+    var taillight = function (x) {
+      return (
+        '<rect x="' + x + '" y="293" width="30" height="7" rx="2" fill="' + tlFill +
+        '" stroke="' + tlStroke + '" stroke-width="1.2" opacity="0.85"/>'
+      );
+    };
+
     return (
       '<svg class="kiaaccess-car" xmlns="http://www.w3.org/2000/svg" ' +
       'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="' + VB + '" width="' + w +
@@ -262,9 +272,9 @@
       // headlights (front corners)
       headlight("M 45 31 q 14 -8 25 -2 l -2 8 q -12 -5 -23 2 z") +
       headlight("M 155 31 q -14 -8 -25 -2 l 2 8 q 12 -5 23 2 z") +
-      // taillight bar (rear)
-      '<rect x="46" y="293" width="30" height="7" rx="2" fill="' + COL.bad + '" opacity="0.7"/>' +
-      '<rect x="124" y="293" width="30" height="7" rx="2" fill="' + COL.bad + '" opacity="0.7"/>' +
+      // taillights (rear)
+      taillight(46) +
+      taillight(124) +
       // raked windscreen + rear glass
       '<path d="M 56 92 L 144 92 L 130 66 Q 100 58 70 66 Z" fill="' + COL.glass + '"/>' +
       '<path d="M 58 246 L 142 246 L 136 272 Q 100 278 64 272 Z" fill="' + COL.glass + '"/>' +
