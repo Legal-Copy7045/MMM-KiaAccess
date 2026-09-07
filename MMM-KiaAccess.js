@@ -228,6 +228,24 @@ Module.register("MMM-KiaAccess", {
       const v = Number(f["vehicle." + k]);
       return isFinite(v) ? v : null;
     };
+    const anyTrue = (...ks) => {
+      const vals = ks.map(bool);
+      if (vals.some((v) => v === true)) return true;
+      if (vals.every((v) => v === false)) return false;
+      return null;
+    };
+    const hs = f["vehicle.headlamp_status"];
+    let headlights = anyTrue(
+      "headlamp_left_low",
+      "headlamp_right_low",
+      "headlamp_left_high",
+      "headlamp_right_high"
+    );
+    if (headlights == null && typeof hs === "string") {
+      const t = hs.trim().toLowerCase();
+      headlights = t && t !== "off" && t !== "none" && t !== "0" ? true : false;
+    }
+
     return {
       batteryPct: num("ev_battery_percentage"),
       rangeKm: num("ev_driving_range"),
@@ -235,6 +253,7 @@ Module.register("MMM-KiaAccess", {
       charging: bool("ev_battery_is_charging"),
       plugged: bool("ev_battery_is_plugged_in"),
       locked: bool("is_locked"),
+      headlights: headlights,
       doorFL: bool("front_left_door_is_open"),
       doorFR: bool("front_right_door_is_open"),
       doorRL: bool("back_left_door_is_open"),
@@ -293,6 +312,17 @@ Module.register("MMM-KiaAccess", {
       const panel = document.createElement("div");
       panel.className = "kiaaccess-visuals";
 
+      // car first, then battery gauge, then the battery readouts — one column
+      if (vis.car) {
+        const c = document.createElement("div");
+        c.className = "kiaaccess-carwrap";
+        c.innerHTML = V.carDiagram(s, {
+          width: Math.round((vis.width || 210) * 0.95),
+          label: vis.carLabel != null ? vis.carLabel : "EV9"
+        });
+        panel.appendChild(c);
+      }
+
       if (vis.battery && s.batteryPct != null) {
         const bwrap = document.createElement("div");
         bwrap.className = "kiaaccess-batt";
@@ -319,16 +349,6 @@ Module.register("MMM-KiaAccess", {
         panel.appendChild(bwrap);
       }
 
-      if (vis.car) {
-        const c = document.createElement("div");
-        c.className = "kiaaccess-carwrap";
-        c.innerHTML = V.carDiagram(s, {
-          width: Math.round((vis.width || 210) * 0.9),
-          label: vis.carLabel != null ? vis.carLabel : "EV9"
-        });
-        panel.appendChild(c);
-      }
-
       if (panel.childNodes.length) wrapper.appendChild(panel);
     }
 
@@ -344,7 +364,7 @@ Module.register("MMM-KiaAccess", {
 
     const rowIcons = !!(V && vis.enabled && vis.rowIcons);
     const table = document.createElement("table");
-    table.className = "kiaaccess-table small";
+    table.className = "kiaaccess-table xsmall";
 
     this.viewData.forEach((entry) => {
       const row = document.createElement("tr");
