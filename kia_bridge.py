@@ -18,7 +18,15 @@ the Home Assistant Kia/Hyundai integration).
 
 import datetime
 import json
+import os
+import stat
 import sys
+
+TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
+ENROLL_HINT = (
+    "OTP enrollment required. Run once on the mirror: "
+    "echo '<same JSON>' | venv/bin/python3 enroll.py  (see README)"
+)
 
 REGION_INT = {
     "EU": 1, "EUROPE": 1,
@@ -80,6 +88,7 @@ def main():
 
     try:
         from hyundai_kia_connect_api import VehicleManager
+        from hyundai_kia_connect_api.Token import Token
     except Exception:  # noqa: BLE001
         print(json.dumps({
             "ok": False,
@@ -87,6 +96,20 @@ def main():
                      "pip3 install hyundai_kia_connect_api",
         }))
         return 0
+
+    try:
+        from hyundai_kia_connect_api.exceptions import AuthenticationOTPRequired
+    except Exception:  # noqa: BLE001
+        class AuthenticationOTPRequired(Exception):
+            pass
+
+    saved_token = None
+    if os.path.exists(TOKEN_FILE):
+        try:
+            with open(TOKEN_FILE) as fh:
+                saved_token = Token.from_dict(json.load(fh))
+        except Exception:  # noqa: BLE001
+            saved_token = None
 
     region = REGION_INT.get(str(job.get("region", "USA")).upper())
     brand = BRAND_INT.get(str(job.get("brand", "KIA")).upper())
@@ -104,8 +127,22 @@ def main():
             username=job["username"],
             password=job["password"],
             pin=str(job.get("pin", "")),
+            token=saved_token,
         )
-        vm.check_and_refresh_token()
+        try:
+            vm.check_and_refresh_token()
+        except AuthenticationOTPRequired:
+            print(json.dumps({"ok": False, "error": ENROLL_HINT}))
+            return 0
+
+        # persist the (possibly refreshed / rotated) token for next time
+        if vm.token is not None:
+            try:
+                with open(TOKEN_FILE, "w") as fh:
+                    json.dump(vm.token.to_dict(), fh, indent=2, default=str)
+                os.chmod(TOKEN_FILE, stat.S_IRUSR | stat.S_IWUSR)
+            except Exception:  # noqa: BLE001
+                pass
 
         want_refresh = job.get("refresh", True)
         if want_refresh:
