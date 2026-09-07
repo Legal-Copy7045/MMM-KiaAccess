@@ -108,11 +108,17 @@ module.exports = NodeHelper.create({
       const vehicle = result.vehicles[0];
       const payload = {
         vehicle,
-        _meta: {
-          fetchedAt: new Date().toISOString(),
-          vehicleCount: result.vehicles.length
-        }
+        _meta: Object.assign(
+          {
+            fetchedAt: new Date().toISOString(),
+            vehicleCount: result.vehicles.length
+          },
+          result.meta || {}
+        )
       };
+      if (payload._meta.warning) {
+        Log.warn("[MMM-KiaAccess] " + payload._meta.warning);
+      }
       this.sendSocketNotification("KIA_DATA", { identifier: id, config, payload });
     });
 

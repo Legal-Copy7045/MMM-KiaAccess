@@ -55,6 +55,15 @@ def jsonable(value):
     return str(value)
 
 
+def flatten_scalar_seq(val):
+    """Tuples/lists of plain scalars (geocode, location, ...) -> one ', ' string,
+    so the frontend shows a single row instead of `.0`, `.1` index rows."""
+    if isinstance(val, (list, tuple)):
+        parts = [str(x) for x in val if x is not None and x != ""]
+        return ", ".join(parts) if parts else None
+    return val
+
+
 def dump_vehicle(vehicle):
     """Collect every readable public attribute + property off the Vehicle object."""
     out = {}
@@ -67,6 +76,10 @@ def dump_vehicle(vehicle):
             continue
         if callable(val):
             continue
+        if isinstance(val, (list, tuple)) and all(
+            not isinstance(x, (list, tuple, dict)) for x in val
+        ):
+            val = flatten_scalar_seq(val)
         try:
             out[attr] = jsonable(val)
         except Exception:
@@ -149,13 +162,18 @@ def main():
 
         want_refresh = job.get("refresh", True)
         if want_refresh:
+            # ask the car for a live reading, then always follow with a cached
+            # read so the Vehicle objects are populated even if the remote
+            # wake-up is slow to return data
             try:
-                vm.check_and_force_update_vehicles(0)
-            except AttributeError:
                 vm.force_refresh_all_vehicles_states()
-                vm.update_all_vehicles_with_cached_state()
+            except Exception as exc:  # noqa: BLE001
+                _meta_note = f"force refresh failed: {exc}"
+            else:
+                _meta_note = None
         else:
-            vm.update_all_vehicles_with_cached_state()
+            _meta_note = None
+        vm.update_all_vehicles_with_cached_state()
 
         vin_filter = str(job.get("vin", "") or "").upper()
         vehicles = []
@@ -168,7 +186,16 @@ def main():
             print(json.dumps({"ok": False, "error": "no matching vehicles on the account"}))
             return 0
 
-        print(json.dumps({"ok": True, "vehicles": vehicles}))
+        meta = {}
+        if _meta_note:
+            meta["note"] = _meta_note
+        first = vehicles[0]
+        if not first.get("last_updated_at") and not (first.get("data") or {}):
+            meta["warning"] = (
+                "Kia returned an empty state for this vehicle. Open the Kia app "
+                "once to force a sync, or try again shortly."
+            )
+        print(json.dumps({"ok": True, "vehicles": vehicles, "meta": meta}))
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}))
     return 0
