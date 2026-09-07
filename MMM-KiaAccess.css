@@ -56,14 +56,7 @@
   text-align: center;
 }
 
-.kiaaccess-batt {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-/* battery readouts: centred label + value pairs, kept within the gauge width */
+/* readouts under the car: centred label + value pairs */
 .kiaaccess-batt-detail {
   margin-top: 5px;
   font-size: 16px;

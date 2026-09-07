@@ -205,10 +205,9 @@ Common EV9 (US) paths:
 | `labels` | `{}` | key path → display label |
 | `formatters` | see defaults | key path → formatter name |
 | `visuals.enabled` | `false` | master switch for the graphical widgets |
-| `visuals.battery` / `.car` / `.rowIcons` | `true` | individual widget toggles (need `visuals.enabled`) |
-| `visuals.carLabel` | `"EV9"` | text under the car's lock glyph |
-| `visuals.width` | `210` | px width of the battery gauge |
-| `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the gauge and removed from the table |
+| `visuals.car` / `.battery` / `.rowIcons` | `true` | individual widget toggles (need `visuals.enabled`) |
+| `visuals.width` | `210` | px width of the car SVG |
+| `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
@@ -224,38 +223,43 @@ toggles independently:
 ```js
 visuals: {
   enabled: true,
-  battery: true,      // battery gauge showing the charge % only, coloured
-                      //   green/amber/red, with an animated bolt when charging
   car: true,          // top-down SUV diagram, front at the top (fixed size —
-                      //   the car never moves or resizes between states):
-                      //   body outline green (locked) / red (unlocked); doors,
-                      //   frunk and tailgate flash red and swing open;
-                      //   headlights solid white when on, outline when off;
-                      //   per-tyre "!" on a pressure warning. When plugged in a
-                      //   wall-box + cable appear at the rear right; while
-                      //   charging the port pulses green and particles flow
-                      //   charger -> car; while exporting (V2L / V2X) the flow
-                      //   reverses in cyan; plugged-idle shows a static amber cable
-  carLabel: "EV9",    // text under the lock glyph ("" hides it)
+                      //   the car never moves or resizes between states)
+  battery: true,      // a vertical battery in the centre of the car (terminal
+                      //   to the front), filling bottom-up, coloured
+                      //   green/amber/red, with the % inside and an animated
+                      //   bolt when charging
   rowIcons: true,     // Font Awesome icon before every table row
-  width: 210,         // px width of the battery gauge; the car scales to match
-  batteryDetail: [    // readouts stacked under the gauge (and removed from the
-    "vehicle.ev_driving_range",              // table). Rendered with your
-    "vehicle.ev_charging_power",             // labels / formatters, and hidden
-    "vehicle.ev_charging_current",           // by hideWhenFalsy just like rows —
+  width: 210,         // px width of the car SVG
+  batteryDetail: [    // readouts under the car (and removed from the table).
+    "vehicle.ev_driving_range",              // Rendered with your labels /
+    "vehicle.ev_charging_power",             // formatters, and hidden by
+    "vehicle.ev_charging_current",           // hideWhenFalsy just like rows —
     "vehicle.ev_estimated_current_charge_duration",   // so the charge-time
-    "vehicle.ev_estimated_fast_charge_duration",      // lines only appear while
-    "vehicle.ev_estimated_station_charge_duration",   // actually charging
-    "vehicle.ev_estimated_portable_charge_duration"
+    "vehicle.ev_estimated_fast_charge_duration",      // lines only appear
+    "vehicle.ev_estimated_station_charge_duration",   // while actually
+    "vehicle.ev_estimated_portable_charge_duration"   // charging
   ]
 }
 ```
 
-The gauge shows `ev_battery_percentage`; that key and every `batteryDetail` key
-are dropped from the table automatically so nothing is duplicated. The car
-diagram always reads the real `vehicle.*` values, so it stays complete even for
-attributes you've hidden — e.g. you can drop the `is_locked` row and let the
-green/red body outline show lock state.
+The car diagram:
+
+- **lock state = body outline colour** — green (locked) / red (unlocked) / grey
+  (unknown). There is no lock icon or text; drop the `is_locked` row from the
+  table and let the outline carry it.
+- **doors, frunk and tailgate** flash red (doors/tailgate also swing out) when open.
+- **headlights** solid white when on, hollow outline when off/unknown.
+- **wheels** show a `!` on a per-tyre pressure warning (all four for the
+  "all tyres" warning).
+- **plugged in** → a wall-box + cable appear at the rear-right charge port.
+  Charging: the port pulses green and particles flow charger → car. Exporting
+  (`ev_v2l_status` / `ev_v2x_status`): the flow reverses in cyan. Plugged but
+  idle: a static amber cable.
+
+`ev_battery_percentage` and every `batteryDetail` key are dropped from the table
+automatically so nothing is duplicated. The diagram always reads the real
+`vehicle.*` values, so it stays complete even for rows you've hidden.
 
 Row icons come from a built-in map (battery → battery, range → road, lock → lock,
 charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:

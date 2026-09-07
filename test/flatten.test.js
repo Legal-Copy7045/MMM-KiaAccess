@@ -69,8 +69,10 @@ const Vis = require("../visuals.js");
 const bg = Vis.batteryGauge(82, { charging: true });
 assert.ok(bg.indexOf("<svg") === 0 && bg.indexOf("82%") > 0);
 assert.strictEqual(Vis.batteryGauge(null, {}).indexOf("—") > 0, true);
-const car = Vis.carDiagram({ locked: false, doorFL: true, hood: true, tyreAny: true });
+const car = Vis.carDiagram({ locked: false, doorFL: true, hood: true, tyreAny: true, batteryPct: 63 });
 assert.ok(car.indexOf("<svg") === 0);
+assert.ok(car.indexOf("63%") > 0); // battery % drawn inside the car
+assert.ok(Vis.carDiagram({ batteryPct: 63 }, { battery: false }).indexOf("63%") < 0);
 // charger strip only appears when plugged; animateMotion only when live
 assert.ok(Vis.carDiagram({ locked: true }).indexOf("animateMotion") < 0);
 assert.ok(Vis.carDiagram({ charging: true }).indexOf("animateMotion") > 0);

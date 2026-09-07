@@ -126,18 +126,37 @@
     );
   }
 
-  function lockGlyph(cx, cy, locked) {
-    var col = locked === true ? COL.ok : locked === false ? COL.bad : COL.dim;
-    var shackle =
-      locked === true
-        ? '<path d="M ' + (cx - 6) + " " + (cy - 3) + " v -5 a 6 6 0 0 1 12 0 v 5" +
-          '" fill="none" stroke="' + col + '" stroke-width="2.4"/>'
-        : '<path d="M ' + (cx - 6) + " " + (cy - 3) + " v -5 a 6 6 0 0 1 12 0" +
-          '" fill="none" stroke="' + col + '" stroke-width="2.4"/>';
+  /** Vertical "AA cell" battery drawn in the middle of the car, terminal to
+   *  the front (top). Fills from the bottom; shows the % in the middle. */
+  function verticalBattery(pct, charging) {
+    var cx = 100;
+    var bw = 40, bx = cx - bw / 2, by = 112, bh = 120; // body
+    var ix = bx + 3, iw = bw - 6, iy = by + 4, ih = bh - 8; // inner track
+    var frac = Math.max(0, Math.min(1, (Number(pct) || 0) / 100));
+    var fh = frac * ih;
+    var col = batteryColor(pct);
+    var label = pct == null || isNaN(pct) ? "—" : Math.round(pct) + "%";
+    var bolt =
+      charging === true
+        ? '<path d="M 104 136 l -11 17 h 7 l -4 15 l 13 -19 h -8 z" fill="' +
+          COL.text +
+          '" stroke="#000" stroke-width="0.6">' +
+          '<animate attributeName="opacity" values="0.35;1;0.35" dur="1.5s" repeatCount="indefinite"/></path>'
+        : "";
     return (
-      shackle +
-      '<rect x="' + (cx - 9) + '" y="' + (cy - 3) + '" width="18" height="14" rx="2.5" fill="' +
-      col + '"/>'
+      // terminal (points to the front of the car)
+      '<rect x="' + (cx - 7) + '" y="' + (by - 6) + '" width="14" height="7" rx="2" fill="' +
+      COL.outline + '"/>' +
+      // body
+      '<rect x="' + bx + '" y="' + by + '" width="' + bw + '" height="' + bh +
+      '" rx="8" fill="#111214" stroke="' + COL.outline + '" stroke-width="2.5"/>' +
+      // charge fill, rising from the base
+      '<rect x="' + ix + '" y="' + (iy + ih - fh) + '" width="' + iw + '" height="' + fh +
+      '" rx="4" fill="' + col + '"/>' +
+      bolt +
+      '<text x="' + cx + '" y="176" text-anchor="middle" font-size="13" font-weight="700" fill="' +
+      COL.text +
+      '" style="paint-order:stroke;stroke:#000;stroke-width:3px">' + esc(label) + "</text>"
     );
   }
 
@@ -146,10 +165,10 @@
    * The canvas is a FIXED size in every state: the car body is always at the
    * same coordinates and pixel size; only the right-hand strip changes (a
    * charger + animated energy flow appear there when plugged in).
-   * @param {object} s state flags (all bool|null): locked, doorFL, doorFR,
-   *   doorRL, doorRR, hood, trunk, charging, plugged, v2l, v2x, headlights,
-   *   tyreFL, tyreFR, tyreRL, tyreRR, tyreAny
-   * @param {object} o { width, label }
+   * @param {object} s state flags: locked/doorFL/doorFR/doorRL/doorRR/hood/
+   *   trunk/charging/plugged/v2l/v2x/headlights/tyre* (bool|null) plus
+   *   batteryPct (number|null) for the battery drawn in the centre
+   * @param {object} o { width, battery:false to omit the centre battery }
    */
   function carDiagram(s, o) {
     s = s || {};
@@ -279,12 +298,10 @@
       COL.dim + '" stroke-width="1"/>' +
       portRing +
       '<circle cx="155" cy="274" r="4.2" fill="' + port + '"/>' +
-      // centre lock + label
-      lockGlyph(100, 150, s.locked) +
-      (o.label
-        ? '<text x="100" y="176" text-anchor="middle" font-size="12" fill="' +
-          COL.dim + '">' + esc(o.label) + "</text>"
-        : "") +
+      // vertical battery in the middle (lock state is shown by the body colour)
+      (o.battery === false
+        ? ""
+        : verticalBattery(s.batteryPct, s.charging)) +
       "</svg>"
     );
   }
