@@ -225,10 +225,10 @@ visuals: {
   enabled: true,
   car: true,          // top-down SUV diagram, front at the top (fixed size —
                       //   the car never moves or resizes between states)
-  battery: true,      // a vertical battery in the centre of the car (terminal
-                      //   to the front), filling bottom-up, coloured
-                      //   green/amber/red, with the % inside and an animated
-                      //   bolt when charging
+  battery: true,      // a small vertical battery toward the rear of the cabin
+                      //   (terminal to the front), filling bottom-up, coloured
+                      //   green/amber/red, % shown underneath, animated bolt
+                      //   when charging
   rowIcons: true,     // Font Awesome icon before every table row
   width: 210,         // px width of the car SVG
   batteryDetail: [    // readouts under the car (and removed from the table).
@@ -248,11 +248,22 @@ The car diagram:
 - **lock state = body outline colour** — green (locked) / red (unlocked) / grey
   (unknown). There is no lock icon or text; drop the `is_locked` row from the
   table and let the outline carry it.
-- **doors and tailgate** flash red and swing out when open; the **frunk** (a small
-  box near the windscreen) just turns red.
+- **doors** swing out ~50° and pulse red when open. A **window** open with the
+  door shut leaves the door in place and pulses it red.
+- **frunk** (small box by the windscreen) and the **SUV liftgate** (rear window +
+  tailgate as one block) turn red / pulse when open.
+- **sunroof** — a panel outline on the roof: grey shut, pulsing red outline open.
 - **headlights** solid white when on, hollow outline when off/unknown.
 - **taillights** solid red when the car is running / in accessory mode
   (`engine_is_running` / `accessory_on` / `ign3` / `remote_ignition`), outline when off.
+- **defrost** (`defrost_is_on`) → orange element lines on the windscreen *and* the
+  liftgate; **rear-window heater** (`back_window_heater_is_on`) → lines on the
+  liftgate only. **Mirror heater** (`side_mirror_heater_is_on`) → the mirrors glow
+  orange. **Steering-wheel heater** (`steering_wheel_heater_is_on`) → an orange
+  ring in the driver's area.
+- **air conditioning** (`air_control_is_on`) → four air streams from a front vent
+  bar: **orange when heating, cyan when cooling** (inferred from `air_temperature`
+  vs `outside_temperature`), neutral white when the direction is unknown.
 - **wheels** show a `!` on a per-tyre pressure warning (all four for the
   "all tyres" warning).
 - **plugged in** → a wall-box + cable appear at the rear-right charge port.
