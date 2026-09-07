@@ -2,11 +2,13 @@
 """One-time OTP enrollment for MMM-KiaAccess (Kia USA and any region that
 requires a one-time passcode on a new client).
 
-Run it once, on the mirror, with the module's venv Python:
+Run it once, on the mirror, with the module's venv Python. Pass the account
+details in the KIA_JOB environment variable (keeps stdin free for the prompts
+and keeps the password out of the process list):
 
-    echo '{"username":"you@example.com","password":"pw","pin":"1234",
-           "region":"USA","brand":"KIA"}' \\
-      | ~/MagicMirror/modules/MMM-KiaAccess/venv/bin/python3 enroll.py
+    KIA_JOB='{"username":"you@example.com","password":"pw","pin":"1234",
+              "region":"USA","brand":"KIA"}' \\
+      ~/MagicMirror/modules/MMM-KiaAccess/venv/bin/python3 enroll.py
 
 It logs in, asks Kia to send you a code (SMS or email), you type it back, and
 the resulting long-lived refresh token is written to `token.json` next to this
@@ -14,7 +16,7 @@ script. `kia_bridge.py` then reuses that token and refreshes it silently — no
 more OTP until Kia expires the refresh token (months), at which point just run
 this again.
 
-Prompts are read from /dev/tty so the JSON job can still come in on stdin.
+The job may also be given as argv[1] (a JSON string) or on stdin.
 """
 
 import json
@@ -33,28 +35,65 @@ REGION_INT = {
 BRAND_INT = {"KIA": 1, "HYUNDAI": 2, "GENESIS": 3}
 
 
-def tty():
+def open_tty():
+    for mode in ("r+", "r"):
+        try:
+            return open("/dev/tty", mode)
+        except OSError:
+            continue
+    return None
+
+
+TERM = None
+
+
+def ask(prompt):
+    global TERM
+    # 1) normal stdin if it's interactive
+    if sys.stdin is not None and sys.stdin.isatty():
+        try:
+            return input(prompt).strip()
+        except EOFError:
+            pass
+    # 2) the controlling terminal directly (stdin was a pipe)
+    if TERM is None:
+        TERM = open_tty()
+    if TERM is not None:
+        TERM.write(prompt)
+        TERM.flush()
+        line = TERM.readline()
+        if line == "":
+            raise SystemExit("\nNo input available on the terminal.")
+        return line.strip()
+    raise SystemExit(
+        "\nThis script needs an interactive terminal for the OTP prompts.\n"
+        "Run it directly (not piped) and pass the account details in KIA_JOB:\n"
+        "  KIA_JOB='{...}' ./venv/bin/python3 enroll.py"
+    )
+
+
+def load_job():
+    raw = os.environ.get("KIA_JOB")
+    src = "KIA_JOB"
+    if not raw and len(sys.argv) > 1:
+        raw, src = sys.argv[1], "argv"
+    if not raw and not sys.stdin.isatty():
+        raw, src = sys.stdin.read(), "stdin"
+    if not raw:
+        raise SystemExit(
+            "No account details given. Set KIA_JOB, e.g.:\n"
+            "  KIA_JOB='{\"username\":\"you@example.com\",\"password\":\"pw\","
+            "\"pin\":\"1234\",\"region\":\"USA\",\"brand\":\"KIA\"}' "
+            "./venv/bin/python3 enroll.py"
+        )
     try:
-        return open("/dev/tty", "r+")
-    except OSError:
-        return None
-
-
-def ask(prompt, term):
-    if term:
-        term.write(prompt)
-        term.flush()
-        return term.readline().strip()
-    # fallback: no controlling tty (shouldn't happen in normal use)
-    return input(prompt).strip()
+        return json.loads(raw)
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"Could not parse the JSON job ({src}): {exc}")
 
 
 def main():
-    try:
-        job = json.load(sys.stdin)
-    except Exception as exc:  # noqa: BLE001
-        print(f"Could not read the JSON job on stdin: {exc}", file=sys.stderr)
-        return 2
+    job = load_job()
 
     from hyundai_kia_connect_api import VehicleManager
     from hyundai_kia_connect_api.ApiImpl import OTPRequest
@@ -74,7 +113,6 @@ def main():
         pin=str(job.get("pin", "")),
     )
 
-    term = tty()
     result = vm.login()
 
     if result is True:
@@ -92,7 +130,7 @@ def main():
         print("Kia needs a one-time code. Where should it be sent?")
         for i, (kind, dest) in enumerate(opts, 1):
             print(f"  {i}) {kind}  {dest or ''}")
-        choice = ask(f"Choose 1-{len(opts)} [1]: ", term) or "1"
+        choice = ask(f"Choose 1-{len(opts)} [1]: ") or "1"
         try:
             kind = opts[int(choice) - 1][0]
         except (ValueError, IndexError):
@@ -100,7 +138,7 @@ def main():
 
         vm.send_otp(OTP_NOTIFY_TYPE(kind))
         print(f"Code sent via {kind}.")
-        code = ask("Enter the code: ", term)
+        code = ask("Enter the code: ")
         if not code:
             print("No code entered.", file=sys.stderr)
             return 1
