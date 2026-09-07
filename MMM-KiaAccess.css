@@ -8,18 +8,31 @@
   font-size: 16px;
 }
 
+/* vertical padding only — horizontal spacing is set per cell below */
 .kiaaccess-table td {
-  padding: 1.5px 0;
+  padding-top: 2px;
+  padding-bottom: 2px;
   vertical-align: top;
 }
 
-.kiaaccess-label {
-  padding-right: 14px;
+.kiaaccess-table td.kiaaccess-icon {
+  width: 1em;
+  text-align: left;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.kiaaccess-table td.kiaaccess-icon i {
+  margin-right: 16px;
+}
+
+.kiaaccess-table td.kiaaccess-label {
+  padding-right: 16px;
   white-space: nowrap;
   opacity: 0.7;
 }
 
-.kiaaccess-value {
+.kiaaccess-table td.kiaaccess-value {
   text-align: right;
   width: 100%;
 }
@@ -50,35 +63,24 @@
   align-items: center;
 }
 
+/* battery readouts: centred label + value pairs, kept within the gauge width */
 .kiaaccess-batt-detail {
   margin-top: 5px;
-  line-height: 1.45;
-  width: 100%;
-  max-width: 190px;
   font-size: 16px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .kiaaccess-batt-detail > div {
-  display: flex;
-  justify-content: flex-start;
-  gap: 10px;
+  white-space: nowrap;
 }
 
-.kiaaccess-batt-detail .kiaaccess-label {
-  padding-right: 0;
-  flex: 0 0 auto;
+.kiaaccess-bd-label {
+  opacity: 0.7;
 }
 
-.kiaaccess-batt-detail .kiaaccess-value {
-  text-align: left;
-  width: auto;
-}
-
-.kiaaccess-icon {
-  width: 1.1em;
-  padding-right: 18px;
-  text-align: left;
-  opacity: 0.65;
+.kiaaccess-bd-value {
+  margin-left: 8px;
 }
 
 .kiaaccess-error {

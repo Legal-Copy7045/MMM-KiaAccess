@@ -338,15 +338,12 @@ Module.register("MMM-KiaAccess", {
         if (detail.length) {
           const dl = document.createElement("div");
           dl.className = "kiaaccess-batt-detail";
-          // keep the readouts within the battery body's width so values don't
-          // float out past the gauge
-          dl.style.maxWidth = (vis.width || 210) - 24 + "px";
           detail.forEach((e) => {
             const r = document.createElement("div");
             r.innerHTML =
-              '<span class="kiaaccess-label">' +
+              '<span class="kiaaccess-bd-label">' +
               this.escape(e.label) +
-              '</span><span class="kiaaccess-value bright">' +
+              '</span><span class="kiaaccess-bd-value bright">' +
               this.escape(this.utils.formatValue(e, this.config)) +
               "</span>";
             dl.appendChild(r);
