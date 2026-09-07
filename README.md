@@ -64,9 +64,12 @@ script **once**, on the mirror, using the module's venv Python:
 
 ```bash
 cd ~/MagicMirror/modules/MMM-KiaAccess
-echo '{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA"}' \
-  | ./venv/bin/python3 enroll.py
+KIA_JOB='{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA"}' \
+  ./venv/bin/python3 enroll.py
 ```
+
+(Passing the details in `KIA_JOB` leaves the terminal free for the prompts and keeps the
+password out of `ps`. `argv[1]` or stdin also work.)
 
 It asks where to send the code (SMS / email), you paste the code back, and it writes
 `token.json` (git-ignored, `chmod 600`) next to the script. `kia_bridge.py` then reuses
