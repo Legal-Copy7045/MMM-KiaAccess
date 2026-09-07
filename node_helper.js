@@ -12,6 +12,18 @@ const NodeHelper = require("node_helper");
 const Log = require("logger");
 const { spawn } = require("child_process");
 const path = require("path");
+const fs = require("fs");
+
+/** Prefer the bundled venv (built by setup_python.js) unless the user set pythonBin. */
+function resolvePython(configured) {
+  if (configured && configured !== "python3") return configured;
+  const venv =
+    process.platform === "win32"
+      ? path.join(__dirname, "venv", "Scripts", "python.exe")
+      : path.join(__dirname, "venv", "bin", "python3");
+  if (fs.existsSync(venv)) return venv;
+  return configured || process.env.PYTHON || "python3";
+}
 
 module.exports = NodeHelper.create({
   start() {
@@ -37,7 +49,7 @@ module.exports = NodeHelper.create({
     }
     this.inFlight[id] = true;
 
-    const pythonBin = config.pythonBin || process.env.PYTHON || "python3";
+    const pythonBin = resolvePython(config.pythonBin);
     const script = path.join(__dirname, "kia_bridge.py");
     const job = {
       username: config.username,

@@ -5,7 +5,7 @@
   "main": "MMM-KiaAccess.js",
   "scripts": {
     "test": "node test/flatten.test.js",
-    "postinstall": "pip3 install --user -r requirements.txt || python3 -m pip install --user -r requirements.txt || echo 'Install Python deps manually: pip3 install -r requirements.txt'"
+    "postinstall": "node setup_python.js || echo 'Python setup incomplete — see README (Python version).'"
   },
   "repository": {
     "type": "git",

@@ -23,12 +23,37 @@ labels and units.
 cd ~/MagicMirror/modules
 git clone https://github.com/Legal-Copy7045/MMM-KiaAccess.git
 cd MMM-KiaAccess
-npm install                      # runs: pip3 install --user -r requirements.txt
-# if the postinstall step is skipped on your setup, run it yourself:
-pip3 install --user -r requirements.txt
+npm install          # runs setup_python.js: builds ./venv and installs the Python dep
 ```
 
-Requires **Python 3.9+** on the mirror (`python3` on PATH). Restart MagicMirror afterwards.
+Restart MagicMirror afterwards. `node_helper` automatically uses `./venv/bin/python3`.
+
+### Python version
+
+The newest `hyundai_kia_connect_api` (with current Kia USA Cloudflare handling)
+requires **Python 3.12+**. `setup_python.js` picks the highest `python3.x` on your PATH:
+
+| Your `python3` | What gets installed | Kia USA |
+|---|---|---|
+| 3.12 / 3.13 / 3.14 | latest (4.29+) | ✅ |
+| 3.10 / 3.11 | 4.23.0 (pip auto-selects) | usually ✅ |
+| ≤ 3.9 | nothing — pip finds no compatible release | ❌ |
+
+Check with `python3 --version`. If it's < 3.12 and the module misbehaves, install a
+newer Python and re-run `npm install`:
+
+```bash
+# Debian / Raspberry Pi OS, if python3.12 is in apt:
+sudo apt install python3.12 python3.12-venv
+# otherwise use pyenv:  https://github.com/pyenv/pyenv
+#   pyenv install 3.12   &&   pyenv local 3.12
+rm -rf venv && npm install
+```
+
+If venv creation fails: `sudo apt install python3-venv`.
+
+To point at a specific interpreter, set `pythonBin` in config (e.g.
+`pythonBin: "/home/pi/.pyenv/versions/3.12.8/bin/python3"`).
 
 ### First-login / OTP note (Kia USA)
 
