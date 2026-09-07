@@ -63,8 +63,9 @@ assert.strictEqual(U.prettifyKey("status.engine.batteryCharge"), "Battery Charge
 
 // --- visuals ---
 const Vis = require("../visuals.js");
-const bg = Vis.batteryGauge(82, { charging: true, caption: "255 mi range" });
-assert.ok(bg.indexOf("<svg") === 0 && bg.indexOf("82%") > 0 && bg.indexOf("255 mi range") > 0);
+const bg = Vis.batteryGauge(82, { charging: true });
+assert.ok(bg.indexOf("<svg") === 0 && bg.indexOf("82%") > 0);
+assert.strictEqual(Vis.batteryGauge(null, {}).indexOf("—") > 0, true);
 const car = Vis.carDiagram({ locked: false, doorFL: true, hood: true, tyreAny: true });
 assert.ok(car.indexOf("<svg") === 0);
 assert.strictEqual(Vis.iconFor("vehicle.ev_battery_percentage"), "fa-solid fa-battery-half");
