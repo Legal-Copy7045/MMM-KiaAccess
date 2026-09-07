@@ -204,11 +204,49 @@ Common EV9 (US) paths:
 | `order` | `[]` | glob paths shown first, in listed order |
 | `labels` | `{}` | key path → display label |
 | `formatters` | see defaults | key path → formatter name |
+| `visuals.enabled` | `false` | master switch for the graphical widgets |
+| `visuals.battery` / `.car` / `.rowIcons` | `true` | individual widget toggles (need `visuals.enabled`) |
+| `visuals.carLabel` | `"EV9"` | text under the car's lock glyph |
+| `visuals.width` | `210` | px width of the battery gauge |
+| `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
 | `maxWidth` | `"420px"` | CSS max-width |
 | `animationSpeed` | `500` | DOM update fade (ms) |
 | `debug` | `false` | extra logging |
+
+### Graphical mode
+
+Set `visuals.enabled: true` to add pictorial widgets above the table. Each part
+toggles independently:
+
+```js
+visuals: {
+  enabled: true,
+  battery: true,      // horizontal battery gauge: fill % coloured green/amber/red,
+                      //   animated bolt when charging, "range · kW" caption
+  car: true,          // top-down car diagram: body outline turns green (locked) /
+                      //   red (unlocked); doors, frunk, tailgate flash red + swing
+                      //   open; charge port glows green charging / amber plugged;
+                      //   wheels turn red on a tyre-pressure warning
+  carLabel: "EV9",    // text under the lock glyph ("" hides it)
+  rowIcons: true,     // Font Awesome icon before every table row
+  width: 210          // px width of the battery gauge; the car scales to match
+}
+```
+
+The diagram always uses the real `vehicle.*` values, so it stays complete even
+if you've hidden those rows from the table.
+
+Row icons come from a built-in map (battery → battery, range → road, lock → lock,
+charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:
+
+```js
+icons: {
+  "vehicle.ev_battery_percentage": "fa-solid fa-bolt",
+  "vehicle.geocode": "fa-solid fa-house"
+}
+```
 
 ### Formatters
 

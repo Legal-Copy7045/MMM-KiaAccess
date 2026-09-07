@@ -23,6 +23,27 @@
   width: 100%;
 }
 
+.kiaaccess-visuals {
+  text-align: center;
+  margin: 2px 0 8px;
+  line-height: 0;
+}
+
+.kiaaccess-visuals svg {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 4px;
+}
+
+.kiaaccess-icon {
+  width: 1.3em;
+  padding-right: 8px;
+  text-align: center;
+  opacity: 0.65;
+}
+
 .kiaaccess-error {
   color: #ff9a9a;
 }
