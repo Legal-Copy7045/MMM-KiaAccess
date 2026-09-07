@@ -106,10 +106,15 @@
       open === true && dxdy
         ? ' transform="translate(' + dxdy[0] + "," + dxdy[1] + ')"'
         : "";
+    var pulse =
+      open === true
+        ? '<animate attributeName="fill-opacity" values="0.15;0.75;0.15" dur="1.2s" repeatCount="indefinite"/>' +
+          '<animate attributeName="stroke-opacity" values="0.5;1;0.5" dur="1.2s" repeatCount="indefinite"/>'
+        : "";
     return (
       '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
       '" rx="3" fill="' + fill + '" fill-opacity="0.55" stroke="' + stroke +
-      '" stroke-width="1.6"' + t + "/>"
+      '" stroke-width="1.6"' + t + ">" + pulse + "</rect>"
     );
   }
 
