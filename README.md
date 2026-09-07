@@ -226,10 +226,12 @@ visuals: {
   enabled: true,
   battery: true,      // battery gauge showing the charge % only, coloured
                       //   green/amber/red, with an animated bolt when charging
-  car: true,          // top-down car diagram: body outline turns green (locked) /
-                      //   red (unlocked); doors, frunk, tailgate flash red + swing
-                      //   open; charge port glows green charging / amber plugged;
-                      //   wheels turn red on a tyre-pressure warning
+  car: true,          // top-down SUV diagram, front at the top: body outline
+                      //   green (locked) / red (unlocked); doors, frunk and
+                      //   tailgate flash red and swing open; headlights are
+                      //   solid white when on, outline when off; each wheel
+                      //   shows "!" on a per-tyre pressure warning; charge port
+                      //   (rear right) glows green charging / amber plugged
   carLabel: "EV9",    // text under the lock glyph ("" hides it)
   rowIcons: true,     // Font Awesome icon before every table row
   width: 210,         // px width of the battery gauge; the car scales to match

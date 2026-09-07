@@ -22,6 +22,7 @@
     warn: "#ffb300",
     bad: "#e53935",
     text: "#e8eaed",
+    glass: "#3a3d40",
     accent: "#4fc3f7"
   };
 
@@ -111,9 +112,14 @@
 
   function wheel(x, y, warn) {
     var c = warn === true ? COL.bad : COL.dim;
+    var mark =
+      warn === true
+        ? '<text x="' + (x + 6) + '" y="' + (y + 20) +
+          '" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">!</text>'
+        : "";
     return (
-      '<rect x="' + x + '" y="' + y + '" width="10" height="22" rx="4" fill="' + c +
-      '" stroke="#000" stroke-width="0.5"/>'
+      '<rect x="' + x + '" y="' + y + '" width="12" height="30" rx="5" fill="' + c +
+      '" stroke="#000" stroke-width="0.5"/>' + mark
     );
   }
 
@@ -133,69 +139,93 @@
   }
 
   /**
-   * Top-down car status diagram.
+   * Top-down SUV status diagram — front at the top (direction of travel = up).
    * @param {object} s state flags (all bool|null): locked, doorFL, doorFR,
-   *   doorRL, doorRR, hood, trunk, charging, plugged, tyreFL, tyreFR, tyreRL,
-   *   tyreRR, tyreAny
+   *   doorRL, doorRR, hood, trunk, charging, plugged, headlights,
+   *   tyreFL, tyreFR, tyreRL, tyreRR, tyreAny
    * @param {object} o { width, label }
    */
   function carDiagram(s, o) {
     s = s || {};
     o = o || {};
     var w = o.width || 190;
-    var vb = 190;
-    var vbh = 300;
 
     var tyre = function (which) {
       return s["tyre" + which] === true || s.tyreAny === true;
     };
 
     var port =
+      s.charging === true ? COL.ok : s.plugged === true ? COL.warn : COL.dim;
+    var portAnim =
       s.charging === true
-        ? COL.ok
-        : s.plugged === true
-        ? COL.warn
-        : COL.dim;
-    var portPulse =
-      s.charging === true
-        ? '<animate attributeName="r" values="5;8;5" dur="1.6s" repeatCount="indefinite"/>'
+        ? '<animate attributeName="opacity" values="0.4;1;0.4" dur="1.6s" repeatCount="indefinite"/>'
         : "";
 
     var bodyStroke =
       s.locked === true ? COL.ok : s.locked === false ? COL.bad : COL.outline;
 
+    // headlights: solid white when on, hollow outline when off/unknown
+    var lampFill = s.headlights === true ? COL.text : "none";
+    var lampStroke = s.headlights === true ? COL.text : COL.outline;
+    var headlight = function (d) {
+      return (
+        '<path d="' + d + '" fill="' + lampFill + '" stroke="' + lampStroke +
+        '" stroke-width="1.4"/>'
+      );
+    };
+
     return (
-      '<svg class="kiaaccess-car" viewBox="0 0 ' + vb + " " + vbh + '" width="' + w +
-      '" role="img" aria-label="Vehicle status">' +
-      // body
-      '<rect x="30" y="18" width="130" height="264" rx="34" fill="#1b1c1e" stroke="' +
+      '<svg class="kiaaccess-car" viewBox="0 0 200 330" width="' + w +
+      '" role="img" aria-label="Vehicle status, front at top">' +
+      // body (front nose rounded, rear squarer)
+      '<path d="M 40 58 Q 40 22 74 22 L 126 22 Q 160 22 160 58 L 160 284 ' +
+      'Q 160 304 140 304 L 60 304 Q 40 304 40 284 Z" fill="#1b1c1e" stroke="' +
       bodyStroke + '" stroke-width="3"/>' +
-      // windshield / rear glass
-      '<path d="M 46 78 q 49 -26 98 0 v 4 q -49 -20 -98 0 z" fill="' + COL.dim + '" opacity="0.5"/>' +
-      '<path d="M 48 226 q 47 22 94 0 v -4 q -47 18 -94 0 z" fill="' + COL.dim + '" opacity="0.5"/>' +
-      // roof panel
-      '<rect x="52" y="92" width="86" height="120" rx="18" fill="#242628"/>' +
-      // hood + tailgate
-      panel(s.hood, 60, 22, 70, 22, [0, -6]) +
-      panel(s.trunk, 60, 256, 70, 22, [0, 6]) +
+      // front grille bar
+      '<rect x="78" y="24" width="44" height="7" rx="2" fill="' + COL.dim + '"/>' +
+      // headlights (front corners)
+      headlight("M 45 31 q 14 -8 25 -2 l -2 8 q -12 -5 -23 2 z") +
+      headlight("M 155 31 q -14 -8 -25 -2 l 2 8 q 12 -5 23 2 z") +
+      // taillight bar (rear)
+      '<rect x="46" y="293" width="30" height="7" rx="2" fill="' + COL.bad + '" opacity="0.7"/>' +
+      '<rect x="124" y="293" width="30" height="7" rx="2" fill="' + COL.bad + '" opacity="0.7"/>' +
+      // raked windscreen + rear glass
+      '<path d="M 56 92 L 144 92 L 130 66 Q 100 58 70 66 Z" fill="' + COL.glass + '"/>' +
+      '<path d="M 58 246 L 142 246 L 136 272 Q 100 278 64 272 Z" fill="' + COL.glass + '"/>' +
+      // roof + roof rails (SUV cue)
+      '<rect x="56" y="94" width="88" height="150" rx="12" fill="#242628"/>' +
+      '<rect x="58" y="96" width="3.5" height="146" rx="1.75" fill="' + COL.dim + '"/>' +
+      '<rect x="138.5" y="96" width="3.5" height="146" rx="1.75" fill="' + COL.dim + '"/>' +
+      // door mirrors (just aft of the windscreen base — a strong "front" cue)
+      '<path d="M 40 98 l -9 3 l 3 7 l 6 -2 z" fill="' + COL.dim + '"/>' +
+      '<path d="M 160 98 l 9 3 l -3 7 l -6 -2 z" fill="' + COL.dim + '"/>' +
+      // hood (frunk) + tailgate
+      panel(s.hood, 66, 24, 68, 20, [0, -8]) +
+      panel(s.trunk, 66, 278, 68, 20, [0, 8]) +
       // doors
-      panel(s.doorFL, 24, 108, 16, 46, [-7, 0]) +
-      panel(s.doorRL, 24, 160, 16, 46, [-7, 0]) +
-      panel(s.doorFR, 150, 108, 16, 46, [7, 0]) +
-      panel(s.doorRR, 150, 160, 16, 46, [7, 0]) +
-      // wheels
-      wheel(18, 70, tyre("FL")) +
-      wheel(162, 70, tyre("FR")) +
-      wheel(18, 210, tyre("RL")) +
-      wheel(162, 210, tyre("RR")) +
-      // charge port (front-left corner)
-      '<circle cx="34" cy="60" r="5" fill="' + port + '">' + portPulse + "</circle>" +
-      // centre lock
-      lockGlyph(95, 150, s.locked) +
-      // label
+      panel(s.doorFL, 34, 104, 14, 44, [-8, 0]) +
+      panel(s.doorRL, 34, 156, 14, 48, [-8, 0]) +
+      panel(s.doorFR, 152, 104, 14, 44, [8, 0]) +
+      panel(s.doorRR, 152, 156, 14, 48, [8, 0]) +
+      // wheels — front axle well forward of the doors, larger tyres
+      wheel(29, 60, tyre("FL")) +
+      wheel(159, 60, tyre("FR")) +
+      wheel(29, 230, tyre("RL")) +
+      wheel(159, 230, tyre("RR")) +
+      // charge port — rear, passenger (right) side, in the gap between the
+      // rear wheel and the taillight
+      '<rect x="148" y="266" width="14" height="16" rx="2" fill="#2a2c2e" stroke="' +
+      COL.dim + '" stroke-width="1"/>' +
+      '<circle cx="155" cy="274" r="4.2" fill="' + port + '">' + portAnim + "</circle>" +
+      (s.charging === true
+        ? '<path d="M 166 274 q 12 0 13 -13" fill="none" stroke="' + COL.ok +
+          '" stroke-width="2"/>'
+        : "") +
+      // centre lock + label
+      lockGlyph(100, 150, s.locked) +
       (o.label
-        ? '<text x="95" y="176" text-anchor="middle" font-size="12" fill="' + COL.dim + '">' +
-          esc(o.label) + "</text>"
+        ? '<text x="100" y="176" text-anchor="middle" font-size="12" fill="' +
+          COL.dim + '">' + esc(o.label) + "</text>"
         : "") +
       "</svg>"
     );
