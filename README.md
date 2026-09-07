@@ -266,7 +266,8 @@ icons: {
 ### Formatters
 
 `raw`, `boolean` (→ Yes/No), `percent`, `distanceKm`, `distanceMi`, `temperatureC`,
-`speedKph`, `datetime`, `relativeTime`. Distance/temp/speed honour `units`.
+`speedKph`, `durationMin` (minutes → `2h 14m`), `datetime`, `relativeTime`.
+Distance/temp/speed honour `units`.
 
 ### Glob syntax
 

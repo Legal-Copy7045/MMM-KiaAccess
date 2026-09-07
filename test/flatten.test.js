@@ -60,6 +60,9 @@ assert.strictEqual(
   "Yes"
 );
 assert.strictEqual(U.prettifyKey("status.engine.batteryCharge"), "Battery Charge");
+assert.strictEqual(U.formatValue({ key: "d", rawValue: 134 }, { formatters: { d: "durationMin" } }), "2h 14m");
+assert.strictEqual(U.formatValue({ key: "d", rawValue: 45 }, { formatters: { d: "durationMin" } }), "45m");
+assert.strictEqual(U.formatValue({ key: "d", rawValue: 120 }, { formatters: { d: "durationMin" } }), "2h");
 
 // --- visuals ---
 const Vis = require("../visuals.js");
