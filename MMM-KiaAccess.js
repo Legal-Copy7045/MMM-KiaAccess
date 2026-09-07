@@ -265,8 +265,27 @@ Module.register("MMM-KiaAccess", {
       doorFR: bool("front_right_door_is_open"),
       doorRL: bool("back_left_door_is_open"),
       doorRR: bool("back_right_door_is_open"),
+      winFL: bool("front_left_window_is_open"),
+      winFR: bool("front_right_window_is_open"),
+      winRL: bool("back_left_window_is_open"),
+      winRR: bool("back_right_window_is_open"),
       hood: bool("hood_is_open"),
       trunk: bool("trunk_is_open"),
+      sunroof: bool("sunroof_is_open"),
+      defrost: bool("defrost_is_on"),
+      rearHeat: bool("back_window_heater_is_on"),
+      mirrorHeat: bool("side_mirror_heater_is_on"),
+      steerHeat: bool("steering_wheel_heater_is_on"),
+      climate: (() => {
+        if (bool("air_control_is_on") !== true) return null;
+        const set = num("air_temperature");
+        const out = num("outside_temperature");
+        if (set != null && out != null) {
+          if (set - out >= 1) return "heat";
+          if (out - set >= 1) return "cool";
+        }
+        return "on";
+      })(),
       tyreAny: bool("tire_pressure_all_warning_is_on"),
       tyreFL: bool("tire_pressure_front_left_warning_is_on"),
       tyreFR: bool("tire_pressure_front_right_warning_is_on"),

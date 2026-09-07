@@ -23,7 +23,8 @@
     bad: "#e53935",
     text: "#e8eaed",
     glass: "#3a3d40",
-    accent: "#4fc3f7"
+    accent: "#4fc3f7",
+    heat: "#ff7043"
   };
 
   function esc(s) {
@@ -99,6 +100,14 @@
     );
   }
 
+  function pulse(attr, a, b, d) {
+    return (
+      '<animate attributeName="' + attr + '" values="' + a + ";" + b + ";" + a +
+      '" dur="' + (d || 1.2) + 's" repeatCount="indefinite"/>'
+    );
+  }
+
+  // hood (frunk) / liftgate panel: outline shut, red + pulse when open
   function panel(open, x, y, w, h, dxdy) {
     var fill = open === true ? COL.bad : "none";
     var stroke = open === true ? COL.bad : COL.outline;
@@ -106,15 +115,38 @@
       open === true && dxdy
         ? ' transform="translate(' + dxdy[0] + "," + dxdy[1] + ')"'
         : "";
-    var pulse =
+    var anim =
       open === true
-        ? '<animate attributeName="fill-opacity" values="0.15;0.75;0.15" dur="1.2s" repeatCount="indefinite"/>' +
-          '<animate attributeName="stroke-opacity" values="0.5;1;0.5" dur="1.2s" repeatCount="indefinite"/>'
+        ? pulse("fill-opacity", "0.15", "0.75") + pulse("stroke-opacity", "0.5", "1")
         : "";
     return (
       '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
       '" rx="3" fill="' + fill + '" fill-opacity="0.55" stroke="' + stroke +
-      '" stroke-width="1.6"' + t + ">" + pulse + "</rect>"
+      '" stroke-width="1.6"' + t + ">" + anim + "</rect>"
+    );
+  }
+
+  // a door: outline shut; door open -> swings ~50deg about its front-outer
+  // hinge + pulse; window open (door shut) -> stays put and pulses red
+  function door(open, winOpen, x, y, w, h, hinge, ang) {
+    if (open !== true && winOpen !== true) {
+      return (
+        '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+        '" rx="3" fill="none" stroke="' + COL.outline + '" stroke-width="1.6"/>'
+      );
+    }
+    if (winOpen === true && open !== true) {
+      return (
+        '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+        '" rx="3" fill="' + COL.bad + '" fill-opacity="0.5" stroke="' + COL.bad +
+        '" stroke-width="1.6">' + pulse("fill-opacity", "0.12", "0.7") + "</rect>"
+      );
+    }
+    return (
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+      '" rx="3" fill="' + COL.bad + '" fill-opacity="0.55" stroke="' + COL.bad +
+      '" stroke-width="1.6" transform="rotate(' + ang + " " + hinge[0] + " " + hinge[1] +
+      ')">' + pulse("fill-opacity", "0.2", "0.8") + "</rect>"
     );
   }
 
@@ -131,37 +163,114 @@
     );
   }
 
-  /** Vertical "AA cell" battery drawn in the middle of the car, terminal to
-   *  the front (top). Fills from the bottom; shows the % in the middle. */
+  // sunroof panel on the roof, lined up with the front-door windows
+  function sunroof(open) {
+    var x = 76, y = 120, w = 48, h = 24;
+    if (open === true) {
+      return (
+        '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+        '" rx="6" fill="none" stroke="' + COL.bad + '" stroke-width="2.6">' +
+        pulse("stroke-opacity", "0.25", "1") + "</rect>"
+      );
+    }
+    return (
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+      '" rx="6" fill="none" stroke="' + COL.outline + '" stroke-width="1.4"/>'
+    );
+  }
+
+  // SUV liftgate = rear window + tailgate as one block, clear of the lights
+  var LG_X = 62, LG_Y = 250, LG_W = 76, LG_H = 33;
+  function liftgate(open) {
+    if (open === true) {
+      return (
+        '<rect x="' + LG_X + '" y="' + (LG_Y + 6) + '" width="' + LG_W + '" height="' + LG_H +
+        '" rx="8" fill="' + COL.bad + '" fill-opacity="0.55" stroke="' + COL.bad +
+        '" stroke-width="1.8">' + pulse("fill-opacity", "0.15", "0.75") + "</rect>"
+      );
+    }
+    return (
+      '<rect x="' + LG_X + '" y="' + LG_Y + '" width="' + LG_W + '" height="' + LG_H +
+      '" rx="8" fill="#242628" stroke="' + COL.outline + '" stroke-width="1.6"/>'
+    );
+  }
+
+  function heatLines(x1, x2, ys, col) {
+    return ys
+      .map(function (y) {
+        return (
+          '<line x1="' + x1 + '" y1="' + y + '" x2="' + x2 + '" y2="' + y +
+          '" stroke="' + col + '" stroke-width="1.6" stroke-linecap="round">' +
+          pulse("opacity", "0.35", "1", 1.6) + "</line>"
+        );
+      })
+      .join("");
+  }
+  // element lines that taper to follow a glass trapezoid (narrow -> wide edge)
+  function heatTrap(xNL, xNR, xWL, xWR, yN, yW, ys, col) {
+    return ys
+      .map(function (y) {
+        var t = (y - yN) / (yW - yN);
+        var xl = xNL + (xWL - xNL) * t;
+        var xr = xNR + (xWR - xNR) * t;
+        return (
+          '<line x1="' + xl + '" y1="' + y + '" x2="' + xr + '" y2="' + y +
+          '" stroke="' + col + '" stroke-width="1.6" stroke-linecap="round">' +
+          pulse("opacity", "0.35", "1", 1.6) + "</line>"
+        );
+      })
+      .join("");
+  }
+  function frontHeat() {
+    return heatTrap(70, 130, 56, 144, 66, 92, [72, 78, 84], COL.heat);
+  }
+  function rearHeatLines() {
+    return heatLines(LG_X + 6, LG_X + LG_W - 6, [LG_Y + 9, LG_Y + 18, LG_Y + 27], COL.heat);
+  }
+
+  // air conditioning: a vent bar at the front + four wavy streams rolling back
+  function airWaves(col) {
+    var g = '<rect x="70" y="96" width="60" height="4" rx="2" fill="' + col + '" opacity="0.55"/>';
+    for (var i = 0; i < 4; i++) {
+      var x = 79 + i * 14;
+      g +=
+        '<path d="M ' + x + ' 104 q 5 11 0 22 q -5 11 0 22" fill="none" stroke="' + col +
+        '" stroke-width="2.2" stroke-linecap="round">' +
+        '<animate attributeName="opacity" values="0.12;1;0.12" dur="1.9s" begin="' +
+        (i * 0.42) + 's" repeatCount="indefinite"/>' +
+        '<animate attributeName="transform" attributeType="XML" type="translate" ' +
+        'values="0 0; 0 14" dur="1.9s" begin="' + (i * 0.42) +
+        's" repeatCount="indefinite" additive="sum"/></path>';
+    }
+    return g;
+  }
+
+  /** Vertical "AA cell" battery, terminal to the front, filling bottom-up,
+   *  sitting toward the rear of the cabin with the % shown underneath. */
   function verticalBattery(pct, charging) {
     var cx = 100;
-    var bw = 40, bx = cx - bw / 2, by = 112, bh = 120; // body
-    var ix = bx + 3, iw = bw - 6, iy = by + 4, ih = bh - 8; // inner track
+    var bw = 24, bx = cx - bw / 2, by = 168, bh = 54;
+    var ix = bx + 2.5, iw = bw - 5, iy = by + 3, ih = bh - 6;
     var frac = Math.max(0, Math.min(1, (Number(pct) || 0) / 100));
     var fh = frac * ih;
     var col = batteryColor(pct);
     var label = pct == null || isNaN(pct) ? "—" : Math.round(pct) + "%";
     var bolt =
       charging === true
-        ? '<path d="M 104 136 l -11 17 h 7 l -4 15 l 13 -19 h -8 z" fill="' +
-          COL.text +
+        ? '<path d="M 103 180 l -8 13 h 6 l -3 11 l 10 -15 h -6 z" fill="' + COL.text +
           '" stroke="#000" stroke-width="0.6">' +
           '<animate attributeName="opacity" values="0.35;1;0.35" dur="1.5s" repeatCount="indefinite"/></path>'
         : "";
     return (
-      // terminal (points to the front of the car)
-      '<rect x="' + (cx - 7) + '" y="' + (by - 6) + '" width="14" height="7" rx="2" fill="' +
+      '<rect x="' + (cx - 5) + '" y="' + (by - 4) + '" width="10" height="5" rx="1.5" fill="' +
       COL.outline + '"/>' +
-      // body
       '<rect x="' + bx + '" y="' + by + '" width="' + bw + '" height="' + bh +
-      '" rx="8" fill="#111214" stroke="' + COL.outline + '" stroke-width="2.5"/>' +
-      // charge fill, rising from the base
+      '" rx="5" fill="#111214" stroke="' + COL.outline + '" stroke-width="2"/>' +
       '<rect x="' + ix + '" y="' + (iy + ih - fh) + '" width="' + iw + '" height="' + fh +
-      '" rx="4" fill="' + col + '"/>' +
+      '" rx="2.5" fill="' + col + '"/>' +
       bolt +
-      '<text x="' + cx + '" y="176" text-anchor="middle" font-size="13" font-weight="700" fill="' +
-      COL.text +
-      '" style="paint-order:stroke;stroke:#000;stroke-width:3px">' + esc(label) + "</text>"
+      '<text x="' + cx + '" y="' + (by + bh + 16) + '" text-anchor="middle" font-size="13" ' +
+      'font-weight="700" fill="' + COL.text + '">' + esc(label) + "</text>"
     );
   }
 
@@ -170,9 +279,13 @@
    * The canvas is a FIXED size in every state: the car body is always at the
    * same coordinates and pixel size; only the right-hand strip changes (a
    * charger + animated energy flow appear there when plugged in).
-   * @param {object} s state flags: locked/doorFL/doorFR/doorRL/doorRR/hood/
-   *   trunk/charging/plugged/v2l/v2x/headlights/tyre* (bool|null) plus
-   *   batteryPct (number|null) for the battery drawn in the centre
+   * @param {object} s state flags (bool|null unless noted):
+   *   locked, carOn, headlights;
+   *   charging, plugged, v2l, v2x, batteryPct (number|null);
+   *   doorFL/FR/RL/RR (open), winFL/FR/RL/RR (window open), hood (frunk),
+   *   trunk (liftgate), sunroof;
+   *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null);
+   *   tyreFL/FR/RL/RR, tyreAny
    * @param {object} o { width, battery:false to omit the centre battery }
    */
   function carDiagram(s, o) {
@@ -264,6 +377,12 @@
       );
     };
 
+    // climate / heaters
+    var climCol =
+      s.climate === "heat" ? COL.heat : s.climate === "cool" ? COL.accent : COL.text;
+    var mirrorFill = s.mirrorHeat === true ? COL.heat : COL.dim;
+    var mirrorAnim = s.mirrorHeat === true ? pulse("opacity", "0.4", "1", 1.4) : "";
+
     return (
       '<svg class="kiaaccess-car" xmlns="http://www.w3.org/2000/svg" ' +
       'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="' + VB + '" width="' + w +
@@ -280,27 +399,36 @@
       // taillights (rear)
       taillight(46) +
       taillight(124) +
-      // raked windscreen + rear glass
+      // SUV liftgate (rear window + tailgate combined), raised off the lights
+      liftgate(s.trunk) +
+      // raked windscreen
       '<path d="M 56 92 L 144 92 L 130 66 Q 100 58 70 66 Z" fill="' + COL.glass + '"/>' +
-      '<path d="M 58 246 L 142 246 L 136 272 Q 100 278 64 272 Z" fill="' + COL.glass + '"/>' +
+      // defrost: front (follows the screen shape) + rear (on the liftgate)
+      (s.defrost === true ? frontHeat() + rearHeatLines() : "") +
+      (s.rearHeat === true && s.defrost !== true ? rearHeatLines() : "") +
       // roof + roof rails (SUV cue)
       '<rect x="56" y="94" width="88" height="150" rx="12" fill="#242628"/>' +
       '<rect x="58" y="96" width="3.5" height="146" rx="1.75" fill="' + COL.dim + '"/>' +
       '<rect x="138.5" y="96" width="3.5" height="146" rx="1.75" fill="' + COL.dim + '"/>' +
-      // door mirrors (just aft of the windscreen base — a strong "front" cue)
-      '<path d="M 40 98 l -9 3 l 3 7 l 6 -2 z" fill="' + COL.dim + '"/>' +
-      '<path d="M 160 98 l 9 3 l -3 7 l -6 -2 z" fill="' + COL.dim + '"/>' +
-      // frunk (small — it's tiny on the real car), fixed midway between the
-      // number plate and the windscreen; no shift when open, just recolours
+      // sunroof (grey outline shut / red pulse open — same as windows)
+      sunroof(s.sunroof) +
+      // air conditioning (heat / cool / on)
+      (s.climate ? airWaves(climCol) : "") +
+      // steering-wheel heater — driver (left) side, toward the front
+      (s.steerHeat === true
+        ? '<circle cx="80" cy="107" r="6" fill="none" stroke="' + COL.heat +
+          '" stroke-width="2.4">' + pulse("opacity", "0.35", "1", 1.4) + "</circle>"
+        : "") +
+      // door mirrors (also the mirror-heater indicator)
+      '<path d="M 40 98 l -9 3 l 3 7 l 6 -2 z" fill="' + mirrorFill + '">' + mirrorAnim + "</path>" +
+      '<path d="M 160 98 l 9 3 l -3 7 l -6 -2 z" fill="' + mirrorFill + '">' + mirrorAnim + "</path>" +
+      // frunk (small — it's tiny on the real car), fixed; recolours when open
       panel(s.hood, 82, 38, 36, 14) +
-      // full-width tailgate at the rear
-      panel(s.trunk, 66, 278, 68, 20, [0, 8]) +
-      // doors — centred in the gap between the front and rear wheels,
-      // clear of the door mirrors
-      panel(s.doorFL, 34, 112, 14, 42, [-8, 0]) +
-      panel(s.doorRL, 34, 162, 14, 46, [-8, 0]) +
-      panel(s.doorFR, 152, 112, 14, 42, [8, 0]) +
-      panel(s.doorRR, 152, 162, 14, 46, [8, 0]) +
+      // doors — swing ~50deg out when open; window open = shut + pulse
+      door(s.doorFL, s.winFL, 34, 112, 14, 42, [34, 112], 50) +
+      door(s.doorRL, s.winRL, 34, 162, 14, 46, [34, 162], 50) +
+      door(s.doorFR, s.winFR, 152, 112, 14, 42, [166, 112], -50) +
+      door(s.doorRR, s.winRR, 152, 162, 14, 46, [166, 162], -50) +
       // wheels — front axle well forward of the doors, larger tyres
       wheel(29, 60, tyre("FL")) +
       wheel(159, 60, tyre("FR")) +
