@@ -70,11 +70,22 @@ Module.register("MMM-KiaAccess", {
     // ---- graphical widgets (all off by default) ----
     visuals: {
       enabled: false,
-      battery: true, // horizontal battery gauge (SoC + charging bolt + range/kW caption)
+      battery: true, // battery gauge (charge % only) + a caption block under it
       car: true, // top-down car status diagram (doors / hood / trunk / lock / charge port / tyres)
       carLabel: "EV9", // text under the lock glyph ("" to hide)
       rowIcons: true, // Font Awesome icon before each table row
-      width: 210 // px width for the battery gauge; car scales with it
+      width: 210, // px width for the battery gauge; car scales with it
+      // readouts shown under the battery gauge (and removed from the table).
+      // Uses your labels / formatters / hideWhenFalsy just like table rows.
+      batteryDetail: [
+        "vehicle.ev_driving_range",
+        "vehicle.ev_charging_power",
+        "vehicle.ev_charging_current",
+        "vehicle.ev_estimated_current_charge_duration",
+        "vehicle.ev_estimated_fast_charge_duration",
+        "vehicle.ev_estimated_station_charge_duration",
+        "vehicle.ev_estimated_portable_charge_duration"
+      ]
     },
     icons: {} // key path -> Font Awesome class, overrides the built-in map
   },
@@ -95,6 +106,11 @@ Module.register("MMM-KiaAccess", {
     this.utils = typeof KiaAccessUtils !== "undefined" ? KiaAccessUtils : null;
     this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
     this.flatMap = null;
+
+    // MagicMirror merges `config` shallowly, so a user-supplied `visuals` block
+    // replaces the default wholesale — re-apply the defaults for any missing keys
+    this.config.visuals = Object.assign({}, this.defaults.visuals, this.config.visuals || {});
+    this.config.icons = Object.assign({}, this.defaults.icons, this.config.icons || {});
 
     if (!this.config.username || !this.config.password) {
       this.errorMessage = "Set username / password / pin in config.js";
@@ -165,7 +181,37 @@ Module.register("MMM-KiaAccess", {
     }
     const flat = this.utils.flatten(this.rawPayload);
     this.flatMap = flat;
-    this.viewData = this.utils.selectEntries(flat, this.config);
+    let entries = this.utils.selectEntries(flat, this.config);
+
+    // when the battery widget is on, its readouts (and the % itself) are shown
+    // in the widget, not the table — drop any duplicates
+    const vis = this.config.visuals || {};
+    if (this.visuals && vis.enabled && vis.battery) {
+      const moved = new Set(
+        ["vehicle.ev_battery_percentage"].concat(vis.batteryDetail || [])
+      );
+      entries = entries.filter((e) => !moved.has(e.key));
+    }
+    this.viewData = entries;
+  },
+
+  batteryDetailEntries() {
+    const vis = this.config.visuals || {};
+    const keys = vis.batteryDetail || [];
+    const f = this.flatMap || {};
+    const labels = this.config.labels || {};
+    const hide = this.config.hideWhenFalsy || [];
+    return keys
+      .filter((k) => Object.prototype.hasOwnProperty.call(f, k))
+      .map((k) => ({
+        key: k,
+        label: labels[k] || this.utils.prettifyKey(k),
+        rawValue: f[k]
+      }))
+      .filter(
+        (e) =>
+          !this.utils.matchesAny(e.key, hide) || !this.utils.isEmptyValue(e.rawValue)
+      );
   },
 
   // read canonical vehicle.* values straight from the flat map, independent of
@@ -201,22 +247,6 @@ Module.register("MMM-KiaAccess", {
       tyreRL: bool("tire_pressure_rear_left_warning_is_on"),
       tyreRR: bool("tire_pressure_rear_right_warning_is_on")
     };
-  },
-
-  batteryCaption(s) {
-    const bits = [];
-    if (s.rangeKm != null) {
-      const mi = this.config.units === "metric";
-      bits.push(
-        mi
-          ? Math.round(s.rangeKm) + " km range"
-          : Math.round(s.rangeKm * 0.621371) + " mi range"
-      );
-    }
-    if (s.charging === true && s.chargeKw) bits.push("⚡ " + s.chargeKw + " kW");
-    else if (s.plugged === true) bits.push("plugged in");
-    else if (s.plugged === false) bits.push("unplugged");
-    return bits.join(" · ");
   },
 
   // allow live config edits via MM's module dev tooling / notifications
@@ -255,39 +285,61 @@ Module.register("MMM-KiaAccess", {
       return wrapper;
     }
 
-    if (this.viewData.length === 0) {
-      const n = document.createElement("div");
-      n.className = "small dimmed";
-      n.innerHTML = "No attributes matched your include/exclude config.";
-      wrapper.appendChild(n);
-      return wrapper;
-    }
-
     const V = this.visuals;
     const vis = this.config.visuals || {};
+
     if (V && vis.enabled && this.flatMap) {
       const s = this.visualState();
-      let html = "";
+      const panel = document.createElement("div");
+      panel.className = "kiaaccess-visuals";
+
       if (vis.battery && s.batteryPct != null) {
-        html += V.batteryGauge(s.batteryPct, {
+        const bwrap = document.createElement("div");
+        bwrap.className = "kiaaccess-batt";
+        bwrap.innerHTML = V.batteryGauge(s.batteryPct, {
           charging: s.charging,
-          plugged: s.plugged,
-          caption: this.batteryCaption(s),
           width: vis.width || 210
         });
+        const detail = this.batteryDetailEntries();
+        if (detail.length) {
+          const dl = document.createElement("div");
+          dl.className = "kiaaccess-batt-detail xsmall";
+          detail.forEach((e) => {
+            const r = document.createElement("div");
+            r.innerHTML =
+              '<span class="kiaaccess-label">' +
+              this.escape(e.label) +
+              '</span><span class="kiaaccess-value bright">' +
+              this.escape(this.utils.formatValue(e, this.config)) +
+              "</span>";
+            dl.appendChild(r);
+          });
+          bwrap.appendChild(dl);
+        }
+        panel.appendChild(bwrap);
       }
+
       if (vis.car) {
-        html += V.carDiagram(s, {
+        const c = document.createElement("div");
+        c.className = "kiaaccess-carwrap";
+        c.innerHTML = V.carDiagram(s, {
           width: Math.round((vis.width || 210) * 0.9),
           label: vis.carLabel != null ? vis.carLabel : "EV9"
         });
+        panel.appendChild(c);
       }
-      if (html) {
-        const panel = document.createElement("div");
-        panel.className = "kiaaccess-visuals";
-        panel.innerHTML = html;
-        wrapper.appendChild(panel);
+
+      if (panel.childNodes.length) wrapper.appendChild(panel);
+    }
+
+    if (this.viewData.length === 0) {
+      if (!(V && vis.enabled)) {
+        const n = document.createElement("div");
+        n.className = "small dimmed";
+        n.innerHTML = "No attributes matched your include/exclude config.";
+        wrapper.appendChild(n);
       }
+      return wrapper;
     }
 
     const rowIcons = !!(V && vis.enabled && vis.rowIcons);

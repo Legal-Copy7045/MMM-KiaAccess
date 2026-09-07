@@ -39,16 +39,18 @@
   }
 
   /**
-   * Horizontal battery gauge.
+   * Horizontal battery gauge — shows the charge % only. Any extra readouts
+   * (range, charge rate, times to full) are rendered by the frontend as a
+   * caption block underneath.
    * @param {number} pct 0..100 (null -> empty/unknown)
-   * @param {object} o { charging, plugged, caption, width }
+   * @param {object} o { charging, width }
    */
   function batteryGauge(pct, o) {
     o = o || {};
     var w = o.width || 210;
-    var h = 66;
+    var h = 50;
     var bx = 8,
-      by = 12,
+      by = 8,
       bw = w - 34,
       bh = 34;
     var innerW = Math.max(0, Math.min(1, (Number(pct) || 0) / 100)) * (bw - 6);
@@ -58,28 +60,16 @@
     var bolt =
       o.charging === true
         ? '<path d="M ' +
-          (bx + bw / 2 + 6) +
+          (bx + bw - 20) +
           " " +
-          (by + 5) +
-          " l -12 15 h 8 l -4 12 l 14 -17 h -9 z" +
+          (by + 6) +
+          " l -11 14 h 7 l -4 11 l 13 -16 h -8 z" +
           '" fill="' +
           COL.text +
           '" stroke="#000" stroke-width="0.5" opacity="0.95">' +
           '<animate attributeName="opacity" values="0.35;1;0.35" dur="1.6s" repeatCount="indefinite"/>' +
           "</path>"
         : "";
-
-    var caption = o.caption
-      ? '<text x="' +
-        w / 2 +
-        '" y="' +
-        (h - 6) +
-        '" text-anchor="middle" font-size="11" fill="' +
-        COL.dim +
-        '">' +
-        esc(o.caption) +
-        "</text>"
-      : "";
 
     return (
       '<svg class="kiaaccess-battery" viewBox="0 0 ' +
@@ -101,7 +91,6 @@
       '" text-anchor="middle" font-size="18" font-weight="700" fill="' + COL.text +
       '" style="paint-order:stroke;stroke:#000;stroke-width:3px">' + esc(label) + "</text>" +
       bolt +
-      caption +
       "</svg>"
     );
   }

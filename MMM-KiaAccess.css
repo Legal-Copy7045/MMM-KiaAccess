@@ -24,17 +24,46 @@
 }
 
 .kiaaccess-visuals {
-  text-align: center;
-  margin: 2px 0 8px;
-  line-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px 16px;
+  margin: 2px 0 10px;
 }
 
 .kiaaccess-visuals svg {
   max-width: 100%;
   height: auto;
+  display: block;
+}
+
+.kiaaccess-batt {
   display: inline-block;
-  vertical-align: middle;
-  margin: 0 4px;
+}
+
+.kiaaccess-batt-detail {
+  margin-top: 5px;
+  line-height: 1.35;
+}
+
+.kiaaccess-batt-detail > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kiaaccess-batt-detail .kiaaccess-label {
+  padding-right: 0;
+}
+
+.kiaaccess-batt-detail .kiaaccess-value {
+  text-align: right;
+  width: auto;
+}
+
+.kiaaccess-carwrap {
+  text-align: center;
 }
 
 .kiaaccess-icon {
