@@ -70,11 +70,10 @@ Module.register("MMM-KiaAccess", {
     // ---- graphical widgets (all off by default) ----
     visuals: {
       enabled: false,
-      battery: true, // battery gauge (charge % only) + a caption block under it
-      car: true, // top-down car status diagram (doors / hood / trunk / lock / charge port / tyres)
-      carLabel: "EV9", // text under the lock glyph ("" to hide)
+      car: true, // top-down SUV diagram (doors / frunk / tailgate / charge port / tyres)
+      battery: true, // vertical battery in the centre of the car (charge % + charging bolt)
       rowIcons: true, // Font Awesome icon before each table row
-      width: 210, // px width for the battery gauge; car scales with it
+      width: 210, // px width for the car SVG
       // readouts shown under the battery gauge (and removed from the table).
       // Uses your labels / formatters / hideWhenFalsy just like table rows.
       batteryDetail: [
@@ -314,43 +313,34 @@ Module.register("MMM-KiaAccess", {
       const panel = document.createElement("div");
       panel.className = "kiaaccess-visuals";
 
-      // car first, then battery gauge, then the battery readouts — one column
+      // the car carries the vertical battery in its centre; the readouts
+      // (range, charge times) sit directly under it
       if (vis.car) {
         const c = document.createElement("div");
         c.className = "kiaaccess-carwrap";
         c.innerHTML = V.carDiagram(s, {
-          // the car SVG is centred on the car body, so matching the gauge
-          // width lines the car up with the battery gauge below it
           width: vis.width || 210,
-          label: vis.carLabel != null ? vis.carLabel : "EV9"
+          battery: vis.battery !== false
         });
         panel.appendChild(c);
       }
 
-      if (vis.battery && s.batteryPct != null) {
-        const bwrap = document.createElement("div");
-        bwrap.className = "kiaaccess-batt";
-        bwrap.innerHTML = V.batteryGauge(s.batteryPct, {
-          charging: s.charging,
-          width: vis.width || 210
+      const detail =
+        vis.battery !== false ? this.batteryDetailEntries() : [];
+      if (detail.length) {
+        const dl = document.createElement("div");
+        dl.className = "kiaaccess-batt-detail";
+        detail.forEach((e) => {
+          const r = document.createElement("div");
+          r.innerHTML =
+            '<span class="kiaaccess-bd-label">' +
+            this.escape(e.label) +
+            '</span><span class="kiaaccess-bd-value bright">' +
+            this.escape(this.utils.formatValue(e, this.config)) +
+            "</span>";
+          dl.appendChild(r);
         });
-        const detail = this.batteryDetailEntries();
-        if (detail.length) {
-          const dl = document.createElement("div");
-          dl.className = "kiaaccess-batt-detail";
-          detail.forEach((e) => {
-            const r = document.createElement("div");
-            r.innerHTML =
-              '<span class="kiaaccess-bd-label">' +
-              this.escape(e.label) +
-              '</span><span class="kiaaccess-bd-value bright">' +
-              this.escape(this.utils.formatValue(e, this.config)) +
-              "</span>";
-            dl.appendChild(r);
-          });
-          bwrap.appendChild(dl);
-        }
-        panel.appendChild(bwrap);
+        panel.appendChild(dl);
       }
 
       if (panel.childNodes.length) wrapper.appendChild(panel);
