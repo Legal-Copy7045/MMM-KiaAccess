@@ -4,3 +4,9 @@ npm-debug.log*
 .DS_Store
 config.js
 secrets.json
+
+# python
+__pycache__/
+*.pyc
+venv/
+.venv/
