@@ -1,14 +1,19 @@
 # MMM-KiaAccess
 
-A [MagicMirror²](https://magicmirror.builders/) module that shows **configurable** data
-from a Kia Connect / Bluelink account. Built for a **Kia EV9** (US region) but works with
-any Hyundai/Kia supported by [`bluelinky`](https://github.com/Hacksore/bluelinky).
+A [MagicMirror²](https://magicmirror.builders/) module that shows **configurable**
+data from a Kia Connect / Bluelink account. Built for a **Kia EV9 (Kia USA)** but works
+with any Hyundai/Kia/Genesis supported by
+[`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api).
 
-The node helper fetches the *entire* vehicle payload (`status`, `rawStatus`, `odometer`,
-`location`, optionally `fullStatus`) and the frontend flattens it to `path → value` rows.
-You then decide exactly which attributes appear, in what order, with what labels and units.
+The node helper runs a small Python bridge (`kia_bridge.py`) that pulls **every**
+attribute the library exposes for your vehicle. The frontend flattens that into
+`path → value` rows, and you choose exactly which ones appear, in what order, with what
+labels and units.
 
-![placeholder](https://via.placeholder.com/420x260?text=MMM-KiaAccess)
+> **Why a Python bridge and not a Node library?**
+> Kia USA sits behind Cloudflare bot protection that returns **HTTP 403** to the Node
+> `bluelinky` library. `hyundai_kia_connect_api` (the library behind the Home Assistant
+> Kia/Hyundai integration) handles it and is actively maintained.
 
 ---
 
@@ -18,69 +23,87 @@ You then decide exactly which attributes appear, in what order, with what labels
 cd ~/MagicMirror/modules
 git clone https://github.com/Legal-Copy7045/MMM-KiaAccess.git
 cd MMM-KiaAccess
-npm install
+npm install                      # runs: pip3 install --user -r requirements.txt
+# if the postinstall step is skipped on your setup, run it yourself:
+pip3 install --user -r requirements.txt
 ```
 
-`npm install` pulls in `bluelinky`. Restart MagicMirror afterwards.
+Requires **Python 3.9+** on the mirror (`python3` on PATH). Restart MagicMirror afterwards.
+
+### First-login / OTP note (Kia USA)
+
+Kia USA may demand a one-time code the first time a new client logs in. If you see an
+`AuthenticationOTPRequired` error, log in once with the official Kia app on the same
+account, then let the module retry. Persistent OTP prompts are a Kia-side change, not a
+module bug.
 
 ## Configuration
-
-Add to `~/MagicMirror/config/config.js`:
 
 ```js
 {
   module: "MMM-KiaAccess",
-  position: "top_left",
+  position: "bottom_right",
   header: "Kia EV9",
   config: {
-    username: "you@example.com",   // Kia Connect account
+    // --- Kia Connect / Bluelink account ---
+    username: "you@example.com",
     password: "••••••••",
-    pin: "1234",                   // Kia Connect PIN
-    brand: "kia",
-    region: "US",                  // US | CA | EU | AU | KR
-    vin: "",                       // optional; blank = first vehicle on the account
+    pin: "1234",
+    brand: "KIA",            // KIA | HYUNDAI | GENESIS
+    region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
+    vin: "",                 // blank = first vehicle on the account
 
-    updateInterval: 30 * 60 * 1000, // 30 min — see "Battery" note below
-    refresh: true,                  // true = live poll of the car, false = Kia's cached copy
-    units: "imperial",              // imperial | metric
+    // --- runtime ---
+    pythonBin: "python3",    // command that runs kia_bridge.py
+    fetchTimeout: 90,        // seconds before the bridge is killed
 
-    // Show only these (glob-friendly). Empty array = show everything.
+    // --- polling ---
+    updateInterval: 30 * 60 * 1000,  // 30 min — see "Battery" note
+    retryInterval: 5 * 60 * 1000,
+    refresh: true,           // true = poll the car; false = Kia's cached copy
+    units: "imperial",       // imperial | metric
+
+    // --- which attributes to show ([] = show everything) ---
     include: [
-      "status.engine.batteryCharge",
-      "status.engine.range",
-      "status.engine.charging",
-      "status.engine.plugedTo",
-      "status.chassis.locked",
-      "status.chassis.openDoors.*",
-      "status.climate.*",
-      "odometer.value",
-      "status.lastupdate",
+      "vehicle.ev_battery_percentage",
+      "vehicle.ev_battery_is_charging",
+      "vehicle.ev_battery_is_plugged_in",
+      "vehicle.ev_driving_range",
+      "vehicle.ev_estimated_current_charge_duration",
+      "vehicle.car_battery_percentage",
+      "vehicle.odometer",
+      "vehicle.is_locked",
+      "vehicle.*_door_is_open",
+      "vehicle.trunk_is_open",
+      "vehicle.hood_is_open",
+      "vehicle.air_control_is_on",
+      "vehicle.tire_pressure_*",
+      "vehicle.last_updated_at",
       "_meta.fetchedAt"
     ],
-
-    exclude: ["rawStatus.*", "_meta.vin"],
-
-    order: ["status.engine.*", "status.chassis.*", "odometer.*"],
-
+    exclude: ["vehicle.data.*", "vehicle.VIN"],
+    order: ["vehicle.ev_*", "vehicle.odometer", "vehicle.*_door_*"],
     labels: {
-      "status.engine.batteryCharge": "Battery",
-      "status.engine.range": "Range",
-      "status.engine.charging": "Charging",
-      "status.engine.plugedTo": "Plugged in",
-      "status.chassis.locked": "Locked",
-      "odometer.value": "Odometer",
-      "status.lastupdate": "Car last reported",
-      "_meta.fetchedAt": "Module last fetched"
+      "vehicle.ev_battery_percentage": "Battery",
+      "vehicle.ev_driving_range": "Range",
+      "vehicle.ev_battery_is_charging": "Charging",
+      "vehicle.ev_battery_is_plugged_in": "Plugged In",
+      "vehicle.car_battery_percentage": "12V Battery",
+      "vehicle.odometer": "Odometer",
+      "vehicle.is_locked": "Locked",
+      "vehicle.last_updated_at": "Car Last Reported",
+      "_meta.fetchedAt": "Last Fetched"
     },
-
     formatters: {
-      "status.engine.batteryCharge": "percent",
-      "status.engine.range": "distanceKm",
-      "status.engine.charging": "boolean",
-      "status.chassis.locked": "boolean",
-      "status.climate.temperatureSetpoint": "temperatureC",
-      "odometer.value": "distanceKm",
-      "status.lastupdate": "relativeTime",
+      "vehicle.ev_battery_percentage": "percent",
+      "vehicle.car_battery_percentage": "percent",
+      "vehicle.ev_driving_range": "distanceKm",
+      "vehicle.odometer": "distanceKm",
+      "vehicle.ev_battery_is_charging": "boolean",
+      "vehicle.ev_battery_is_plugged_in": "boolean",
+      "vehicle.is_locked": "boolean",
+      "vehicle.air_control_is_on": "boolean",
+      "vehicle.last_updated_at": "relativeTime",
       "_meta.fetchedAt": "relativeTime"
     }
   }
@@ -89,74 +112,82 @@ Add to `~/MagicMirror/config/config.js`:
 
 ### Discovering every available attribute
 
-Set `include: []` (show everything) and `exclude: []` once. Every row's label tooltip
-(hover) is its exact key path — copy the ones you want into `include` / `labels` /
-`formatters`. Keys depend on region and vehicle; common EV9 (US) paths:
+Set `include: []` and `exclude: []`, restart, and every attribute renders. Each row's
+hover tooltip is its exact key path — copy the ones you want. Everything lives under
+`vehicle.` (plus `_meta.`). The full raw API response is under `vehicle.data.*`.
+
+Common EV9 (US) paths:
 
 | Path | Meaning |
 |---|---|
-| `status.engine.batteryCharge` | Drive battery state of charge (%) |
-| `status.engine.batteryCharge12v` | 12V battery (%) |
-| `status.engine.charging` | Currently charging |
-| `status.engine.range` | Estimated range (km, before unit conversion) |
-| `status.engine.plugedTo` | Charge connector type |
-| `status.climate.active` | HVAC running |
-| `status.climate.temperatureSetpoint` | Climate setpoint |
-| `status.climate.defrost` / `steeringwheelHeat` / `sideMirrorHeat` / `rearWindowHeat` | Heating features |
-| `status.chassis.locked` | Doors locked |
-| `status.chassis.hoodOpen` / `trunkOpen` | Hood / trunk open |
-| `status.chassis.openDoors.frontLeft` … `backRight` | Individual door states |
-| `status.chassis.tirePressureWarningLamp.*` | Tyre pressure warnings |
-| `status.lastupdate` | When the car last reported to Kia |
-| `odometer.value` / `odometer.unit` | Mileage |
-| `location.latitude` / `location.longitude` / `location.speed` / `location.heading` | GPS |
-| `_meta.fetchedAt` | When this module last pulled data |
+| `vehicle.ev_battery_percentage` | Drive battery state of charge (%) |
+| `vehicle.ev_battery_soh_percentage` | Battery state of health (%) |
+| `vehicle.ev_battery_is_charging` / `ev_battery_is_plugged_in` | Charging / plugged in |
+| `vehicle.ev_driving_range` (+ `_unit`) | Estimated EV range |
+| `vehicle.ev_charging_power` | Current charge rate (kW) |
+| `vehicle.ev_estimated_current_charge_duration` | Minutes to target |
+| `vehicle.ev_charge_limits_ac` / `ev_charge_limits_dc` | Charge target % |
+| `vehicle.car_battery_percentage` | 12V battery (%) |
+| `vehicle.odometer` (+ `odometer_unit`) | Mileage |
+| `vehicle.is_locked` | Doors locked |
+| `vehicle.front_left_door_is_open` … `back_right_door_is_open` | Individual doors |
+| `vehicle.trunk_is_open` / `hood_is_open` | Trunk / frunk |
+| `vehicle.*_window_is_open` | Windows |
+| `vehicle.air_control_is_on` / `defrost_is_on` / `steering_wheel_heater_is_on` | Climate |
+| `vehicle.air_temperature` / `outside_temperature` | Temperatures |
+| `vehicle.tire_pressure_front_left` … `tire_pressure_rear_right` | Tyre pressures |
+| `vehicle.tire_pressure_*_warning_is_on` | Tyre pressure warnings |
+| `vehicle.location_latitude` / `location_longitude` | GPS |
+| `vehicle.last_updated_at` / `last_scanned_at` | Freshness timestamps |
+| `_meta.fetchedAt` | When this module last fetched |
 
 ## Config options
 
 | Option | Default | Notes |
 |---|---|---|
 | `username` / `password` / `pin` | `""` | Kia Connect / Bluelink credentials. **Required.** |
-| `brand` | `"kia"` | `"kia"` or `"hyundai"` |
-| `region` | `"US"` | `US` `CA` `EU` `AU` `KR` |
+| `brand` | `"KIA"` | `KIA` \| `HYUNDAI` \| `GENESIS` |
+| `region` | `"USA"` | `USA` `CA` `EU` `AU` `CN` `IN` `NZ` `BR` |
 | `vin` | `""` | Blank = first vehicle on the account |
+| `pythonBin` | `"python3"` | Command used to run the bridge (`PYTHON` env var also works) |
+| `fetchTimeout` | `90` | Seconds before the bridge process is killed |
 | `updateInterval` | `1800000` | ms between fetches |
 | `retryInterval` | `300000` | ms before retrying after an error |
-| `refresh` | `true` | `true` polls the car directly; `false` uses Kia's server cache (no battery cost) |
-| `loginTimeout` | `30` | seconds to wait for login |
+| `refresh` | `true` | `true` wakes the car; `false` uses Kia's server cache (no battery cost) |
 | `units` | `"imperial"` | `"imperial"` or `"metric"` for distance/temp/speed formatters |
 | `decimals` | `1` | rounding for numeric formatters |
-| `nullText` | `"—"` | shown for `null` / `undefined` values |
-| `include` | `[]` example populated | glob paths to show; empty = all |
-| `exclude` | `["rawStatus.*", "_meta.vin"]` | glob paths to hide |
+| `nullText` | `"—"` | shown for `null` / `undefined` |
+| `include` | `[]` | glob paths to show; empty = all |
+| `exclude` | `["vehicle.data.*", "vehicle.VIN"]` | glob paths to hide |
 | `order` | `[]` | glob paths shown first, in listed order |
 | `labels` | `{}` | key path → display label |
 | `formatters` | see defaults | key path → formatter name |
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
-| `maxWidth` | `"420px"` | CSS max-width of the module |
+| `maxWidth` | `"420px"` | CSS max-width |
 | `animationSpeed` | `500` | DOM update fade (ms) |
 | `debug` | `false` | extra logging |
 
 ### Formatters
 
 `raw`, `boolean` (→ Yes/No), `percent`, `distanceKm`, `distanceMi`, `temperatureC`,
-`speedKph`, `datetime`, `relativeTime`. Distance/temp/speed formatters honour `units`.
+`speedKph`, `datetime`, `relativeTime`. Distance/temp/speed honour `units`.
 
 ### Glob syntax
 
-`*` matches within one path segment, `**` matches across segments, `?` matches one char.
-A plain string with no wildcard matches that exact path **or** anything beneath it
-(`status.chassis` matches `status.chassis.locked`).
+`*` matches within one path segment, `**` across segments, `?` one char. A plain string
+with no wildcard matches that exact path **or** anything beneath it.
 
 ## Notes
 
-- **12V battery:** every `refresh: true` poll wakes the car. Kia's own app polls
-  roughly every 30–60 min. Going lower risks draining the 12V battery, especially in
-  cold weather. Use `refresh: false` for frequent updates from Kia's cache.
-- **Credentials** live in `config.js`. `config.js` and `secrets.json` are git-ignored here.
-- Control commands (lock/unlock/start charge) are intentionally **not** exposed — this
-  module is read-only.
+- **12V battery:** every `refresh: true` poll wakes the car. Kia's own app polls roughly
+  every 30–60 min. Lower risks draining the 12V battery in cold weather. Use
+  `refresh: false` for frequent updates from Kia's cache.
+- Read-only: no lock/unlock/charge commands are exposed.
+- Test the bridge directly:
+  ```bash
+  echo '{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA","refresh":false}' | python3 kia_bridge.py
+  ```
 - Trigger an immediate refresh from another module with
   `this.sendNotification("MMM_KIA_ACCESS_REFRESH")`.
 
@@ -168,9 +199,8 @@ npm test
 
 ## Credits
 
-- [`bluelinky`](https://github.com/Hacksore/bluelinky) — Node Kia/Hyundai Connect client
-- API behaviour cross-referenced with
-  [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
+- [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
+- Formatter/flatten design informed by [`bluelinky`](https://github.com/Hacksore/bluelinky)
 
 ## License
 
