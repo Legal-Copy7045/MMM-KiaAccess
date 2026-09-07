@@ -65,15 +65,26 @@ Module.register("MMM-KiaAccess", {
     showUpdatedFooter: true,
     maxWidth: "420px",
     animationSpeed: 500,
-    debug: false
+    debug: false,
+
+    // ---- graphical widgets (all off by default) ----
+    visuals: {
+      enabled: false,
+      battery: true, // horizontal battery gauge (SoC + charging bolt + range/kW caption)
+      car: true, // top-down car status diagram (doors / hood / trunk / lock / charge port / tyres)
+      carLabel: "EV9", // text under the lock glyph ("" to hide)
+      rowIcons: true, // Font Awesome icon before each table row
+      width: 210 // px width for the battery gauge; car scales with it
+    },
+    icons: {} // key path -> Font Awesome class, overrides the built-in map
   },
 
   getStyles() {
-    return ["MMM-KiaAccess.css"];
+    return ["MMM-KiaAccess.css", "font-awesome.css"];
   },
 
   getScripts() {
-    return [this.file("flatten.js")];
+    return [this.file("flatten.js"), this.file("visuals.js")];
   },
 
   start() {
@@ -82,6 +93,8 @@ Module.register("MMM-KiaAccess", {
     this.loading = true;
     this.lastUpdated = null;
     this.utils = typeof KiaAccessUtils !== "undefined" ? KiaAccessUtils : null;
+    this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
+    this.flatMap = null;
 
     if (!this.config.username || !this.config.password) {
       this.errorMessage = "Set username / password / pin in config.js";
@@ -151,7 +164,59 @@ Module.register("MMM-KiaAccess", {
       return;
     }
     const flat = this.utils.flatten(this.rawPayload);
+    this.flatMap = flat;
     this.viewData = this.utils.selectEntries(flat, this.config);
+  },
+
+  // read canonical vehicle.* values straight from the flat map, independent of
+  // the include/exclude list, so the diagram is always complete
+  visualState() {
+    const f = this.flatMap || {};
+    const bool = (k) => {
+      const v = f["vehicle." + k];
+      if (v === true || v === "true" || v === 1 || v === "1") return true;
+      if (v === false || v === "false" || v === 0 || v === "0") return false;
+      return null;
+    };
+    const num = (k) => {
+      const v = Number(f["vehicle." + k]);
+      return isFinite(v) ? v : null;
+    };
+    return {
+      batteryPct: num("ev_battery_percentage"),
+      rangeKm: num("ev_driving_range"),
+      chargeKw: num("ev_charging_power"),
+      charging: bool("ev_battery_is_charging"),
+      plugged: bool("ev_battery_is_plugged_in"),
+      locked: bool("is_locked"),
+      doorFL: bool("front_left_door_is_open"),
+      doorFR: bool("front_right_door_is_open"),
+      doorRL: bool("back_left_door_is_open"),
+      doorRR: bool("back_right_door_is_open"),
+      hood: bool("hood_is_open"),
+      trunk: bool("trunk_is_open"),
+      tyreAny: bool("tire_pressure_all_warning_is_on"),
+      tyreFL: bool("tire_pressure_front_left_warning_is_on"),
+      tyreFR: bool("tire_pressure_front_right_warning_is_on"),
+      tyreRL: bool("tire_pressure_rear_left_warning_is_on"),
+      tyreRR: bool("tire_pressure_rear_right_warning_is_on")
+    };
+  },
+
+  batteryCaption(s) {
+    const bits = [];
+    if (s.rangeKm != null) {
+      const mi = this.config.units === "metric";
+      bits.push(
+        mi
+          ? Math.round(s.rangeKm) + " km range"
+          : Math.round(s.rangeKm * 0.621371) + " mi range"
+      );
+    }
+    if (s.charging === true && s.chargeKw) bits.push("⚡ " + s.chargeKw + " kW");
+    else if (s.plugged === true) bits.push("plugged in");
+    else if (s.plugged === false) bits.push("unplugged");
+    return bits.join(" · ");
   },
 
   // allow live config edits via MM's module dev tooling / notifications
@@ -198,11 +263,47 @@ Module.register("MMM-KiaAccess", {
       return wrapper;
     }
 
+    const V = this.visuals;
+    const vis = this.config.visuals || {};
+    if (V && vis.enabled && this.flatMap) {
+      const s = this.visualState();
+      let html = "";
+      if (vis.battery && s.batteryPct != null) {
+        html += V.batteryGauge(s.batteryPct, {
+          charging: s.charging,
+          plugged: s.plugged,
+          caption: this.batteryCaption(s),
+          width: vis.width || 210
+        });
+      }
+      if (vis.car) {
+        html += V.carDiagram(s, {
+          width: Math.round((vis.width || 210) * 0.9),
+          label: vis.carLabel != null ? vis.carLabel : "EV9"
+        });
+      }
+      if (html) {
+        const panel = document.createElement("div");
+        panel.className = "kiaaccess-visuals";
+        panel.innerHTML = html;
+        wrapper.appendChild(panel);
+      }
+    }
+
+    const rowIcons = !!(V && vis.enabled && vis.rowIcons);
     const table = document.createElement("table");
     table.className = "kiaaccess-table small";
 
     this.viewData.forEach((entry) => {
       const row = document.createElement("tr");
+
+      if (rowIcons) {
+        const ic = document.createElement("td");
+        ic.className = "kiaaccess-icon";
+        const cls = V.iconFor(entry.key, this.config.icons);
+        if (cls) ic.innerHTML = '<i class="' + this.escape(cls) + '"></i>';
+        row.appendChild(ic);
+      }
 
       const label = document.createElement("td");
       label.className = "kiaaccess-label";
