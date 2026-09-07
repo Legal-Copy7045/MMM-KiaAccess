@@ -49,11 +49,14 @@
   function batteryGauge(pct, o) {
     o = o || {};
     var w = o.width || 210;
-    var h = 50;
-    var bx = 8,
-      by = 8,
-      bw = w - 34,
-      bh = 34;
+    var h = 46;
+    // the battery BODY is centred in the svg (the terminal nub sits in the
+    // right margin) so the % text sits exactly on the svg centre-line and
+    // lines up with the lock icon in the car above it
+    var bw = w - 24;
+    var bx = (w - bw) / 2; // -> body centre = w/2
+    var by = 6;
+    var bh = 34;
     var innerW = Math.max(0, Math.min(1, (Number(pct) || 0) / 100)) * (bw - 6);
     var col = batteryColor(pct);
     var label = pct == null || isNaN(pct) ? "—" : Math.round(pct) + "%";
