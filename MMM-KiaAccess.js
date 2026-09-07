@@ -2,11 +2,13 @@
 
 /* MMM-KiaAccess
  * A MagicMirror² module that shows configurable Kia Connect / Bluelink data.
- * Built for the Kia EV9 but works with any bluelinky-supported Hyundai/Kia.
+ * Built for the Kia EV9 (Kia USA) but works with any Hyundai/Kia supported by
+ * the `hyundai_kia_connect_api` Python library.
  *
- * By design the node_helper returns the *entire* vehicle payload and the
- * frontend flattens it into `path -> value` rows. You then choose what to show
- * with `include` / `exclude` / `order` / `labels` / `formatters`.
+ * By design the node_helper returns the *entire* vehicle attribute set and the
+ * frontend flattens it into `path -> value` rows (all keys are under `vehicle.`,
+ * plus a `_meta.` block). You choose what to show with
+ * `include` / `exclude` / `order` / `labels` / `formatters`.
  */
 Module.register("MMM-KiaAccess", {
   defaults: {
@@ -14,41 +16,46 @@ Module.register("MMM-KiaAccess", {
     username: "",
     password: "",
     pin: "",
-    brand: "kia", // "kia" | "hyundai"
-    region: "US", // "US" | "CA" | "EU" | "AU" | "KR"
+    brand: "KIA", // "KIA" | "HYUNDAI" | "GENESIS"
+    region: "USA", // "USA" | "CA" | "EU" | "AU" | "CN" | "IN" | "NZ" | "BR"
     vin: "", // optional; first vehicle on the account is used when blank
+
+    // ---- runtime ----
+    pythonBin: "python3", // command used to run kia_bridge.py
+    fetchTimeout: 90, // seconds before the bridge process is killed
 
     // ---- polling ----
     updateInterval: 30 * 60 * 1000, // 30 min. Be gentle: frequent polls drain the 12V battery.
     retryInterval: 5 * 60 * 1000,
     refresh: true, // true = ask the car for live data, false = Kia's cached copy
-    loginTimeout: 30, // seconds
 
     // ---- display ----
     header: "Kia",
     units: "imperial", // "imperial" | "metric"
     decimals: 1,
     nullText: "—",
-    include: [], // e.g. ["status.engine.batteryCharge", "status.chassis.*", "odometer.*"]
-    exclude: ["rawStatus.*", "_meta.vin"],
+    include: [], // e.g. ["vehicle.ev_battery_percentage", "vehicle.*_door_is_open", "vehicle.odometer"]
+    exclude: ["vehicle.data.*", "vehicle.VIN"], // raw API dump + VIN hidden by default
     order: [], // paths / globs listed here are shown first, in this order
     labels: {
-      // "status.engine.batteryCharge": "Battery",
+      // "vehicle.ev_battery_percentage": "Battery",
     },
     formatters: {
       // key path -> one of:
       // raw | boolean | percent | distanceKm | distanceMi |
       // temperatureC | speedKph | datetime | relativeTime
-      "status.engine.batteryCharge": "percent",
-      "status.engine.range": "distanceKm",
-      "status.engine.charging": "boolean",
-      "status.engine.plugedTo": "raw",
-      "status.chassis.locked": "boolean",
-      "status.climate.temperatureSetpoint": "temperatureC",
-      "status.lastupdate": "relativeTime",
-      "odometer.value": "distanceKm",
-      "location.latitude": "raw",
-      "location.longitude": "raw",
+      "vehicle.ev_battery_percentage": "percent",
+      "vehicle.ev_battery_soh_percentage": "percent",
+      "vehicle.car_battery_percentage": "percent",
+      "vehicle.ev_driving_range": "distanceKm",
+      "vehicle.total_driving_range": "distanceKm",
+      "vehicle.odometer": "distanceKm",
+      "vehicle.ev_battery_is_charging": "boolean",
+      "vehicle.ev_battery_is_plugged_in": "boolean",
+      "vehicle.is_locked": "boolean",
+      "vehicle.air_control_is_on": "boolean",
+      "vehicle.last_updated_at": "relativeTime",
+      "vehicle.last_scanned_at": "relativeTime",
       "_meta.fetchedAt": "relativeTime"
     },
 
@@ -103,8 +110,8 @@ Module.register("MMM-KiaAccess", {
       region: c.region,
       vin: c.vin,
       refresh: c.refresh,
-      loginTimeout: c.loginTimeout,
-      includeFullStatus: c.include.some((p) => String(p).indexOf("fullStatus") === 0)
+      pythonBin: c.pythonBin,
+      fetchTimeout: c.fetchTimeout
     };
   },
 
