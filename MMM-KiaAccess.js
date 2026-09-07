@@ -319,9 +319,9 @@ Module.register("MMM-KiaAccess", {
         const c = document.createElement("div");
         c.className = "kiaaccess-carwrap";
         c.innerHTML = V.carDiagram(s, {
-          // width here sizes the CAR; the SVG ends ~18% wider for the charger
-          // strip, so scale down to keep the whole thing near the gauge width
-          width: Math.round((vis.width || 210) * 0.8),
+          // the car SVG is centred on the car body, so matching the gauge
+          // width lines the car up with the battery gauge below it
+          width: vis.width || 210,
           label: vis.carLabel != null ? vis.carLabel : "EV9"
         });
         panel.appendChild(c);
@@ -337,7 +337,7 @@ Module.register("MMM-KiaAccess", {
         const detail = this.batteryDetailEntries();
         if (detail.length) {
           const dl = document.createElement("div");
-          dl.className = "kiaaccess-batt-detail xsmall";
+          dl.className = "kiaaccess-batt-detail";
           detail.forEach((e) => {
             const r = document.createElement("div");
             r.innerHTML =
@@ -368,7 +368,7 @@ Module.register("MMM-KiaAccess", {
 
     const rowIcons = !!(V && vis.enabled && vis.rowIcons);
     const table = document.createElement("table");
-    table.className = "kiaaccess-table xsmall";
+    table.className = "kiaaccess-table";
 
     this.viewData.forEach((entry) => {
       const row = document.createElement("tr");

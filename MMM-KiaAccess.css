@@ -5,15 +5,16 @@
 .kiaaccess-table {
   border-collapse: collapse;
   width: 100%;
+  font-size: 16px;
 }
 
 .kiaaccess-table td {
-  padding: 1px 0;
+  padding: 1.5px 0;
   vertical-align: top;
 }
 
 .kiaaccess-label {
-  padding-right: 12px;
+  padding-right: 14px;
   white-space: nowrap;
   opacity: 0.7;
 }
@@ -51,9 +52,10 @@
 
 .kiaaccess-batt-detail {
   margin-top: 5px;
-  line-height: 1.4;
+  line-height: 1.45;
   width: 100%;
   max-width: 220px;
+  font-size: 16px;
 }
 
 .kiaaccess-batt-detail > div {
@@ -72,8 +74,8 @@
 }
 
 .kiaaccess-icon {
-  width: 1.3em;
-  padding-right: 8px;
+  width: 1.25em;
+  padding-right: 12px;
   text-align: center;
   opacity: 0.65;
 }

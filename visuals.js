@@ -151,10 +151,11 @@
   function carDiagram(s, o) {
     s = s || {};
     o = o || {};
-    var CARW = 200;
-    var VBW = 236; // fixed canvas; car occupies x 0..200, charger strip x 176..228
-    var unit = (o.width || 190) / CARW; // 1 user unit = constant px in every state
-    var w = VBW * unit;
+    // Fixed canvas, centred on the car body (its centre is x100, so the
+    // viewBox spans -32..232). Charger strip lives at x 200..228; when
+    // unplugged the left/right margins are equal so the car sits dead centre.
+    var VB = "-32 0 264 330";
+    var w = o.width || 190;
 
     var tyre = function (which) {
       return s["tyre" + which] === true || s.tyreAny === true;
@@ -228,7 +229,7 @@
 
     return (
       '<svg class="kiaaccess-car" xmlns="http://www.w3.org/2000/svg" ' +
-      'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ' + VBW + ' 330" width="' + w +
+      'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="' + VB + '" width="' + w +
       '" role="img" aria-label="Vehicle status, front at top">' +
       // body (front nose rounded, rear squarer)
       '<path d="M 40 58 Q 40 22 74 22 L 126 22 Q 160 22 160 58 L 160 284 ' +
