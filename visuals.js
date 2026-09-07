@@ -202,11 +202,12 @@
       // hood (frunk) + tailgate
       panel(s.hood, 66, 24, 68, 20, [0, -8]) +
       panel(s.trunk, 66, 278, 68, 20, [0, 8]) +
-      // doors
-      panel(s.doorFL, 34, 104, 14, 44, [-8, 0]) +
-      panel(s.doorRL, 34, 156, 14, 48, [-8, 0]) +
-      panel(s.doorFR, 152, 104, 14, 44, [8, 0]) +
-      panel(s.doorRR, 152, 156, 14, 48, [8, 0]) +
+      // doors — centred in the gap between the front and rear wheels,
+      // clear of the door mirrors
+      panel(s.doorFL, 34, 112, 14, 42, [-8, 0]) +
+      panel(s.doorRL, 34, 162, 14, 46, [-8, 0]) +
+      panel(s.doorFR, 152, 112, 14, 42, [8, 0]) +
+      panel(s.doorRR, 152, 162, 14, 46, [8, 0]) +
       // wheels — front axle well forward of the doors, larger tyres
       wheel(29, 60, tyre("FL")) +
       wheel(159, 60, tyre("FR")) +
