@@ -1,0 +1,18 @@
+{
+  "name": "drive battery at 6% -> ev_battery_critical, no faults",
+  "flat": {
+    "vehicle.ev_battery_percentage": 6,
+    "vehicle.car_battery_percentage": 80,
+    "vehicle.is_locked": "true",
+    "vehicle.brake_fluid_warning_is_on": "false"
+  },
+  "expectState": { "batteryPct": 6, "faults": [] },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "ev_battery_critical": true,
+    "ev_battery_low": true,
+    "vehicle_fault": false,
+    "battery_12v_critical": false
+  }
+}

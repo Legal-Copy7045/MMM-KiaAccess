@@ -449,6 +449,9 @@ The car diagram:
   vs `outside_temperature`), neutral white when the direction is unknown.
 - **wheels** show a `!` on a per-tyre pressure warning (all four for the
   "all tyres" warning).
+- **critical issue** → a pulsing red warning triangle in the front-right margin
+  whenever any `critical` condition is active (tyre pressure, a fault lamp, a
+  hard-low battery). Shows regardless of whether `notifications` are enabled.
 - **plugged in** → a wall-box + cable appear at the rear-right charge port.
   Charging: the port pulses green and particles flow charger → car. Exporting
   (`ev_v2l_status` / `ev_v2x_status`): the flow reverses in cyan. Plugged but
@@ -565,8 +568,11 @@ alert stays on screen until the condition **clears** (set `criticalAlertSeconds`
 | check | default | fires when |
 |---|---|---|
 | `tyrePressure` | **critical** | a tyre-pressure warning is on |
+| `vehicleFault` | **critical** | any real fault lamp the car reports is on — brake fluid, 12V system, ABS, airbag (not washer fluid / key-fob battery) |
 | `evBatteryLow` | warning | drive battery ≤ `belowPct` (20) |
+| `evBatteryCritical` | **critical** | drive battery ≤ `belowPct` (8) — a hard floor alongside `evBatteryLow` |
 | `battery12vLow` | warning | 12V battery ≤ `belowPct` (55) |
+| `battery12vCritical` | **critical** | 12V battery ≤ `belowPct` (40) — "the car may not start" |
 | `battery12vDrain` | warning | 12V fell `dropPct` over `overHours` while parked — the "won't start on a cold morning" one |
 | `unlocked` | warning | vehicle unlocked (muted while driving) |
 | `doorOpen` / `hoodOpen` / `liftgateOpen` | warning | that part is open |

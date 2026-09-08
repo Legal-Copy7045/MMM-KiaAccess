@@ -75,6 +75,30 @@
       return isFinite(ms) && ms >= 0 ? ms / 864e5 : null;
     })();
 
+    // genuine fault lamps the car reports (only those that exist AND are on).
+    // washer fluid / key-fob battery are deliberately not here — not "critical".
+    var FAULTS = [
+      ["brake_oil_warning_is_on", "Brake fluid low"],
+      ["brake_fluid_warning_is_on", "Brake fluid low"],
+      ["breaking_oil_warning_is_on", "Brake fluid low"],
+      ["battery_auxiliary_fail_warning_is_on", "12V battery system fault"],
+      ["air_bag_warning_is_on", "Airbag warning"],
+      ["srs_warning_is_on", "Airbag (SRS) warning"],
+      ["abs_warning_is_on", "ABS fault"],
+      ["esc_warning_is_on", "Stability control fault"],
+      ["engine_oil_warning_is_on", "Engine oil warning"],
+      ["break_pad_warning_is_on", "Brake pad wear"],
+      ["brake_pad_warning_is_on", "Brake pad wear"]
+    ];
+    var faults = [];
+    var faultSeen = {};
+    FAULTS.forEach(function (row) {
+      if (bool(row[0]) === true && !faultSeen[row[1]]) {
+        faultSeen[row[1]] = true;
+        faults.push(row[1]);
+      }
+    });
+
     return {
       batteryPct: num("ev_battery_percentage"),
       rangeKm: num("ev_driving_range"),
@@ -111,6 +135,7 @@
       car12vPct: num("car_battery_percentage"),
       chargeLimitPct: chargeLimitPct,
       capacityKwh: num("ev_battery_capacity"),
+      faults: faults, // [] = no fault lamps; names of any that are on
       history: opts.history || [],
       tokenAgeDays: tokenAgeDays,
       otpLifetimeDays: opts.otpLifetimeDays,

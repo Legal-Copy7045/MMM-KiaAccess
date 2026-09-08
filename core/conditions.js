@@ -38,8 +38,11 @@
   // built-in per-check config; user config is merged over this per key
   var CHECK_DEFAULTS = {
     evBatteryLow: { enabled: true, level: "warning", belowPct: 20, clearPct: 25 },
+    evBatteryCritical: { enabled: true, level: "critical", belowPct: 8, clearPct: 12 },
     battery12vLow: { enabled: true, level: "warning", belowPct: 55, clearPct: 60 },
+    battery12vCritical: { enabled: true, level: "critical", belowPct: 40, clearPct: 45 },
     battery12vDrain: { enabled: true, level: "warning", dropPct: 8, overHours: 12 },
+    vehicleFault: { enabled: true, level: "critical" },
     otpExpiring: { enabled: true, level: "warning" }, // lifetimeDays / warnDays fall back to config
     unlocked: { enabled: true, level: "warning" },
     doorOpen: { enabled: true, level: "warning" },
@@ -112,7 +115,21 @@
       });
     }
     threshold("ev_battery_low", num(s.batteryPct), checkCfg(cfg, "evBatteryLow"), "EV battery");
+    threshold("ev_battery_critical", num(s.batteryPct), checkCfg(cfg, "evBatteryCritical"), "EV battery critically");
     threshold("battery_12v_low", num(s.car12vPct), checkCfg(cfg, "battery12vLow"), "12V battery");
+    threshold("battery_12v_critical", num(s.car12vPct), checkCfg(cfg, "battery12vCritical"), "12V battery critically");
+
+    // ---- vehicle fault lamps (brake fluid, 12V system, ABS, airbag, …) ----
+    var cFault = checkCfg(cfg, "vehicleFault");
+    if (cFault.enabled) {
+      var faults = Array.isArray(s.faults) ? s.faults : null;
+      var fActive = faults == null ? null : faults.length > 0;
+      emit("vehicle_fault", cFault.level, fActive,
+        fActive === true
+          ? "Warning light: " + faults.join(", ")
+          : "No fault lights",
+        { faults: faults || [] });
+    }
 
     // ---- 12V draining while parked ----
     var cVD = checkCfg(cfg, "battery12vDrain");

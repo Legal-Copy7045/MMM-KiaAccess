@@ -228,6 +228,21 @@
     return heatLines(LG_X + 6, LG_X + LG_W - 6, [LG_Y + 9, LG_Y + 18, LG_Y + 27], COL.heat);
   }
 
+  // critical-issue badge — a warning triangle in the right margin, up toward
+  // the front of the car (clear of the charger, which renders lower/rear)
+  function criticalBadge() {
+    return (
+      '<g transform="translate(189 70)" class="kiaaccess-critical">' +
+      '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
+      'fill="' + COL.bad + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
+      pulse("opacity", "0.5", "1", 1.05) +
+      "</path>" +
+      '<rect x="20.5" y="11" width="3" height="12" rx="1.5" fill="#fff"/>' +
+      '<circle cx="22" cy="29" r="2" fill="#fff"/>' +
+      "</g>"
+    );
+  }
+
   // air conditioning: a vent bar at the front + four wavy streams rolling back
   function airWaves(col) {
     var g = '<rect x="70" y="96" width="60" height="4" rx="2" fill="' + col + '" opacity="0.55"/>';
@@ -285,7 +300,8 @@
    *   doorFL/FR/RL/RR (open), winFL/FR/RL/RR (window open), hood (frunk),
    *   trunk (liftgate), sunroof;
    *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null);
-   *   tyreFL/FR/RL/RR, tyreAny
+   *   tyreFL/FR/RL/RR, tyreAny;
+   *   critical (bool) -> shows a warning triangle in the front-right margin
    * @param {object} o { width, battery:false to omit the centre battery }
    */
   function carDiagram(s, o) {
@@ -445,6 +461,8 @@
       (o.battery === false
         ? ""
         : verticalBattery(s.batteryPct, s.charging)) +
+      // critical-issue warning triangle (front-right margin)
+      (s.critical === true ? criticalBadge() : "") +
       "</svg>"
     );
   }

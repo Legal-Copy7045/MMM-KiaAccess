@@ -488,10 +488,28 @@ Module.register("MMM-KiaAccess", {
 
   // edge-triggered vehicle-state notifications
   processConditions() {
+    if (!this.conditions || !this.flatMap) return;
     const cfg = this.config.notifications || {};
-    if (!cfg.enabled || !this.conditions || !this.flatMap) return;
 
     const res = this.conditions.evaluate(this.visualState(), cfg, this.prevCond);
+
+    // any active critical condition -> the diagram shows a warning triangle
+    // (independent of whether the `alert` notifications are enabled)
+    this.hasCritical = res.conditions.some(
+      (c) => c.level === "critical" && c.active === true
+    );
+
+    if (cfg.enabled) this.fireNotifications(res, cfg);
+
+    // keep prevCond fresh for the hysteresis dead-bands regardless of alerts
+    res.conditions.forEach((c) => {
+      if (c.active !== null) this.prevCond[c.reason] = c.active;
+    });
+    this.prevCond._charging = res.meta.charging;
+    this.firstConditionRun = false;
+  },
+
+  fireNotifications(res, cfg) {
     const vin = (this.rawPayload && this.rawPayload.vehicle && this.rawPayload.vehicle.VIN) || null;
     const startup = this.firstConditionRun;
     const startupAllows = (level) =>
@@ -538,11 +556,7 @@ Module.register("MMM-KiaAccess", {
           }
         }
       }
-      if (c.active !== null) this.prevCond[c.reason] = c.active;
     });
-
-    this.prevCond._charging = res.meta.charging;
-    this.firstConditionRun = false;
   },
 
   // allow live config edits via MM's module dev tooling / notifications
@@ -859,6 +873,7 @@ Module.register("MMM-KiaAccess", {
 
     if (V && vis.enabled) {
       const s = this.visualState();
+      s.critical = !!this.hasCritical; // set by processConditions()
       const panel = document.createElement("div");
       panel.className = "kiaaccess-visuals";
 
