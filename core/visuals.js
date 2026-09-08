@@ -40,12 +40,15 @@
     return Math.round(v) + "°";
   }
 
-  // minutes -> "2h 45m" / "45m" / "3h"  (null unless a positive number)
+  // minutes -> "2h 45m" / "45m" / "3h"  (null unless a positive number).
+  // 10h+ drops the minutes ("12h") — the precision is noise and it keeps the
+  // on-diagram readout narrow.
   function hoursMins(min) {
     if (min == null || isNaN(min) || min <= 0) return null;
     var t = Math.round(min);
     var h = Math.floor(t / 60);
     var m = t % 60;
+    if (h >= 10) return h + "h";
     return h ? (m ? h + "h " + m + "m" : h + "h") : m + "m";
   }
 
@@ -417,8 +420,8 @@
         : "";
 
     // live charge readout — only while actually charging: kW drawn + "2h 45m" to
-    // the current target. Sits under the wall box, clear of the car body and
-    // inside the right viewBox edge (x 232).
+    // the current target. Centred under the wall box (its centre is x214),
+    // clear of the car body, kept inside the right viewBox edge (x 232).
     var chargeInfo = "";
     if (s.charging === true) {
       var kwNum = Number(s.chargeKw);
@@ -428,13 +431,13 @@
       var eta = hoursMins(s.chargeEtaMin);
       var rows = [];
       if (kw) rows.push([kw, COL.ok]);
-      if (eta) rows.push(["~" + eta, COL.text]);
+      if (eta) rows.push([eta, COL.text]);
       if (rows.length) {
         chargeInfo =
-          '<g transform="translate(205 289)" text-anchor="middle" ' +
+          '<g transform="translate(214 289)" text-anchor="middle" ' +
           'style="paint-order:stroke;stroke:#000;stroke-width:2.6px">' +
           rows.map(function (r, i) {
-            return '<text x="0" y="' + (i * 11.5) + '" font-size="9.5" ' +
+            return '<text x="0" y="' + (i * 11) + '" font-size="9" ' +
               'font-weight="700" fill="' + r[1] + '">' + esc(r[0]) + "</text>";
           }).join("") +
           "</g>";
