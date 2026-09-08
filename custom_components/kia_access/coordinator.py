@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import kia_client
@@ -39,6 +40,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(minutes=minutes),
         )
         self.entry = entry
+        self.last_options: dict = dict(entry.options)
         self.vehicle: dict = {}
         self.meta: dict = {}
         self._prev_cond: dict = {}
@@ -68,8 +70,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         try:
             result = await self.hass.async_add_executor_job(kia_client.fetch, job)
         except kia_client.OtpRequired as err:
-            raise UpdateFailed(
-                "Kia needs re-enrollment (OTP). Re-add the integration."
+            # triggers HA's reauth flow instead of an endless retry
+            raise ConfigEntryAuthFailed(
+                "Kia needs re-enrollment (one-time code)."
             ) from err
         except kia_client.ClientError as err:
             raise UpdateFailed(str(err)) from err
@@ -77,7 +80,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"{type(err).__name__}: {err}") from err
 
         self.meta = result.get("meta", {}) or {}
-        # persist a rotated refresh token back into the config entry
+        # persist a rotated refresh token back into the config entry.
+        # async_update_entry fires the update listener, but _async_options_updated
+        # ignores data-only changes so this does not reload the integration.
         new_token = self.meta.pop("token", None)
         if new_token and new_token != self.entry.data.get(CONF_TOKEN):
             self.hass.config_entries.async_update_entry(
@@ -93,6 +98,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         using the exact same rules as the MagicMirror module (conditions.py)."""
         flat = {f"vehicle.{k}": v for k, v in self.vehicle.items()
                 if not isinstance(v, (dict, list))}
+        if self.meta.get("tokenEnrolledAt"):
+            flat["_meta.tokenEnrolledAt"] = self.meta["tokenEnrolledAt"]
         cfg = self.entry.options.get("notifications", {}) or {}
         state = build_state(flat, {})
         try:
@@ -102,6 +109,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return
 
         startup = self._first_alert_run
+        # match the MagicMirror module: on the first run after (re)start, only
+        # fire what `notifyOnStartup` allows (default: critical only)
+        startup_mode = cfg.get("notifyOnStartup", "critical")
+
+        def _startup_allows(level: str) -> bool:
+            return startup_mode is True or (startup_mode == "critical" and level == "critical")
+
         vin = self.vehicle.get("VIN")
         for c in res["conditions"]:
             reason = c["reason"]
@@ -111,7 +125,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 not c["oneShot"] and c["active"] is False and was is True
                 and self._announced.get(reason)
             )
-            fire = became if startup else (became or cleared)
+            if startup:
+                fire = became and _startup_allows(c["level"])
+            else:
+                fire = became or cleared
             if became and fire:
                 self._announced[reason] = True
             if cleared:
@@ -131,7 +148,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     },
                 )
 
-        self._prev_cond = {c["reason"]: c["active"] for c in res["conditions"]}
+        # keep the last *known* state per reason (don't clobber with None when a
+        # value is temporarily unknown) — matches conditions.js hysteresis intent
+        for c in res["conditions"]:
+            if c["active"] is not None:
+                self._prev_cond[c["reason"]] = c["active"]
         self._prev_cond["_charging"] = res["meta"]["charging"]
         self._first_alert_run = False
 

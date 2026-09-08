@@ -16,10 +16,15 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
     def __init__(self, coordinator: KiaAccessCoordinator, key: str) -> None:
         super().__init__(coordinator)
         self._key = key
-        vin = str(coordinator.vehicle.get("VIN") or coordinator.entry.entry_id)
-        self._attr_unique_id = f"{vin}_{key}"
+        # Stable identity: never derive from VIN. A brand-new car reports VIN=None
+        # until its first sync; if identity flipped to the VIN later, every entity
+        # and the device would be recreated. entry.unique_id is region:brand:user
+        # (set in the config flow) and never changes.
+        ident = coordinator.entry.unique_id or coordinator.entry.entry_id
+        self._attr_unique_id = f"{ident}_{key}"
+        vin = coordinator.vehicle.get("VIN")
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, vin)},
+            identifiers={(DOMAIN, ident)},
             manufacturer=str(coordinator.vehicle.get("manufacturer") or "Kia"),
             model=str(coordinator.vehicle.get("model") or ""),
             name=str(
@@ -27,6 +32,7 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
                 or coordinator.vehicle.get("model")
                 or "Kia"
             ),
+            serial_number=str(vin) if vin else None,
         )
 
     @property

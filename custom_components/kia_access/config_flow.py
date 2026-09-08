@@ -48,6 +48,40 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._job: dict[str, Any] = {}
         self._vm = None
+        self._reauth_entry = None
+
+    async def async_step_reauth(self, entry_data: dict) -> FlowResult:
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        self._job = dict(entry_data)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            self._job.update(user_input)
+            try:
+                result = await self.hass.async_add_executor_job(self._try_login)
+            except _NeedOtp:
+                return await self.async_step_otp()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Kia reauth failed", exc_info=True)
+                errors["base"] = "auth"
+            else:
+                return self._finish(result)
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("password"): str,
+                    vol.Optional(CONF_PIN, default=self._job.get(CONF_PIN, "")): str,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"username": self._job.get("username", "")},
+        )
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
@@ -113,6 +147,21 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return kia_client.token_dict(self._vm)
 
     def _finish(self, token: dict | None) -> FlowResult:
+        if self._reauth_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                self._reauth_entry,
+                data={
+                    **self._reauth_entry.data,
+                    "password": self._job["password"],
+                    CONF_PIN: self._job.get(CONF_PIN, ""),
+                    CONF_TOKEN: token,
+                },
+            )
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+            )
+            return self.async_abort(reason="reauth_successful")
+
         data = {
             "username": self._job["username"],
             "password": self._job["password"],

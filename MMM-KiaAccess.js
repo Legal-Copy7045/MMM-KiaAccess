@@ -216,8 +216,18 @@ Module.register("MMM-KiaAccess", {
       this.config.mqtt.homeAssistant
     );
 
-    if (!this.config.username || !this.config.password) {
-      this.errorMessage = "Set username / password / pin in config.js";
+    const src = String(this.config.source || "kia").toLowerCase();
+    let configErr = null;
+    if (src === "homeassistant") {
+      const ha = this.config.homeassistant || {};
+      if (!ha.url || !ha.token) {
+        configErr = "Set homeassistant.url and homeassistant.token in config.js";
+      }
+    } else if (!this.config.username || !this.config.password) {
+      configErr = "Set username / password / pin in config.js";
+    }
+    if (configErr) {
+      this.errorMessage = configErr;
       this.loading = false;
     } else {
       this.scheduleFetch(0);

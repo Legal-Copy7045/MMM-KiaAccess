@@ -18,6 +18,11 @@
         "title": "One-time code",
         "description": "Enter the one-time code Kia just sent to {dest}.",
         "data": { "code": "Code" }
+      },
+      "reauth_confirm": {
+        "title": "Kia Access — sign in again",
+        "description": "The token for {username} expired. Re-enter the password (and PIN); you may be asked for a new one-time code.",
+        "data": { "password": "Password", "pin": "PIN" }
       }
     },
     "error": {
@@ -25,7 +30,8 @@
       "otp": "That code was not accepted. Try again."
     },
     "abort": {
-      "already_configured": "This Kia account is already set up."
+      "already_configured": "This Kia account is already set up.",
+      "reauth_successful": "Kia Access is signed in again."
     }
   },
   "options": {

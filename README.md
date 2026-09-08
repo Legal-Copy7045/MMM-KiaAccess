@@ -592,6 +592,11 @@ Topics: `kia/ev9/ev_battery_percentage`, `kia/ev9/is_locked`,
 (`online` / `offline` via LWT). Current-state only — derive change triggers
 downstream, or use the `KIA_ACCESS_STATE_CHANGED` notification above.
 
+The raw API dump (`vehicle.data.*`, which includes GPS) is **not** fanned out
+to individual retained topics; set `mqtt.publishRaw: true` if you want it. The
+`kia/ev9/state` JSON blob still contains everything (turn it off with
+`publishJson: false`).
+
 ### Home Assistant discovery (mode A only)
 
 **Skip this if you use the native integration (mode B/C)** — it already gives
@@ -702,8 +707,11 @@ Install and setup are **mode B** above. Some details:
   call.
 - **Alerts in automations.** Trigger on `event_type: kia_access_alert`; the
   `event_data` has `reason`, `level`, `active`, `message`, `vin`, `entry_id`.
-- **Token.** The refresh token lives in the config entry and is re-saved when
-  Kia rotates it — nothing is written into the HACS-managed integration folder.
+- **Token / re-auth.** The refresh token lives in the config entry and is
+  re-saved when Kia rotates it (nothing is written into the HACS-managed
+  folder). If Kia ever forces a new one-time code, HA shows a **"Reconfigure"
+  / re-authenticate** prompt on the integration — enter the password and the
+  new code there; no need to delete and re-add.
 
 ## Credits
 

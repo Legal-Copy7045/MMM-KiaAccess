@@ -31,13 +31,13 @@ g.KiaAccessEntities={
   ]
 };
 g.KiaAccessCommands={
-  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute; `args` names job fields passed through (in order). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file for now.",
-  "version": 1,
+  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file.",
+  "version": 2,
   "commands": [
-    { "key": "lock", "name": "Lock", "method": "lock", "args": [], "icon": "mdi:lock", "category": "security" },
-    { "key": "unlock", "name": "Unlock", "method": "unlock", "args": [], "icon": "mdi:lock-open", "category": "security", "confirm": true },
-    { "key": "start_climate", "name": "Start climate", "method": "start_climate",
-      "args": ["climate"], "icon": "mdi:air-conditioner", "category": "climate",
+    { "key": "lock", "name": "Lock", "method": "lock", "call": "bare", "icon": "mdi:lock", "category": "security" },
+    { "key": "unlock", "name": "Unlock", "method": "unlock", "call": "bare", "icon": "mdi:lock-open", "category": "security", "confirm": true },
+    { "key": "start_climate", "name": "Start climate", "method": "start_climate", "call": "climate_options",
+      "icon": "mdi:air-conditioner", "category": "climate",
       "options": {
         "set_temp": { "type": "float", "default": 21, "min": 16, "max": 30, "unit": "°C" },
         "duration": { "type": "int", "default": 10, "min": 1, "max": 30, "unit": "min" },
@@ -45,10 +45,10 @@ g.KiaAccessCommands={
         "heating": { "type": "bool", "default": false }
       }
     },
-    { "key": "stop_climate", "name": "Stop climate", "method": "stop_climate", "args": [], "icon": "mdi:air-conditioner", "category": "climate" },
-    { "key": "start_charge", "name": "Start charging", "method": "start_charge", "args": [], "icon": "mdi:battery-charging", "category": "charge" },
-    { "key": "stop_charge", "name": "Stop charging", "method": "stop_charge", "args": [], "icon": "mdi:battery-off", "category": "charge", "confirm": true },
-    { "key": "set_charge_limits", "name": "Set charge limits", "method": "set_charge_limits",
+    { "key": "stop_climate", "name": "Stop climate", "method": "stop_climate", "call": "bare", "icon": "mdi:air-conditioner", "category": "climate" },
+    { "key": "start_charge", "name": "Start charging", "method": "start_charge", "call": "bare", "icon": "mdi:battery-charging", "category": "charge" },
+    { "key": "stop_charge", "name": "Stop charging", "method": "stop_charge", "call": "bare", "icon": "mdi:battery-off", "category": "charge", "confirm": true },
+    { "key": "set_charge_limits", "name": "Set charge limits", "method": "set_charge_limits", "call": "positional",
       "args": ["ac_limit", "dc_limit"], "icon": "mdi:battery-lock", "category": "charge",
       "options": {
         "ac_limit": { "type": "int", "default": 80, "min": 50, "max": 100, "unit": "%" },
@@ -1089,10 +1089,17 @@ g.KiaAccessCommands={
     });
   }
 
-  function fmt(value) {
-    if (value === true) return "Yes";
-    if (value === false) return "No";
+  var UNIT = {};
+  CATALOGUE.forEach(function (e) { if (e.unit) UNIT[e.key] = e.unit; });
+
+  function fmt(key, value) {
+    if (value === true || value === "true") return "Yes";
+    if (value === false || value === "false") return "No";
     if (value == null || value === "" || value === "null") return "—";
+    var u = UNIT[key];
+    if (u && (typeof value === "number" || /^-?\d+(\.\d+)?$/.test(value))) {
+      return (Math.round(Number(value) * 10) / 10) + " " + u;
+    }
     return String(value);
   }
 
@@ -1130,16 +1137,26 @@ g.KiaAccessCommands={
   class KiaAccessCard extends HTMLElement {
     setConfig(config) {
       this._config = config || {};
+      this._sig = null;
       if (!this._root) this._root = this.attachShadow({ mode: "open" });
+      if (this._hass) { this.hass = this._hass; }
     }
 
     getCardSize() { return 7; }
 
-    static getConfigElement() { return document.createElement("div"); }
-
     static getStubConfig() { return { entity: "" }; }
 
-    set hass(hass) { this._hass = hass; this._render(); }
+    set hass(hass) {
+      this._hass = hass;
+      // HA sets `hass` on every state change anywhere — only re-render when the
+      // vehicle entity we care about actually changed
+      var entId = findRawEntity(hass, this._config && this._config.entity);
+      var st = entId && hass.states[entId];
+      var sig = st ? entId + "|" + st.state + "|" + st.last_updated : "none";
+      if (sig === this._sig) return;
+      this._sig = sig;
+      this._render();
+    }
 
     _callCommand(key) {
       if (!this._hass) return;
@@ -1175,7 +1192,7 @@ g.KiaAccessCommands={
       var rows = CATALOGUE.map(function (e) {
         var raw = flat["vehicle." + e.key];
         if (raw === undefined) return "";
-        return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(raw)) + "</td></tr>";
+        return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(e.key, raw)) + "</td></tr>";
       }).join("");
 
       var buttons = BUTTON_COMMANDS.map(function (c) {
