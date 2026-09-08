@@ -277,6 +277,14 @@ The car diagram:
 automatically so nothing is duplicated. The diagram always reads the real
 `vehicle.*` values, so it stays complete even for rows you've hidden.
 
+#### Every state, visually
+
+![Car diagram states](docs/car-states.png)
+
+Open [`docs/car-states.html`](docs/car-states.html) for the same gallery with the
+animations playing. Regenerate it from the current `visuals.js` with
+`node docs/build-gallery.js` (the PNG is a screenshot of that page).
+
 Row icons come from a built-in map (battery → battery, range → road, lock → lock,
 charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:
 
