@@ -415,6 +415,7 @@ Common EV9 (US) paths:
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer (when *we* last fetched) |
 | `showReportedInHeader` | `false` | append `" - as of: <time>"` to the header from `vehicle.last_updated_at` (when the *car* last reported) and drop that row from the table. Shows `14:32` for today, `Sep 7 14:32` otherwise |
+| `showTable` | `true` | `false` drops the details table entirely — the diagram + widgets carry the state. `visuals.batteryDetail` (Range, charge times…) still renders under the car |
 | `maxWidth` | `"420px"` | CSS max-width |
 | `animationSpeed` | `500` | fade (ms) when the module re-renders; **`0` = no fade**. The module only re-renders when the data changed, so at rest there's no fade regardless |
 | `debug` | `false` | extra logging |

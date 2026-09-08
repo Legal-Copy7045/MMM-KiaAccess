@@ -1,6 +1,6 @@
 {
   "name": "mmm-kiaaccess",
-  "version": "2.11.0",
+  "version": "2.12.0",
   "description": "MagicMirror² module that shows configurable Kia Connect / Bluelink vehicle data (built for the Kia EV9)",
   "main": "MMM-KiaAccess.js",
   "scripts": {
