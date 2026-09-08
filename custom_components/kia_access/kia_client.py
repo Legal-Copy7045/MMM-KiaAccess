@@ -350,11 +350,64 @@ def run_command(job, token_file=None):
         elif call == "positional":
             args = [_with_default(a) for a in spec.get("args", [])]
             method(vehicle_id, *args)
+        elif call == "poi":
+            method(vehicle_id, [_build_poi(opts)])
         else:
             method(vehicle_id)
     except ClientError:
         raise
+    except NotImplementedError as exc:
+        raise ClientError(
+            f"'{name}' isn't available for this region yet "
+            "(waiting on a hyundai_kia_connect_api implementation)"
+        ) from exc
     except Exception as exc:  # noqa: BLE001
         raise ClientError(f"{spec['method']} failed: {type(exc).__name__}: {exc}") from exc
 
     return {"ok": True, "command": name, "vehicleId": vehicle_id}
+
+
+def _geocode(address):
+    """address string -> (lat, lon, display_name) via OpenStreetMap Nominatim."""
+    import json as _json
+    import urllib.parse
+    import urllib.request
+
+    url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode(
+        {"q": address, "format": "json", "limit": 1}
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "MMM-KiaAccess (kia_client)"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            rows = _json.load(resp)
+    except Exception as exc:  # noqa: BLE001
+        raise ClientError(f"geocoding failed for {address!r}: {exc}") from exc
+    if not rows:
+        raise ClientError(f"could not find a location for {address!r}")
+    row = rows[0]
+    return float(row["lat"]), float(row["lon"]), row.get("display_name") or address
+
+
+def _build_poi(opts):
+    """opts {name, address?, latitude?, longitude?} -> a POIInfo (geocoding the
+    address when no explicit lat/lon is given)."""
+    try:
+        from hyundai_kia_connect_api.ApiImpl import POICoord, POIInfo
+    except Exception as exc:  # noqa: BLE001
+        raise ClientError(
+            "this hyundai_kia_connect_api version has no POIInfo (send-to-car)"
+        ) from exc
+
+    lat = opts.get("latitude")
+    lon = opts.get("longitude")
+    addr = (opts.get("address") or "").strip()
+    if lat is None or lon is None:
+        if not addr:
+            raise ClientError("send-to-car needs latitude + longitude, or an address")
+        lat, lon, resolved = _geocode(addr)
+        addr = addr or resolved
+    return POIInfo(
+        name=(opts.get("name") or "").strip() or addr or "Destination",
+        addr=addr,
+        coord=POICoord(lat=float(lat), lon=float(lon)),
+    )

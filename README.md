@@ -144,8 +144,10 @@ Lovelace card. No MagicMirror required.
    - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
      car), `open` / `close charge port`, `stop climate`, `start` / `stop charge`
    - **services**: the no-arg buttons above, plus `kia_access.start_climate`
-     (`set_temp` / `duration` / `defrost` / `heating`) and
-     `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`)
+     (`set_temp` / `duration` / `defrost` / `heating`),
+     `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`) and
+     `kia_access.send_to_car` (`name` + `address`, or `latitude` / `longitude`)
+     — see [Send to car](#send-to-car)
    - *(commands the car or region doesn't support just return a clear error
      when pressed)*
    - **`kia_access_alert`** events on the event bus for the same edge-triggered
@@ -765,6 +767,47 @@ release, so:
 - **new HA sensors / buttons / services** need a one-line addition to
   `core/entities.json` or `core/commands.json` (then `npm run sync`).
 - unsupported commands for a given car/region just return a clear error.
+
+## Send to car
+
+`kia_access.send_to_car` pushes a destination to the car's built-in navigation
+(the "Send-To-Car" feature in the Kia app — on the next start the car offers it
+as your route). Pass a `name` plus either an `address` (geocoded via
+OpenStreetMap) or explicit `latitude` / `longitude`:
+
+```yaml
+service: kia_access.send_to_car
+data:
+  name: "Nana's house"
+  address: "5025 Hialeah Drive, Pittsburgh, PA"
+```
+
+**Send your calendar destinations before you leave:**
+
+```yaml
+alias: Route to the car before a calendar event
+trigger:
+  - platform: calendar
+    event: start
+    offset: "-00:20:00"          # 20 minutes before it starts
+    entity_id: calendar.family_calendar
+condition:
+  - "{{ trigger.calendar_event.location not in ('', None) }}"
+action:
+  - service: kia_access.send_to_car
+    data:
+      name: "{{ trigger.calendar_event.summary }}"
+      address: "{{ trigger.calendar_event.location }}"
+```
+
+> **Dormant for now.** `hyundai_kia_connect_api` only implements `set_navigation`
+> for EU / AU / IN / CN so far — **not USA**. On a US car the service call
+> returns *"send_to_car isn't available for this region yet"*. The wiring is all
+> in place: when USA support lands upstream, a library update (`npm install` /
+> HACS redownload) lights it up with no config change. Progress is tracked by
+> the monthly upstream check. (If you can capture one Send-To-Car request from
+> the Kia app, a US `set_navigation` implementation could be contributed —
+> [open an issue](https://github.com/Legal-Copy7045/MMM-KiaAccess/issues).)
 
 ## Home Assistant — reference
 
