@@ -215,8 +215,13 @@ entity not found).
 
 From here the module is identical to mode A — same diagram, table, sparklines,
 history, notifications and optional MQTT re-publishing — it just gets its data
-from Home Assistant. It re-reads HA every `updateInterval` (a local call, so this
-can be short — 5–15 min).
+from Home Assistant.
+
+**Polling.** In this mode `updateInterval` defaults to **30 s** (it's a cheap
+local REST call), so the mirror tracks HA in near real time. Set it lower if you
+want — `updateInterval: 10 * 1000` is fine. The module only re-renders and only
+writes its disk cache when the data actually changed, so a fast interval costs
+almost nothing.
 
 ## Configuration
 
@@ -341,8 +346,8 @@ Common EV9 (US) paths:
 | `vin` | `""` | Blank = first vehicle on the account (mode A) |
 | `pythonBin` | `"python3"` | mode A — command used to run the bridge (`PYTHON` env var also works) |
 | `fetchTimeout` | `90` | Seconds before the bridge process is killed |
-| `updateInterval` | `1800000` | ms between fetches |
-| `retryInterval` | `300000` | ms before retrying after an error |
+| `updateInterval` | `1800000` | ms between fetches (**mode C**: defaults to `30000` unless you set it) |
+| `retryInterval` | `300000` | ms before retrying after an error (**mode C**: `30000` default) |
 | `refresh` | `true` | `true` wakes the car; `false` uses Kia's server cache (no battery cost). Use `false` for a **brand-new car that hasn't synced yet** |
 | `forceRefreshTimeout` | `45` | seconds to wait for the `refresh: true` wake-up before falling back to Kia's cached copy for that poll |
 | `backoffMax` | `8` | cap the post-failure exponential backoff at `retryInterval × this` |
