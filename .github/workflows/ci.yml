@@ -45,4 +45,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Byte-compile
-        run: python -m py_compile kia_bridge.py enroll.py
+        run: python -m py_compile kia_bridge.py enroll.py kia_client.py
+      - name: Spec sanity
+        run: python test/spec_check.py
