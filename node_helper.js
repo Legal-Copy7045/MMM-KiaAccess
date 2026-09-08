@@ -19,8 +19,8 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const { flatten } = require("./flatten.js");
-const haDiscovery = require("./ha_discovery.js");
+const { flatten } = require("./core/flatten.js");
+const haDiscovery = require("./core/ha-discovery.js");
 
 const CACHE_DIR = path.join(__dirname, "cache");
 

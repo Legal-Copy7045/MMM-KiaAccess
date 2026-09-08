@@ -168,7 +168,7 @@ Module.register("MMM-KiaAccess", {
   },
 
   getScripts() {
-    return [this.file("flatten.js"), this.file("visuals.js"), this.file("conditions.js")];
+    return [this.file("core/flatten.js"), this.file("core/visuals.js"), this.file("core/conditions.js")];
   },
 
   start() {

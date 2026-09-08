@@ -1,6 +1,6 @@
 /* Minimal assertion-only tests. Run with: node test/flatten.test.js */
 const assert = require("assert");
-const U = require("../flatten.js");
+const U = require("../core/flatten.js");
 
 const payload = {
   status: {
@@ -65,7 +65,7 @@ assert.strictEqual(U.formatValue({ key: "d", rawValue: 45 }, { formatters: { d: 
 assert.strictEqual(U.formatValue({ key: "d", rawValue: 120 }, { formatters: { d: "durationMin" } }), "2h");
 
 // --- visuals ---
-const Vis = require("../visuals.js");
+const Vis = require("../core/visuals.js");
 const bg = Vis.batteryGauge(82, { charging: true });
 assert.ok(bg.indexOf("<svg") === 0 && bg.indexOf("82%") > 0);
 assert.strictEqual(Vis.batteryGauge(null, {}).indexOf("—") > 0, true);

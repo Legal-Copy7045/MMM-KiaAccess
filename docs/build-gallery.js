@@ -1,4 +1,4 @@
-/* Regenerate docs/car-states.html from the current visuals.js.
+/* Regenerate docs/car-states.html from the current core/visuals.js.
  *
  *   node docs/build-gallery.js
  *
@@ -9,7 +9,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const visuals = fs.readFileSync(path.join(__dirname, "..", "visuals.js"), "utf8");
+const visuals = fs.readFileSync(path.join(__dirname, "..", "core", "visuals.js"), "utf8");
 
 const GROUPS = [
   ["Lock (body outline colour)", [

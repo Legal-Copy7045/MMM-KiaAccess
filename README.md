@@ -301,7 +301,7 @@ Every diagram state and every optional widget:
 ![Car diagram states and widgets](docs/car-states.png)
 
 Open [`docs/car-states.html`](docs/car-states.html) for the same gallery with the
-animations playing. Regenerate it from the current `visuals.js` with
+animations playing. Regenerate it from the current `core/visuals.js` with
 `node docs/build-gallery.js` (the PNG is a screenshot of that page).
 
 #### Extra widgets

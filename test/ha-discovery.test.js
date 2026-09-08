@@ -1,6 +1,6 @@
-/* node test/ha_discovery.test.js */
+/* node test/ha-discovery.test.js */
 const assert = require("assert");
-const HA = require("../ha_discovery.js");
+const HA = require("../core/ha-discovery.js");
 
 const msgs = HA.build({
   prefix: "kia/ev9/",
@@ -35,4 +35,4 @@ let n = 0;
 HA.publish({ publish: (t, p, o) => { n++; assert.strictEqual(o.retain, true); } }, { prefix: "kia" });
 assert.strictEqual(n, HA.SENSORS.length);
 
-console.log("all ha_discovery tests passed");
+console.log("all ha-discovery tests passed");
