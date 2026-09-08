@@ -195,7 +195,8 @@ Common EV9 (US) paths:
 | `fetchTimeout` | `90` | Seconds before the bridge process is killed |
 | `updateInterval` | `1800000` | ms between fetches |
 | `retryInterval` | `300000` | ms before retrying after an error |
-| `refresh` | `true` | `true` wakes the car; `false` uses Kia's server cache (no battery cost) |
+| `refresh` | `true` | `true` wakes the car; `false` uses Kia's server cache (no battery cost). Use `false` for a **brand-new car that hasn't synced yet** |
+| `forceRefreshTimeout` | `45` | seconds to wait for the `refresh: true` wake-up before falling back to Kia's cached copy for that poll |
 | `backoffMax` | `8` | cap the post-failure exponential backoff at `retryInterval × this` |
 | `maxRequestsPerHour` | `0` | `0` = no cap; otherwise pause fetches once the cap is hit (protects the account) |
 | `historyDays` | `60` | days of SoC / 12V history kept on disk (`cache/`) for the sparkline + drain alert |
@@ -456,9 +457,14 @@ automatically, grouped under one device, with `kia/ev9/status` as availability.
 
 ## Reliability
 
+- **Live wake-up is time-boxed.** With `refresh: true` the bridge asks the car to
+  report fresh data, but only waits `forceRefreshTimeout` seconds — if the
+  wake-up hangs (common for a car that has **never synced**), it falls back to
+  Kia's server-cached copy for that poll and notes it. A fresh EV9 should run
+  `refresh: false` until it has checked in once.
 - **Last-known-state cache.** The last good payload is saved to `cache/` and
   re-served (dimmed, with a "cached" footer and a warning strip) whenever a fetch
-  fails, so the widgets never go blank during a Kia outage or restart.
+  fails outright, so the widgets never go blank during a Kia outage or restart.
 - **Backoff.** After a failure, retries slow down exponentially
   (`retryInterval`, ×2, ×4, … capped at `retryInterval × backoffMax`) and reset
   on the next success.

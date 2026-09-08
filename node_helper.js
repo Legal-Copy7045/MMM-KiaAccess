@@ -130,7 +130,8 @@ module.exports = NodeHelper.create({
       region: config.region || "USA",
       vin: config.vin || "",
       refresh: config.refresh !== false,
-      geocode: config.geocode === true
+      geocode: config.geocode === true,
+      forceRefreshTimeout: Number(config.forceRefreshTimeout) || 45
     };
 
     let stdout = "";

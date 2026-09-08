@@ -169,18 +169,30 @@ def main():
                 pass
 
         want_refresh = job.get("refresh", True)
+        _meta_note = None
         if want_refresh:
-            # ask the car for a live reading, then always follow with a cached
-            # read so the Vehicle objects are populated even if the remote
-            # wake-up is slow to return data
-            try:
-                vm.force_refresh_all_vehicles_states()
-            except Exception as exc:  # noqa: BLE001
-                _meta_note = f"force refresh failed: {exc}"
-            else:
-                _meta_note = None
-        else:
-            _meta_note = None
+            # Ask the car for a live reading, but time-box it in a daemon
+            # thread: the remote wake-up can hang indefinitely for a vehicle
+            # that has never synced. Whatever happens, follow with a cached
+            # read so the Vehicle objects are populated.
+            import threading
+
+            timeout = float(job.get("forceRefreshTimeout", 45) or 45)
+            err = {}
+
+            def _do_refresh():
+                try:
+                    vm.force_refresh_all_vehicles_states()
+                except Exception as exc:  # noqa: BLE001
+                    err["e"] = exc
+
+            th = threading.Thread(target=_do_refresh, daemon=True)
+            th.start()
+            th.join(timeout)
+            if th.is_alive():
+                _meta_note = f"live wake-up timed out after {int(timeout)}s — using cached data"
+            elif "e" in err:
+                _meta_note = f"live wake-up failed: {err['e']}"
         vm.update_all_vehicles_with_cached_state()
 
         vin_filter = str(job.get("vin", "") or "").upper()
