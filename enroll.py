@@ -152,8 +152,12 @@ def main():
         print("Login finished but no token was produced.", file=sys.stderr)
         return 1
 
+    tok = vm.token.to_dict()
+    tok["enrolled_at"] = __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    ).isoformat()
     with open(TOKEN_FILE, "w") as fh:
-        json.dump(vm.token.to_dict(), fh, indent=2, default=str)
+        json.dump(tok, fh, indent=2, default=str)
     try:
         os.chmod(TOKEN_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0600
     except OSError:

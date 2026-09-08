@@ -117,10 +117,13 @@ def main():
             pass
 
     saved_token = None
+    enrolled_at = None
     if os.path.exists(TOKEN_FILE):
         try:
             with open(TOKEN_FILE) as fh:
-                saved_token = Token.from_dict(json.load(fh))
+                raw_token = json.load(fh)
+            saved_token = Token.from_dict(raw_token)
+            enrolled_at = raw_token.get("enrolled_at")
         except Exception:  # noqa: BLE001
             saved_token = None
 
@@ -151,11 +154,16 @@ def main():
             print(json.dumps({"ok": False, "error": ENROLL_HINT}))
             return 0
 
-        # persist the (possibly refreshed / rotated) token for next time
+        # persist the (possibly refreshed / rotated) token for next time,
+        # keeping the original enrolment timestamp
         if vm.token is not None:
             try:
+                tok = vm.token.to_dict()
+                tok["enrolled_at"] = enrolled_at or datetime.datetime.now(
+                    datetime.timezone.utc
+                ).isoformat()
                 with open(TOKEN_FILE, "w") as fh:
-                    json.dump(vm.token.to_dict(), fh, indent=2, default=str)
+                    json.dump(tok, fh, indent=2, default=str)
                 os.chmod(TOKEN_FILE, stat.S_IRUSR | stat.S_IWUSR)
             except Exception:  # noqa: BLE001
                 pass
@@ -189,6 +197,8 @@ def main():
         meta = {}
         if _meta_note:
             meta["note"] = _meta_note
+        if enrolled_at:
+            meta["tokenEnrolledAt"] = enrolled_at
         first = vehicles[0]
         if not first.get("last_updated_at") and not (first.get("data") or {}):
             meta["warning"] = (

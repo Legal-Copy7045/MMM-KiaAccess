@@ -74,4 +74,32 @@ assert.strictEqual(find(r, "charge_complete").active, false);
 r = C.evaluate({ charging: true }, {}, {});
 assert.strictEqual(r.meta.charging, true);
 
+// --- 12V drain while parked ---
+const t = Date.now();
+const drainHist = [
+  { t: t - 11 * 3600e3, v12: 82, ev: 60 },
+  { t: t - 1 * 3600e3, v12: 70, ev: 60 }
+];
+r = C.evaluate({ history: drainHist, carOn: false, charging: false, plugged: false }, {}, {});
+assert.strictEqual(find(r, "battery_12v_drain").active, true);
+// plugged in -> not a concern
+r = C.evaluate({ history: drainHist, carOn: false, charging: false, plugged: true }, {}, {});
+assert.strictEqual(find(r, "battery_12v_drain").active, null);
+// small drop -> inactive
+r = C.evaluate(
+  { history: [{ t: t - 6 * 3600e3, v12: 71 }, { t, v12: 70 }], carOn: false, charging: false, plugged: false },
+  {},
+  {}
+);
+assert.strictEqual(find(r, "battery_12v_drain").active, false);
+
+// --- OTP expiry ---
+r = C.evaluate({ tokenAgeDays: 26, otpLifetimeDays: 30, otpWarnDays: 7 }, {}, {});
+assert.strictEqual(find(r, "otp_expiring").active, true);
+assert.ok(/expires in ~4 days/.test(find(r, "otp_expiring").message));
+r = C.evaluate({ tokenAgeDays: 10, otpLifetimeDays: 30, otpWarnDays: 7 }, {}, {});
+assert.strictEqual(find(r, "otp_expiring").active, false);
+r = C.evaluate({ tokenAgeDays: null }, {}, {});
+assert.strictEqual(find(r, "otp_expiring").active, null);
+
 console.log("all conditions tests passed");

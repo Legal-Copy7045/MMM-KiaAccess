@@ -1,5 +1,7 @@
 # MMM-KiaAccess
 
+[![CI](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml/badge.svg)](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml)
+
 A [MagicMirror²](https://magicmirror.builders/) module that shows **configurable**
 data from a Kia Connect / Bluelink account. Built for a **Kia EV9 (Kia USA)** but works
 with any Hyundai/Kia/Genesis supported by
@@ -194,6 +196,12 @@ Common EV9 (US) paths:
 | `updateInterval` | `1800000` | ms between fetches |
 | `retryInterval` | `300000` | ms before retrying after an error |
 | `refresh` | `true` | `true` wakes the car; `false` uses Kia's server cache (no battery cost) |
+| `backoffMax` | `8` | cap the post-failure exponential backoff at `retryInterval × this` |
+| `maxRequestsPerHour` | `0` | `0` = no cap; otherwise pause fetches once the cap is hit (protects the account) |
+| `historyDays` | `60` | days of SoC / 12V history kept on disk (`cache/`) for the sparkline + drain alert |
+| `historyMinIntervalMinutes` | `30` | don't record history samples closer together than this |
+| `otpLifetimeDays` | `30` | assumed Kia refresh-token lifetime, used for the expiry warning |
+| `otpWarnDays` | `7` | start showing "OTP expires in N days" this far out |
 | `geocode` | `false` | resolve `vehicle.geocode` to a street address via OpenStreetMap |
 | `units` | `"imperial"` | `"imperial"` or `"metric"` for distance/temp/speed formatters |
 | `decimals` | `1` | rounding for numeric formatters |
@@ -207,6 +215,13 @@ Common EV9 (US) paths:
 | `visuals.enabled` | `false` | master switch for the graphical widgets |
 | `visuals.car` / `.battery` / `.rowIcons` | `true` | individual widget toggles (need `visuals.enabled`) |
 | `visuals.width` | `210` | px width of the car SVG |
+| `visuals.compact` | `false` | one-line summary (`78% · 312 mi · 🔒`) instead of the diagram + table |
+| `visuals.chargeProgress` | `true` | progress bar + "full at HH:MM" while plugged in |
+| `visuals.rangeRing` | `false` | radial SoC / range gauge under the car |
+| `visuals.socHistory` | `false` | battery-% sparkline (`visuals.socHistoryDays`, default 14) |
+| `visuals.tripStats` | `false` | distance / consumption / regen from `month_trip_info` |
+| `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map` — see [Location](#location--map) |
+| `visuals.chargeCost` | `{ enabled:false }` | estimated cost to the charge target (`pricePerKwh`, `currency`) |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
@@ -285,6 +300,44 @@ Open [`docs/car-states.html`](docs/car-states.html) for the same gallery with th
 animations playing. Regenerate it from the current `visuals.js` with
 `node docs/build-gallery.js` (the PNG is a screenshot of that page).
 
+#### Extra widgets
+
+Each is off by default and stacks under the car:
+
+- **`compact`** — replaces everything with one line: `78% · 312 mi · 🔒 · ⚡ 7.4 kW`.
+- **`chargeProgress`** — while plugged in, a bar (current + target) and either
+  "Full (80%) at 06:40" or "Plugged in, not charging".
+- **`rangeRing`** — a radial gauge: SoC on the ring, range in the centre.
+- **`socHistory`** — a battery-% sparkline over the last `socHistoryDays`, from the
+  history the helper keeps on disk.
+- **`tripStats`** — this month's distance / average consumption / regen.
+- **`chargeCost`** — `{ enabled: true, pricePerKwh: 0.14, currency: "$" }` →
+  "Est. cost to 80%: $6.40" (needs `ev_battery_capacity`).
+
+A **preconditioning schedule** is shown automatically whenever one is set on the
+car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 21°".
+
+#### Location & map
+
+```js
+visuals: {
+  location: {
+    enabled: true,
+    homeLat: 40.71374,          // both set -> "3.2 mi from home" / "At home"
+    homeLon: -79.75464,
+    map: true,                  // show a static map image
+    mapZoom: 14,
+    mapWidth: 210, mapHeight: 120,
+    mapUrlTemplate: "https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom={zoom}&size={w}x{h}&markers={lat},{lon},red-pushpin"
+  }
+}
+```
+
+`{lat} {lon} {zoom} {w} {h}` are substituted. The default keyless OpenStreetMap
+endpoint is rate-limited and sometimes down — for a reliable map, point
+`mapUrlTemplate` at your own provider (Geoapify / Mapbox / Google static maps).
+Enabling `location` turns `geocode` on automatically so the address resolves.
+
 Row icons come from a built-in map (battery → battery, range → road, lock → lock,
 charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:
 
@@ -330,10 +383,12 @@ notifications: {
 ```
 
 Every check can be turned off (`checkName: false`) or tuned (`level`, thresholds).
-Built-in checks: `evBatteryLow`, `battery12vLow`, `unlocked`, `doorOpen`,
-`windowOpen`, `hoodOpen`, `liftgateOpen`, `sunroofOpen`, `tyrePressure`,
-`chargeComplete`, `chargeInterrupted`. Levels are `info` / `warning` / `critical`;
-`alertModule` only pops for `warning` and `critical`.
+Built-in checks: `evBatteryLow`, `battery12vLow`, **`battery12vDrain`** (12V
+falling `dropPct` over `overHours` while parked — the "won't start on a cold
+morning" warning), `unlocked`, `doorOpen`, `windowOpen`, `hoodOpen`,
+`liftgateOpen`, `sunroofOpen`, `tyrePressure`, `chargeComplete`,
+`chargeInterrupted`, **`otpExpiring`** (see below). Levels are
+`info` / `warning` / `critical`; `alertModule` only pops for `warning` and `critical`.
 
 **For other modules** — a semantic notification is broadcast each time:
 
@@ -374,9 +429,45 @@ mqtt: {
 
 Topics: `kia/ev9/ev_battery_percentage`, `kia/ev9/is_locked`,
 `kia/ev9/tire_pressure_front_left`, … plus `kia/ev9/state` (JSON),
-`kia/ev9/_meta/fetched_at`, and `kia/ev9/status` (`online` / `offline` via LWT).
-This is current-state only — derive your own change triggers downstream, or use
-the `KIA_ACCESS_STATE_CHANGED` notification above.
+`kia/ev9/_meta/fetched_at`, `kia/ev9/_meta/stale`, and `kia/ev9/status`
+(`online` / `offline` via LWT). Current-state only — derive change triggers
+downstream, or use the `KIA_ACCESS_STATE_CHANGED` notification above.
+
+### Home Assistant discovery
+
+```js
+mqtt: {
+  enabled: true,
+  url: "mqtt://192.168.1.8:1883",
+  topicPrefix: "kia/ev9",
+  homeAssistant: { enabled: true, discoveryPrefix: "homeassistant" }
+}
+```
+
+Publishes retained `homeassistant/…/config` messages so a curated set of entities
+(battery %, health, 12V, range, charge power, ETA, odometer, outside temp, last
+reported; charging / plugged / locked / doors / frunk / liftgate / sunroof / tyre
+warning / defrost / climate binary sensors) appear in Home Assistant
+automatically, grouped under one device, with `kia/ev9/status` as availability.
+
+## Reliability
+
+- **Last-known-state cache.** The last good payload is saved to `cache/` and
+  re-served (dimmed, with a "cached" footer and a warning strip) whenever a fetch
+  fails, so the widgets never go blank during a Kia outage or restart.
+- **Backoff.** After a failure, retries slow down exponentially
+  (`retryInterval`, ×2, ×4, … capped at `retryInterval × backoffMax`) and reset
+  on the next success.
+- **Request cap.** `maxRequestsPerHour` (default off) pauses fetching once the cap
+  is hit — Kia soft-locks accounts that poll too hard.
+
+## OTP expiry
+
+Kia's OTP can't be refreshed unattended (it needs the SMS/email code). The module
+records when `enroll.py` ran and shows **"OTP expires in ~N days — re-run
+enroll.py"** once you're within `otpWarnDays` of `otpLifetimeDays` (both
+configurable; the 30-day default is an estimate — tune it to what you observe).
+The `otpExpiring` notification check fires the same warning to other modules.
 
 ## Notes
 

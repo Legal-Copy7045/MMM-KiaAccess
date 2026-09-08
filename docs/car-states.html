@@ -533,10 +533,102 @@ Animations (pulses, charge flow, heater shimmer) play live here; car-states.png 
     return null;
   }
 
+  // ---- optional standalone widgets ----
+
+  /** SoC sparkline. points: [{ t:epoch_ms, v:pct }] (or [{t, ev}]) */
+  function sparkline(points, o) {
+    o = o || {};
+    var w = o.width || 200,
+      h = o.height || 40,
+      pad = 3;
+    var pts = (points || [])
+      .map(function (p) {
+        return { t: +p.t, v: p.v != null ? +p.v : p.ev != null ? +p.ev : null };
+      })
+      .filter(function (p) {
+        return isFinite(p.t) && p.v != null && isFinite(p.v);
+      });
+    if (pts.length < 2) return "";
+    var t0 = pts[0].t,
+      t1 = pts[pts.length - 1].t || t0 + 1;
+    var lo = o.min != null ? o.min : Math.min.apply(null, pts.map(function (p) { return p.v; }));
+    var hi = o.max != null ? o.max : Math.max.apply(null, pts.map(function (p) { return p.v; }));
+    if (hi - lo < 5) {
+      hi = lo + 5;
+    }
+    var sx = function (t) { return pad + ((t - t0) / (t1 - t0)) * (w - 2 * pad); };
+    var sy = function (v) { return h - pad - ((v - lo) / (hi - lo)) * (h - 2 * pad); };
+    var d = pts
+      .map(function (p, i) { return (i ? "L" : "M") + sx(p.t).toFixed(1) + " " + sy(p.v).toFixed(1); })
+      .join(" ");
+    var area = d + " L " + sx(t1).toFixed(1) + " " + (h - pad) + " L " + sx(t0).toFixed(1) + " " + (h - pad) + " Z";
+    var col = o.color || COL.accent;
+    var last = pts[pts.length - 1];
+    return (
+      '<svg class="kiaaccess-spark" viewBox="0 0 ' + w + " " + h + '" width="' + w + '">' +
+      '<path d="' + area + '" fill="' + col + '" fill-opacity="0.15"/>' +
+      '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="1.6" stroke-linejoin="round"/>' +
+      '<circle cx="' + sx(last.t).toFixed(1) + '" cy="' + sy(last.v).toFixed(1) + '" r="2.4" fill="' + col + '"/>' +
+      "</svg>"
+    );
+  }
+
+  /** radial range/charge ring. pct 0..100; centreText e.g. "312 mi" */
+  function rangeRing(pct, o) {
+    o = o || {};
+    var sz = o.size || 132,
+      r = sz / 2 - 10,
+      cx = sz / 2,
+      cy = sz / 2;
+    var frac = Math.max(0, Math.min(1, (Number(pct) || 0) / 100));
+    var C = 2 * Math.PI * r;
+    var col = batteryColor(pct);
+    var label = pct == null || isNaN(pct) ? "—" : Math.round(pct) + "%";
+    return (
+      '<svg class="kiaaccess-ring" viewBox="0 0 ' + sz + " " + sz + '" width="' + sz + '">' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="#2a2c2e" stroke-width="9"/>' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + col +
+      '" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + (frac * C).toFixed(1) + " " + C.toFixed(1) +
+      '" transform="rotate(-90 ' + cx + " " + cy + ')"/>' +
+      (o.charging === true
+        ? '<path d="M ' + (cx + 5) + " " + (cy - 16) +
+          ' l -11 17 h 7 l -4 14 l 13 -19 h -8 z" fill="' + COL.text +
+          '"><animate attributeName="opacity" values="0.4;1;0.4" dur="1.5s" repeatCount="indefinite"/></path>'
+        : "") +
+      '<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" font-size="20" font-weight="700" fill="' +
+      COL.text + '">' + esc(label) + "</text>" +
+      (o.centreText
+        ? '<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" font-size="11" fill="' + COL.dim +
+          '">' + esc(o.centreText) + "</text>"
+        : "") +
+      "</svg>"
+    );
+  }
+
+  /** horizontal charge-progress bar with an ETA caption */
+  function chargeBar(pct, targetPct, o) {
+    o = o || {};
+    var w = o.width || 210,
+      h = 20;
+    var cur = Math.max(0, Math.min(100, Number(pct) || 0));
+    var tgt = targetPct != null ? Math.max(0, Math.min(100, Number(targetPct))) : 100;
+    var iw = w - 4;
+    return (
+      '<svg class="kiaaccess-chargebar" viewBox="0 0 ' + w + " " + h + '" width="' + w + '">' +
+      '<rect x="1" y="4" width="' + (w - 2) + '" height="' + (h - 8) + '" rx="4" fill="none" stroke="' + COL.outline + '" stroke-width="1.4"/>' +
+      '<rect x="2" y="5" width="' + ((tgt / 100) * iw).toFixed(1) + '" height="' + (h - 10) + '" rx="3" fill="' + COL.dim + '" opacity="0.5"/>' +
+      '<rect x="2" y="5" width="' + ((cur / 100) * iw).toFixed(1) + '" height="' + (h - 10) + '" rx="3" fill="' + COL.ok + '"/>' +
+      "</svg>"
+    );
+  }
+
   return {
     COL: COL,
     batteryGauge: batteryGauge,
     carDiagram: carDiagram,
+    sparkline: sparkline,
+    rangeRing: rangeRing,
+    chargeBar: chargeBar,
     iconFor: iconFor,
     DEFAULT_ICONS: DEFAULT_ICONS
   };

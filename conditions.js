@@ -39,6 +39,8 @@
   var CHECK_DEFAULTS = {
     evBatteryLow: { enabled: true, level: "warning", belowPct: 20, clearPct: 25 },
     battery12vLow: { enabled: true, level: "warning", belowPct: 55, clearPct: 60 },
+    battery12vDrain: { enabled: true, level: "warning", dropPct: 8, overHours: 12 },
+    otpExpiring: { enabled: true, level: "warning" }, // lifetimeDays / warnDays fall back to config
     unlocked: { enabled: true, level: "warning" },
     doorOpen: { enabled: true, level: "warning" },
     windowOpen: { enabled: true, level: "info" },
@@ -111,6 +113,48 @@
     }
     threshold("ev_battery_low", num(s.batteryPct), checkCfg(cfg, "evBatteryLow"), "EV battery");
     threshold("battery_12v_low", num(s.car12vPct), checkCfg(cfg, "battery12vLow"), "12V battery");
+
+    // ---- 12V draining while parked ----
+    var cVD = checkCfg(cfg, "battery12vDrain");
+    if (cVD.enabled) {
+      var parked = s.carOn !== true && s.charging !== true && s.plugged !== true;
+      var overMs = (num(cVD.overHours) || 12) * 3600e3;
+      var drop = num(cVD.dropPct) || 8;
+      var recent = (s.history || [])
+        .filter(function (h) {
+          return h && num(h.v12) != null && Date.now() - h.t <= overMs;
+        })
+        .sort(function (a, b) { return a.t - b.t; });
+      var delta = recent.length >= 2 ? num(recent[0].v12) - num(recent[recent.length - 1].v12) : null;
+      var vdActive;
+      if (!parked || delta == null) vdActive = prev.battery_12v_drain === true ? false : null;
+      else if (delta >= drop) vdActive = true;
+      else if (delta <= drop / 2) vdActive = false;
+      else vdActive = prev.battery_12v_drain === true;
+      emit("battery_12v_drain", cVD.level, vdActive,
+        delta != null
+          ? "12V battery down " + Math.round(delta) + "% while parked"
+          : "12V battery trend",
+        { dropPct: delta != null ? Math.round(delta) : null, overHours: num(cVD.overHours) || 12 });
+    }
+
+    // ---- OTP / refresh-token expiry warning ----
+    var cO = checkCfg(cfg, "otpExpiring");
+    if (cO.enabled) {
+      var age = num(s.tokenAgeDays);
+      var life = num(cO.lifetimeDays) != null ? num(cO.lifetimeDays) : num(s.otpLifetimeDays) || 30;
+      var warn = num(cO.warnDays) != null ? num(cO.warnDays) : num(s.otpWarnDays) || 7;
+      if (age == null) {
+        emit("otp_expiring", cO.level, null, "OTP age unknown");
+      } else {
+        var remaining = Math.max(0, Math.ceil(life - age));
+        emit("otp_expiring", cO.level, life - age <= warn,
+          remaining > 0
+            ? "OTP enrolment expires in ~" + remaining + " day" + (remaining === 1 ? "" : "s")
+            : "OTP enrolment has likely expired — re-run enroll.py",
+          { remainingDays: remaining, ageDays: Math.round(age) });
+      }
+    }
 
     // ---- unlocked ----
     var cU = checkCfg(cfg, "unlocked");
