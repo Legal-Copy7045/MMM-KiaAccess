@@ -23,9 +23,16 @@ assert manifest["config_flow"] is True
 assert manifest["version"], "manifest needs a version"
 assert any(r.startswith("hyundai_kia_connect_api") for r in manifest["requirements"])
 
-for mod in ("const", "coordinator", "config_flow", "entity", "sensor", "binary_sensor", "button", "__init__"):
+for mod in ("const", "conditions", "vehicle_state", "coordinator", "config_flow",
+            "entity", "sensor", "binary_sensor", "button", "__init__"):
     importlib.import_module(f"{pkg}.{mod}" if mod != "__init__" else pkg)
     print("imported", mod)
+
+cond = importlib.import_module(f"{pkg}.conditions")
+vs = importlib.import_module(f"{pkg}.vehicle_state")
+r = cond.evaluate(vs.build_state({"vehicle.is_locked": "false"}, {}), {}, {})
+assert any(c["reason"] == "unlocked" and c["active"] is True for c in r["conditions"])
+assert const.EVENT_STATE_CHANGED == "kia_access_alert"
 
 const = importlib.import_module(f"{pkg}.const")
 assert len(const.ENTITIES) >= 20

@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import kia_client
+from .conditions import evaluate as evaluate_conditions
 from .const import (
     CONF_BRAND,
     CONF_GEOCODE,
@@ -19,7 +20,9 @@ from .const import (
     DEFAULT_FORCE_REFRESH_TIMEOUT,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
+    EVENT_STATE_CHANGED,
 )
+from .vehicle_state import build_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +41,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self.vehicle: dict = {}
         self.meta: dict = {}
+        self._prev_cond: dict = {}
+        self._announced: dict = {}
+        self._first_alert_run = True
 
     def _job(self, **extra) -> dict:
         d = self.entry.data
@@ -79,7 +85,55 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 data={**self.entry.data, CONF_TOKEN: new_token},
             )
         self.vehicle = (result.get("vehicles") or [{}])[0]
+        self._emit_alerts()
         return self.vehicle
+
+    def _emit_alerts(self) -> None:
+        """Fire kia_access_alert events on edge-triggered condition changes,
+        using the exact same rules as the MagicMirror module (conditions.py)."""
+        flat = {f"vehicle.{k}": v for k, v in self.vehicle.items()
+                if not isinstance(v, (dict, list))}
+        cfg = self.entry.options.get("notifications", {}) or {}
+        state = build_state(flat, {})
+        try:
+            res = evaluate_conditions(state, cfg, self._prev_cond)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("condition evaluation failed", exc_info=True)
+            return
+
+        startup = self._first_alert_run
+        vin = self.vehicle.get("VIN")
+        for c in res["conditions"]:
+            reason = c["reason"]
+            was = self._prev_cond.get(reason)
+            became = c["active"] is True and was is not True
+            cleared = (
+                not c["oneShot"] and c["active"] is False and was is True
+                and self._announced.get(reason)
+            )
+            fire = became if startup else (became or cleared)
+            if became and fire:
+                self._announced[reason] = True
+            if cleared:
+                self._announced[reason] = False
+            if fire:
+                self.hass.bus.async_fire(
+                    EVENT_STATE_CHANGED,
+                    {
+                        "entry_id": self.entry.entry_id,
+                        "reason": reason,
+                        "level": c["level"],
+                        "active": c["active"],
+                        "title": c["title"],
+                        "message": c["message"],
+                        "value": c["value"],
+                        "vin": vin,
+                    },
+                )
+
+        self._prev_cond = {c["reason"]: c["active"] for c in res["conditions"]}
+        self._prev_cond["_charging"] = res["meta"]["charging"]
+        self._first_alert_run = False
 
     async def async_run_command(self, command: str, options: dict | None = None) -> None:
         job = self._job(command=command, options=options or {})

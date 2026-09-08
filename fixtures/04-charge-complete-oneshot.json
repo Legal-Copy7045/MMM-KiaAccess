@@ -1,0 +1,16 @@
+{
+  "name": "charging just stopped at the limit -> charge_complete one-shot",
+  "state": {
+    "charging": false,
+    "plugged": true,
+    "batteryPct": 80,
+    "chargeLimitPct": 80,
+    "locked": true
+  },
+  "cfg": {},
+  "prev": { "_charging": true },
+  "expectConditions": {
+    "charge_complete": true,
+    "charge_interrupted": false
+  }
+}

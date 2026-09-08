@@ -1,0 +1,7 @@
+{
+  "name": "EV battery 22% holds low state inside the 20-25 dead band",
+  "state": { "batteryPct": 22, "locked": true },
+  "cfg": {},
+  "prev": { "ev_battery_low": true },
+  "expectConditions": { "ev_battery_low": true }
+}

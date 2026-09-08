@@ -48,10 +48,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Byte-compile
         run: |
-          python -m py_compile kia_bridge.py enroll.py kia_client.py
+          python -m py_compile kia_bridge.py enroll.py kia_client.py conditions.py vehicle_state.py
           python -m py_compile custom_components/kia_access/*.py
       - name: Spec sanity
         run: python test/spec_check.py
+      - name: Contract fixtures (Python engine)
+        run: python test/contract_test.py
 
   hass:
     runs-on: ubuntu-latest

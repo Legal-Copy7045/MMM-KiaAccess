@@ -1,0 +1,14 @@
+{
+  "name": "empty payload -> everything unknown, nothing fires",
+  "flat": {},
+  "expectState": { "batteryPct": null, "locked": null, "climate": null },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "ev_battery_low": null,
+    "door_open": null,
+    "unlocked": null,
+    "tyre_pressure": null,
+    "otp_expiring": null
+  }
+}
