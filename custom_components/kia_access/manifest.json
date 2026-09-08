@@ -7,5 +7,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Legal-Copy7045/MMM-KiaAccess/issues",
   "requirements": ["hyundai_kia_connect_api>=3.30.0"],
-  "version": "0.1.0"
+  "version": "2.1.0"
 }
