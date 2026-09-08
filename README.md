@@ -352,6 +352,7 @@ Common EV9 (US) paths:
 | `vehicle.*_window_is_open` | Windows |
 | `vehicle.air_control_is_on` / `defrost_is_on` / `steering_wheel_heater_is_on` | Climate |
 | `vehicle.air_temperature` / `outside_temperature` | Climate set-point / outside temp — always normalised to °C (the Kia US/CA API reports °F); the `temperatureC` formatter and the diagram then show °C or °F per `units` |
+| `vehicle.odometer`, `ev_driving_range`, `total_driving_range`, `next_service_distance` | Distances — always normalised to km (the Kia US/CA API reports miles); `distanceKm` / the HA `distance` device class then show mi or km |
 | `vehicle.tire_pressure_front_left` … `tire_pressure_rear_right` | Tyre pressures |
 | `vehicle.tire_pressure_*_warning_is_on` | Tyre pressure warnings |
 | `vehicle.location_latitude` / `location_longitude` | GPS |

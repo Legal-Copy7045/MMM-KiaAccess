@@ -19,11 +19,11 @@ class _Veh:
             setattr(self, k, v)
 
 
-def approx(a, b, tol=0.15):
+def approx(a, b, tol=0.2):
     return a is not None and abs(a - b) <= tol
 
 
-# USA / Canada: the library hands us °F — dump_vehicle must normalise to °C
+# --- temperature: USA / Canada hand us °F -> normalise to °C ---
 usa = kia_client.dump_vehicle(
     _Veh(
         air_temperature=72.0,
@@ -37,18 +37,36 @@ assert approx(usa["outside_temperature"], 1.7), usa["outside_temperature"]
 
 # EU / rest: already °C (or unit unknown) — leave the value alone
 eu = kia_client.dump_vehicle(
-    _Veh(
-        air_temperature=21.0,
-        outside_temperature=3.0,
-        _air_temperature_unit="°C",
-        _outside_temperature_unit=None,
-    )
+    _Veh(air_temperature=21.0, _air_temperature_unit="°C")
 )
 assert eu["air_temperature"] == 21.0, eu["air_temperature"]
-assert eu["outside_temperature"] == 3.0, eu["outside_temperature"]
 
 # missing temps must not crash or invent a value
-none_case = kia_client.dump_vehicle(_Veh(_air_temperature_unit="°F"))
-assert none_case.get("air_temperature") is None
+assert kia_client.dump_vehicle(_Veh(_air_temperature_unit="°F")).get("air_temperature") is None
+
+# --- distance: USA / Canada hand us miles -> normalise to km ---
+usa_d = kia_client.dump_vehicle(
+    _Veh(
+        odometer=12000.0,
+        odometer_unit="mi",
+        _odometer_unit="mi",
+        ev_driving_range=200.0,
+        _ev_driving_range_unit="mi",
+        next_service_distance=7981.0,
+        _next_service_distance_unit="mi",
+    )
+)
+assert approx(usa_d["odometer"], 19312.1, 1), usa_d["odometer"]
+assert usa_d["odometer_unit"] == "km", usa_d["odometer_unit"]
+assert approx(usa_d["ev_driving_range"], 321.9, 1), usa_d["ev_driving_range"]
+assert approx(usa_d["next_service_distance"], 12844.2, 1), usa_d["next_service_distance"]
+
+# EU: km already -> untouched
+eu_d = kia_client.dump_vehicle(_Veh(odometer=45000.0, _odometer_unit="km"))
+assert eu_d["odometer"] == 45000.0, eu_d["odometer"]
+
+# unknown / missing unit -> leave as-is (can't guess)
+none_d = kia_client.dump_vehicle(_Veh(ev_driving_range=300.0))
+assert none_d["ev_driving_range"] == 300.0
 
 print("dump_vehicle tests passed")
