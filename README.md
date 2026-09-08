@@ -475,9 +475,12 @@ The car diagram:
   (`ev_v2l_status` / `ev_v2x_status`): the flow reverses in cyan. Plugged but
   idle: a static amber cable.
 
-`ev_battery_percentage` and every `batteryDetail` key are dropped from the table
-automatically so nothing is duplicated. The diagram always reads the real
-`vehicle.*` values, so it stays complete even for rows you've hidden.
+**Anything a widget already shows is dropped from the table automatically** so
+nothing is said twice — with `visuals.battery` on: `ev_battery_percentage` +
+every `batteryDetail` key; with `visuals.car` on: `is_locked`,
+`car_battery_percentage`, `air_temperature`, `outside_temperature`. You don't
+need to list these in `exclude`. The diagram always reads the real `vehicle.*`
+values, so it stays complete even for rows that never appear in the table.
 
 #### Every state, visually
 

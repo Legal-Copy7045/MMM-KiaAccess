@@ -94,8 +94,11 @@ Module.register("MMM-KiaAccess", {
     // ---- graphical widgets (all off by default) ----
     visuals: {
       enabled: false,
-      car: true, // top-down SUV diagram (doors / frunk / tailgate / charge port / tyres)
-      battery: true, // vertical battery in the centre of the car (charge % + charging bolt)
+      car: true, // top-down SUV diagram (doors / frunk / tailgate / charge port / tyres).
+                 //   owns lock, 12V %, climate set-point, outside temp — those
+                 //   rows are dropped from the table
+      battery: true, // vertical battery in the centre of the car (charge % + charging bolt).
+                     //   drops the SoC row + the batteryDetail rows from the table
       rowIcons: true, // Font Awesome icon before each table row
       width: 210, // px width for the car SVG
       compact: false, // one-line summary instead of the diagram + table
@@ -351,13 +354,24 @@ Module.register("MMM-KiaAccess", {
     this.flatMap = flat;
     let entries = this.utils.selectEntries(flat, this.config);
 
-    // when the battery widget is on, its readouts (and the % itself) are shown
-    // in the widget, not the table — drop any duplicates
+    // anything a widget already shows is dropped from the table so it isn't
+    // said twice. battery widget → SoC + the batteryDetail readouts; car
+    // diagram → lock (body colour), 12V %, climate set-point, outside temp.
     const vis = this.config.visuals || {};
-    if (this.visuals && vis.enabled && vis.battery) {
-      const moved = new Set(
-        ["vehicle.ev_battery_percentage"].concat(vis.batteryDetail || [])
-      );
+    if (this.visuals && vis.enabled && !vis.compact) {
+      const moved = new Set();
+      if (vis.battery) {
+        moved.add("vehicle.ev_battery_percentage");
+        (vis.batteryDetail || []).forEach((k) => moved.add(k));
+      }
+      if (vis.car) {
+        [
+          "vehicle.is_locked",
+          "vehicle.car_battery_percentage",
+          "vehicle.air_temperature",
+          "vehicle.outside_temperature"
+        ].forEach((k) => moved.add(k));
+      }
       entries = entries.filter((e) => !moved.has(e.key));
     }
     this.viewData = this.applyCombine(entries);
