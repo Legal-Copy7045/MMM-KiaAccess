@@ -105,6 +105,7 @@
       batteryPct: num("ev_battery_percentage"),
       rangeKm: num("ev_driving_range"),
       chargeKw: num("ev_charging_power"),
+      chargeEtaMin: num("ev_estimated_current_charge_duration"),
       charging: bool("ev_battery_is_charging"),
       plugged: bool("ev_battery_is_plugged_in"),
       v2l: bool("ev_v2l_status"),
