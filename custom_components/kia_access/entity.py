@@ -16,11 +16,12 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
     def __init__(self, coordinator: KiaAccessCoordinator, key: str) -> None:
         super().__init__(coordinator)
         self._key = key
-        # Stable identity: never derive from VIN. A brand-new car reports VIN=None
-        # until its first sync; if identity flipped to the VIN later, every entity
-        # and the device would be recreated. entry.unique_id is region:brand:user
-        # (set in the config flow) and never changes.
-        ident = coordinator.entry.unique_id or coordinator.entry.entry_id
+        # Stable identity: the config entry id. It never changes for the life of
+        # the entry, and — crucially — it is what pre-2.1.1 entities already used
+        # (that code fell back to entry_id whenever VIN was None, which it always
+        # is before the car's first sync). Deriving identity from VIN, or from
+        # entry.unique_id, would recreate every entity + the device on upgrade.
+        ident = coordinator.entry.entry_id
         self._attr_unique_id = f"{ident}_{key}"
         vin = coordinator.vehicle.get("VIN")
         self._attr_device_info = DeviceInfo(
