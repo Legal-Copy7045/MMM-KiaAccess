@@ -134,6 +134,30 @@ g.KiaAccessCommands={
       return isFinite(ms) && ms >= 0 ? ms / 864e5 : null;
     })();
 
+    // genuine fault lamps the car reports (only those that exist AND are on).
+    // washer fluid / key-fob battery are deliberately not here — not "critical".
+    var FAULTS = [
+      ["brake_oil_warning_is_on", "Brake fluid low"],
+      ["brake_fluid_warning_is_on", "Brake fluid low"],
+      ["breaking_oil_warning_is_on", "Brake fluid low"],
+      ["battery_auxiliary_fail_warning_is_on", "12V battery system fault"],
+      ["air_bag_warning_is_on", "Airbag warning"],
+      ["srs_warning_is_on", "Airbag (SRS) warning"],
+      ["abs_warning_is_on", "ABS fault"],
+      ["esc_warning_is_on", "Stability control fault"],
+      ["engine_oil_warning_is_on", "Engine oil warning"],
+      ["break_pad_warning_is_on", "Brake pad wear"],
+      ["brake_pad_warning_is_on", "Brake pad wear"]
+    ];
+    var faults = [];
+    var faultSeen = {};
+    FAULTS.forEach(function (row) {
+      if (bool(row[0]) === true && !faultSeen[row[1]]) {
+        faultSeen[row[1]] = true;
+        faults.push(row[1]);
+      }
+    });
+
     return {
       batteryPct: num("ev_battery_percentage"),
       rangeKm: num("ev_driving_range"),
@@ -170,6 +194,7 @@ g.KiaAccessCommands={
       car12vPct: num("car_battery_percentage"),
       chargeLimitPct: chargeLimitPct,
       capacityKwh: num("ev_battery_capacity"),
+      faults: faults, // [] = no fault lamps; names of any that are on
       history: opts.history || [],
       tokenAgeDays: tokenAgeDays,
       otpLifetimeDays: opts.otpLifetimeDays,
@@ -410,6 +435,21 @@ g.KiaAccessCommands={
     return heatLines(LG_X + 6, LG_X + LG_W - 6, [LG_Y + 9, LG_Y + 18, LG_Y + 27], COL.heat);
   }
 
+  // critical-issue badge — a warning triangle in the right margin, up toward
+  // the front of the car (clear of the charger, which renders lower/rear)
+  function criticalBadge() {
+    return (
+      '<g transform="translate(189 70)" class="kiaaccess-critical">' +
+      '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
+      'fill="' + COL.bad + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
+      pulse("opacity", "0.5", "1", 1.05) +
+      "</path>" +
+      '<rect x="20.5" y="11" width="3" height="12" rx="1.5" fill="#fff"/>' +
+      '<circle cx="22" cy="29" r="2" fill="#fff"/>' +
+      "</g>"
+    );
+  }
+
   // air conditioning: a vent bar at the front + four wavy streams rolling back
   function airWaves(col) {
     var g = '<rect x="70" y="96" width="60" height="4" rx="2" fill="' + col + '" opacity="0.55"/>';
@@ -467,7 +507,8 @@ g.KiaAccessCommands={
    *   doorFL/FR/RL/RR (open), winFL/FR/RL/RR (window open), hood (frunk),
    *   trunk (liftgate), sunroof;
    *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null);
-   *   tyreFL/FR/RL/RR, tyreAny
+   *   tyreFL/FR/RL/RR, tyreAny;
+   *   critical (bool) -> shows a warning triangle in the front-right margin
    * @param {object} o { width, battery:false to omit the centre battery }
    */
   function carDiagram(s, o) {
@@ -627,6 +668,8 @@ g.KiaAccessCommands={
       (o.battery === false
         ? ""
         : verticalBattery(s.batteryPct, s.charging)) +
+      // critical-issue warning triangle (front-right margin)
+      (s.critical === true ? criticalBadge() : "") +
       "</svg>"
     );
   }
@@ -838,8 +881,11 @@ g.KiaAccessCommands={
   // built-in per-check config; user config is merged over this per key
   var CHECK_DEFAULTS = {
     evBatteryLow: { enabled: true, level: "warning", belowPct: 20, clearPct: 25 },
+    evBatteryCritical: { enabled: true, level: "critical", belowPct: 8, clearPct: 12 },
     battery12vLow: { enabled: true, level: "warning", belowPct: 55, clearPct: 60 },
+    battery12vCritical: { enabled: true, level: "critical", belowPct: 40, clearPct: 45 },
     battery12vDrain: { enabled: true, level: "warning", dropPct: 8, overHours: 12 },
+    vehicleFault: { enabled: true, level: "critical" },
     otpExpiring: { enabled: true, level: "warning" }, // lifetimeDays / warnDays fall back to config
     unlocked: { enabled: true, level: "warning" },
     doorOpen: { enabled: true, level: "warning" },
@@ -912,7 +958,21 @@ g.KiaAccessCommands={
       });
     }
     threshold("ev_battery_low", num(s.batteryPct), checkCfg(cfg, "evBatteryLow"), "EV battery");
+    threshold("ev_battery_critical", num(s.batteryPct), checkCfg(cfg, "evBatteryCritical"), "EV battery critically");
     threshold("battery_12v_low", num(s.car12vPct), checkCfg(cfg, "battery12vLow"), "12V battery");
+    threshold("battery_12v_critical", num(s.car12vPct), checkCfg(cfg, "battery12vCritical"), "12V battery critically");
+
+    // ---- vehicle fault lamps (brake fluid, 12V system, ABS, airbag, …) ----
+    var cFault = checkCfg(cfg, "vehicleFault");
+    if (cFault.enabled) {
+      var faults = Array.isArray(s.faults) ? s.faults : null;
+      var fActive = faults == null ? null : faults.length > 0;
+      emit("vehicle_fault", cFault.level, fActive,
+        fActive === true
+          ? "Warning light: " + faults.join(", ")
+          : "No fault lights",
+        { faults: faults || [] });
+    }
 
     // ---- 12V draining while parked ----
     var cVD = checkCfg(cfg, "battery12vDrain");
@@ -1063,6 +1123,7 @@ g.KiaAccessCommands={
 
   var V = self.KiaAccessVisuals;
   var S = self.KiaAccessState;
+  var C = self.KiaConditions;
   var CATALOGUE = (self.KiaAccessEntities && self.KiaAccessEntities.entities) || [];
   var COMMANDS = (self.KiaAccessCommands && self.KiaAccessCommands.commands) || [];
   var BUTTON_COMMANDS = COMMANDS.filter(function (c) { return !c.options; });
@@ -1183,6 +1244,14 @@ g.KiaAccessCommands={
       this._entryId = st.attributes.entry_id || null;
       var flat = flatFromAttributes(st.attributes);
       var state = S.buildState(flat, {});
+      if (C) {
+        try {
+          var cres = C.evaluate(state, {}, {});
+          state.critical = cres.conditions.some(function (c) {
+            return c.level === "critical" && c.active === true;
+          });
+        } catch (e) { /* ignore */ }
+      }
       var diagram = V.carDiagram(state, { width: 230, battery: true });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";

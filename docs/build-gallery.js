@@ -50,6 +50,10 @@ const GROUPS = [
     ["One tyre warning", { tyreFL: true }],
     ["All-tyre warning", { tyreAny: true }],
   ]],
+  ["Critical issue", [
+    ["Warning triangle", { critical: true }],
+    ["Critical + charging", { critical: true, charging: true, batteryPct: 41 }],
+  ]],
   ["Heaters", [
     ["Defrost (front + rear)", { defrost: true }],
     ["Rear-window heater", { rearHeat: true }],

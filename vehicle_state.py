@@ -82,6 +82,25 @@ def build_state(flat, opts=None):
             return None
         return ms / 864e5 if ms >= 0 else None
 
+    # genuine fault lamps the car reports (only those that exist AND are on)
+    _FAULTS = [
+        ("brake_oil_warning_is_on", "Brake fluid low"),
+        ("brake_fluid_warning_is_on", "Brake fluid low"),
+        ("breaking_oil_warning_is_on", "Brake fluid low"),
+        ("battery_auxiliary_fail_warning_is_on", "12V battery system fault"),
+        ("air_bag_warning_is_on", "Airbag warning"),
+        ("srs_warning_is_on", "Airbag (SRS) warning"),
+        ("abs_warning_is_on", "ABS fault"),
+        ("esc_warning_is_on", "Stability control fault"),
+        ("engine_oil_warning_is_on", "Engine oil warning"),
+        ("break_pad_warning_is_on", "Brake pad wear"),
+        ("brake_pad_warning_is_on", "Brake pad wear"),
+    ]
+    faults = []
+    for key, label in _FAULTS:
+        if _bool(f, key) is True and label not in faults:
+            faults.append(label)
+
     return {
         "batteryPct": _num(f, "ev_battery_percentage"),
         "rangeKm": _num(f, "ev_driving_range"),
@@ -117,6 +136,7 @@ def build_state(flat, opts=None):
         "car12vPct": _num(f, "car_battery_percentage"),
         "chargeLimitPct": charge_limit(),
         "capacityKwh": _num(f, "ev_battery_capacity"),
+        "faults": faults,
         "history": opts.get("history") or [],
         "tokenAgeDays": token_age_days(),
         "otpLifetimeDays": opts.get("otpLifetimeDays"),

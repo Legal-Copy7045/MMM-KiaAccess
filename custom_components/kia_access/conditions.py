@@ -19,8 +19,11 @@ CORNERS = ["FL", "FR", "RL", "RR"]
 
 CHECK_DEFAULTS = {
     "evBatteryLow": {"enabled": True, "level": "warning", "belowPct": 20, "clearPct": 25},
+    "evBatteryCritical": {"enabled": True, "level": "critical", "belowPct": 8, "clearPct": 12},
     "battery12vLow": {"enabled": True, "level": "warning", "belowPct": 55, "clearPct": 60},
+    "battery12vCritical": {"enabled": True, "level": "critical", "belowPct": 40, "clearPct": 45},
     "battery12vDrain": {"enabled": True, "level": "warning", "dropPct": 8, "overHours": 12},
+    "vehicleFault": {"enabled": True, "level": "critical"},
     "otpExpiring": {"enabled": True, "level": "warning"},
     "unlocked": {"enabled": True, "level": "warning"},
     "doorOpen": {"enabled": True, "level": "warning"},
@@ -121,7 +124,18 @@ def evaluate(s, cfg, prev):
              {"pct": cur, "threshold": below})
 
     threshold("ev_battery_low", _num(s.get("batteryPct")), _check_cfg(cfg, "evBatteryLow"), "EV battery")
+    threshold("ev_battery_critical", _num(s.get("batteryPct")), _check_cfg(cfg, "evBatteryCritical"), "EV battery critically")
     threshold("battery_12v_low", _num(s.get("car12vPct")), _check_cfg(cfg, "battery12vLow"), "12V battery")
+    threshold("battery_12v_critical", _num(s.get("car12vPct")), _check_cfg(cfg, "battery12vCritical"), "12V battery critically")
+
+    # ---- vehicle fault lamps (brake fluid, 12V system, ABS, airbag, ...) ----
+    c_fault = _check_cfg(cfg, "vehicleFault")
+    if c_fault.get("enabled"):
+        faults = s.get("faults") if isinstance(s.get("faults"), list) else None
+        f_active = None if faults is None else (len(faults) > 0)
+        emit("vehicle_fault", c_fault.get("level"), f_active,
+             ("Warning light: " + ", ".join(faults)) if f_active else "No fault lights",
+             {"faults": faults or []})
 
     # ---- 12V draining while parked ----
     c_vd = _check_cfg(cfg, "battery12vDrain")

@@ -246,6 +246,21 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
     return heatLines(LG_X + 6, LG_X + LG_W - 6, [LG_Y + 9, LG_Y + 18, LG_Y + 27], COL.heat);
   }
 
+  // critical-issue badge — a warning triangle in the right margin, up toward
+  // the front of the car (clear of the charger, which renders lower/rear)
+  function criticalBadge() {
+    return (
+      '<g transform="translate(189 70)" class="kiaaccess-critical">' +
+      '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
+      'fill="' + COL.bad + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
+      pulse("opacity", "0.5", "1", 1.05) +
+      "</path>" +
+      '<rect x="20.5" y="11" width="3" height="12" rx="1.5" fill="#fff"/>' +
+      '<circle cx="22" cy="29" r="2" fill="#fff"/>' +
+      "</g>"
+    );
+  }
+
   // air conditioning: a vent bar at the front + four wavy streams rolling back
   function airWaves(col) {
     var g = '<rect x="70" y="96" width="60" height="4" rx="2" fill="' + col + '" opacity="0.55"/>';
@@ -303,7 +318,8 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
    *   doorFL/FR/RL/RR (open), winFL/FR/RL/RR (window open), hood (frunk),
    *   trunk (liftgate), sunroof;
    *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null);
-   *   tyreFL/FR/RL/RR, tyreAny
+   *   tyreFL/FR/RL/RR, tyreAny;
+   *   critical (bool) -> shows a warning triangle in the front-right margin
    * @param {object} o { width, battery:false to omit the centre battery }
    */
   function carDiagram(s, o) {
@@ -463,6 +479,8 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
       (o.battery === false
         ? ""
         : verticalBattery(s.batteryPct, s.charging)) +
+      // critical-issue warning triangle (front-right margin)
+      (s.critical === true ? criticalBadge() : "") +
       "</svg>"
     );
   }
@@ -636,7 +654,7 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
 </script>
 <script>
 const V = KiaAccessVisuals;
-const groups = [["Lock (body outline colour)",[["Locked",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Unlocked",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false}],["Lock unknown",{"locked":null,"batteryPct":78,"carOn":false,"headlights":false}]]],["Battery level (centre cell)",[["High charge",{"locked":true,"batteryPct":82,"carOn":false,"headlights":false}],["Mid charge",{"locked":true,"batteryPct":35,"carOn":false,"headlights":false}],["Low charge",{"locked":true,"batteryPct":8,"carOn":false,"headlights":false}],["No battery data",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false}]]],["Charging / plug (rear-right port)",[["Unplugged",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Plugged, not charging",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"plugged":true}],["Charging",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"charging":true}],["Exporting (V2L / V2X)",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"v2l":true}]]],["Doors, frunk, liftgate",[["A door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorFL":true}],["A rear door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorRR":true}],["Frunk open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"hood":true}],["Liftgate open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"trunk":true}]]],["Windows & sunroof",[["A window open (door shut)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"winFL":true}],["Sunroof shut",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Sunroof open",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"sunroof":true}]]],["Lights",[["Headlights off",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Headlights on",{"locked":true,"batteryPct":78,"carOn":false,"headlights":true}],["Car off (taillights outline)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Ignition / accessory on",{"locked":true,"batteryPct":78,"carOn":true,"headlights":false}]]],["Tyres",[["One tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreFL":true}],["All-tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreAny":true}]]],["Heaters",[["Defrost (front + rear)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"defrost":true}],["Rear-window heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"rearHeat":true}],["Side-mirror heaters",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"mirrorHeat":true}],["Steering-wheel heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"steerHeat":true}]]],["Air conditioning",[["Heating",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"heat"}],["Cooling",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"cool"}],["On (direction unknown)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"on"}]]],["Combined example",[["Cold morning, many states",{"locked":false,"batteryPct":11,"carOn":true,"headlights":true,"charging":true,"doorRR":true,"hood":true,"sunroof":true,"tyreFR":true,"climate":"heat","defrost":true,"rearHeat":true,"mirrorHeat":true,"steerHeat":true}]]]];
+const groups = [["Lock (body outline colour)",[["Locked",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Unlocked",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false}],["Lock unknown",{"locked":null,"batteryPct":78,"carOn":false,"headlights":false}]]],["Battery level (centre cell)",[["High charge",{"locked":true,"batteryPct":82,"carOn":false,"headlights":false}],["Mid charge",{"locked":true,"batteryPct":35,"carOn":false,"headlights":false}],["Low charge",{"locked":true,"batteryPct":8,"carOn":false,"headlights":false}],["No battery data",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false}]]],["Charging / plug (rear-right port)",[["Unplugged",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Plugged, not charging",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"plugged":true}],["Charging",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"charging":true}],["Exporting (V2L / V2X)",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"v2l":true}]]],["Doors, frunk, liftgate",[["A door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorFL":true}],["A rear door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorRR":true}],["Frunk open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"hood":true}],["Liftgate open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"trunk":true}]]],["Windows & sunroof",[["A window open (door shut)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"winFL":true}],["Sunroof shut",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Sunroof open",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"sunroof":true}]]],["Lights",[["Headlights off",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Headlights on",{"locked":true,"batteryPct":78,"carOn":false,"headlights":true}],["Car off (taillights outline)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Ignition / accessory on",{"locked":true,"batteryPct":78,"carOn":true,"headlights":false}]]],["Tyres",[["One tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreFL":true}],["All-tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreAny":true}]]],["Critical issue",[["Warning triangle",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"critical":true}],["Critical + charging",{"locked":true,"batteryPct":41,"carOn":false,"headlights":false,"critical":true,"charging":true}]]],["Heaters",[["Defrost (front + rear)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"defrost":true}],["Rear-window heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"rearHeat":true}],["Side-mirror heaters",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"mirrorHeat":true}],["Steering-wheel heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"steerHeat":true}]]],["Air conditioning",[["Heating",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"heat"}],["Cooling",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"cool"}],["On (direction unknown)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"on"}]]],["Combined example",[["Cold morning, many states",{"locked":false,"batteryPct":11,"carOn":true,"headlights":true,"charging":true,"doorRR":true,"hood":true,"sunroof":true,"tyreFR":true,"climate":"heat","defrost":true,"rearHeat":true,"mirrorHeat":true,"steerHeat":true}]]]];
 const out = document.getElementById("out");
 function section(title){ const h=document.createElement("h2"); h.textContent=title; out.appendChild(h);
   const g=document.createElement("div"); g.className="grid"; out.appendChild(g); return g; }

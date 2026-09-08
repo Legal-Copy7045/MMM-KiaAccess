@@ -14,6 +14,7 @@
 
   var V = self.KiaAccessVisuals;
   var S = self.KiaAccessState;
+  var C = self.KiaConditions;
   var CATALOGUE = (self.KiaAccessEntities && self.KiaAccessEntities.entities) || [];
   var COMMANDS = (self.KiaAccessCommands && self.KiaAccessCommands.commands) || [];
   var BUTTON_COMMANDS = COMMANDS.filter(function (c) { return !c.options; });
@@ -134,6 +135,14 @@
       this._entryId = st.attributes.entry_id || null;
       var flat = flatFromAttributes(st.attributes);
       var state = S.buildState(flat, {});
+      if (C) {
+        try {
+          var cres = C.evaluate(state, {}, {});
+          state.critical = cres.conditions.some(function (c) {
+            return c.level === "critical" && c.active === true;
+          });
+        } catch (e) { /* ignore */ }
+      }
       var diagram = V.carDiagram(state, { width: 230, battery: true });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";

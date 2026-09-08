@@ -1,0 +1,23 @@
+{
+  "name": "brake-fluid + 12V system fault + very low 12V -> criticals",
+  "flat": {
+    "vehicle.brake_fluid_warning_is_on": "true",
+    "vehicle.battery_auxiliary_fail_warning_is_on": "true",
+    "vehicle.car_battery_percentage": 33,
+    "vehicle.ev_battery_percentage": 55,
+    "vehicle.is_locked": "true"
+  },
+  "expectState": {
+    "car12vPct": 33,
+    "faults": ["Brake fluid low", "12V battery system fault"]
+  },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "vehicle_fault": true,
+    "battery_12v_critical": true,
+    "battery_12v_low": true,
+    "ev_battery_critical": false,
+    "ev_battery_low": false
+  }
+}
