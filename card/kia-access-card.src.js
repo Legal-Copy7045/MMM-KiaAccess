@@ -210,7 +210,10 @@
         } catch (e) { /* ignore */ }
       }
       state.flashing = this._flashing === true;
-      var diagram = V.carDiagram(state, { width: 230, battery: true });
+      // the API reports temperatures in °C; follow the HA unit system for display
+      var tUnit = (hass.config && hass.config.unit_system &&
+        hass.config.unit_system.temperature === "°F") ? "F" : "C";
+      var diagram = V.carDiagram(state, { width: 230, battery: true, tempUnit: tUnit });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";
       var updated = st.state && st.state !== "unknown" && st.state !== "unavailable"
