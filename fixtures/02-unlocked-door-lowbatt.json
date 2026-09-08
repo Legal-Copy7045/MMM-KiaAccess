@@ -1,0 +1,20 @@
+{
+  "name": "unlocked, a door open, EV battery low",
+  "flat": {
+    "vehicle.ev_battery_percentage": 12,
+    "vehicle.car_battery_percentage": 80,
+    "vehicle.is_locked": "false",
+    "vehicle.front_left_door_is_open": "true",
+    "vehicle.front_right_door_is_open": "false",
+    "vehicle.back_left_door_is_open": "false",
+    "vehicle.back_right_door_is_open": "false"
+  },
+  "expectState": { "batteryPct": 12, "locked": false, "doorFL": true },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "ev_battery_low": true,
+    "unlocked": true,
+    "door_open": true
+  }
+}

@@ -18,7 +18,13 @@ const check = process.argv.includes("--check");
 const outputs = {};
 
 // 1:1 copies
-for (const rel of ["core/entities.json", "core/commands.json", "kia_client.py"]) {
+for (const rel of [
+  "core/entities.json",
+  "core/commands.json",
+  "kia_client.py",
+  "conditions.py",
+  "vehicle_state.py"
+]) {
   outputs[path.join(HA, path.basename(rel))] = fs.readFileSync(path.join(ROOT, rel), "utf8");
 }
 

@@ -1,0 +1,16 @@
+{
+  "name": "12V down 12% over ~11h while parked -> drain alert",
+  "state": {
+    "carOn": false,
+    "charging": false,
+    "plugged": false,
+    "locked": true,
+    "history": [
+      { "hoursAgo": 11, "v12": 82, "ev": 60 },
+      { "hoursAgo": 1, "v12": 70, "ev": 60 }
+    ]
+  },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": { "battery_12v_drain": true }
+}

@@ -500,25 +500,34 @@ npm test
 
 ## Project layout
 
-`core/` holds the platform-agnostic engine, shared verbatim with the planned
-Home Assistant integration and Lovelace card:
+**Define a feature once.** The shared engine lives in `core/` and at the repo
+root, and every surface (MagicMirror, the HA integration, the Lovelace card) is
+generated from it:
 
 | file | purpose |
 | --- | --- |
-| `core/entities.json` | canonical catalogue of vehicle entities — everything else (MQTT discovery, HA entities, docs) generates from this |
-| `core/state.js` | `buildState(flat, opts)` — flat Kia payload → normalised diagram/condition state |
+| `core/entities.json` | canonical catalogue of vehicle entities — MQTT discovery, HA sensors/binary-sensors and the card's table all generate from this |
+| `core/commands.json` | canonical control commands — HA services, HA buttons and the card's action buttons generate from this |
+| `core/state.js` / `vehicle_state.py` | `buildState(flat)` — flat payload → normalised diagram/condition state (JS + Python ports) |
+| `core/conditions.js` / `conditions.py` | edge-triggered alert rules `evaluate(state, cfg, prev)` (JS + Python ports) |
 | `core/visuals.js` | SVG car diagram, battery, sparkline, range ring, charge bar |
-| `core/conditions.js` | edge-triggered alert rules (`evaluate(state, cfg, prev)`) |
 | `core/flatten.js` | flatten / glob-select / format helpers |
 | `core/ha-discovery.js` | Home Assistant MQTT discovery, built from `entities.json` |
+| `kia_client.py` | shared Kia client (auth, token, fetch, control) — used by the MM bridge and the HA integration |
+| `card/kia-access-card.src.js` | the Lovelace card class |
+
+`fixtures/*.json` are scenarios run through **both** the JS and Python engines
+in CI (`test/contract.test.js`, `test/contract_test.py`) — any drift between the
+ports fails the build.
+
+`scripts/sync-core.js` vendors the shared files into
+`custom_components/kia_access/`, generates its `services.yaml`, and bundles the
+card (`frontend/kia-access-card.js` = catalogues + `core/{state,visuals,
+conditions}.js` + the card class). `npm test` / CI fail if anything is stale —
+run `npm run sync` after editing `core/`.
 
 The MagicMirror front end (`MMM-KiaAccess.js`), `node_helper.js` and the Python
 bridge (`kia_bridge.py`) stay at the repo root as MagicMirror requires.
-
-`custom_components/kia_access/` is the Home Assistant integration (see below).
-`scripts/sync-core.js` copies `core/entities.json`, `core/commands.json` and
-`kia_client.py` into it and generates its `services.yaml`, so a feature defined
-in `core/` lands on every surface. CI fails if the copies drift.
 
 ## Home Assistant
 
@@ -535,6 +544,9 @@ You get a device per vehicle with:
 - buttons for `lock`, `unlock`, `start/stop climate`, `start/stop charge`
 - services `kia_access.lock` … `kia_access.set_charge_limits` (and
   `kia_access.start_climate` with `set_temp` / `duration` / `defrost`)
+- `kia_access_alert` events on the HA event bus for the same edge-triggered
+  conditions the mirror notifies on (battery low, left unlocked, door open,
+  charge complete / interrupted, 12V drain, …) — use them in automations
 
 Poll interval and live-wake-up timeout are in the integration's **Configure**
 dialog.

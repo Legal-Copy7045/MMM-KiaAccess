@@ -1,0 +1,30 @@
+{
+  "name": "parked, locked, healthy",
+  "flat": {
+    "vehicle.ev_battery_percentage": 72,
+    "vehicle.car_battery_percentage": 88,
+    "vehicle.ev_driving_range": 410,
+    "vehicle.is_locked": "true",
+    "vehicle.front_left_door_is_open": "false",
+    "vehicle.front_right_door_is_open": "false",
+    "vehicle.back_left_door_is_open": "false",
+    "vehicle.back_right_door_is_open": "false",
+    "vehicle.hood_is_open": "false",
+    "vehicle.trunk_is_open": "false",
+    "vehicle.sunroof_is_open": "false",
+    "vehicle.tire_pressure_all_warning_is_on": "false",
+    "vehicle.ev_battery_is_charging": "false",
+    "vehicle.ev_battery_is_plugged_in": "false"
+  },
+  "expectState": { "batteryPct": 72, "car12vPct": 88, "locked": true, "charging": false },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "ev_battery_low": false,
+    "battery_12v_low": false,
+    "unlocked": false,
+    "door_open": false,
+    "tyre_pressure": false,
+    "otp_expiring": null
+  }
+}
