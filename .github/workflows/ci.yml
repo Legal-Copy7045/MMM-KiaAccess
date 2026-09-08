@@ -66,3 +66,13 @@ jobs:
         run: |
           pip install --quiet homeassistant
           python test/ha_import_check.py
+
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
