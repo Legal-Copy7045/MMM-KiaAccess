@@ -4,7 +4,7 @@
   "description": "MagicMirror² module that shows configurable Kia Connect / Bluelink vehicle data (built for the Kia EV9)",
   "main": "MMM-KiaAccess.js",
   "scripts": {
-    "test": "node test/flatten.test.js && node test/conditions.test.js && node test/ha-discovery.test.js",
+    "test": "node test/flatten.test.js && node test/conditions.test.js && node test/state.test.js && node test/ha-discovery.test.js",
     "postinstall": "node setup_python.js || echo 'Python setup incomplete — see README (Python version).'"
   },
   "repository": {

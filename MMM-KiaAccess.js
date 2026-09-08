@@ -168,7 +168,12 @@ Module.register("MMM-KiaAccess", {
   },
 
   getScripts() {
-    return [this.file("core/flatten.js"), this.file("core/visuals.js"), this.file("core/conditions.js")];
+    return [
+      this.file("core/flatten.js"),
+      this.file("core/visuals.js"),
+      this.file("core/conditions.js"),
+      this.file("core/state.js")
+    ];
   },
 
   start() {
@@ -179,6 +184,7 @@ Module.register("MMM-KiaAccess", {
     this.utils = typeof KiaAccessUtils !== "undefined" ? KiaAccessUtils : null;
     this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
     this.conditions = typeof KiaConditions !== "undefined" ? KiaConditions : null;
+    this.stateBuilder = typeof KiaAccessState !== "undefined" ? KiaAccessState : null;
     this.flatMap = null;
     this.history = [];
     this.stale = false;
@@ -332,6 +338,14 @@ Module.register("MMM-KiaAccess", {
   // read canonical vehicle.* values straight from the flat map, independent of
   // the include/exclude list, so the diagram is always complete
   visualState() {
+    if (this.stateBuilder) {
+      return this.stateBuilder.buildState(this.flatMap || {}, {
+        history: this.history || [],
+        otpLifetimeDays: this.config.otpLifetimeDays,
+        otpWarnDays: this.config.otpWarnDays
+      });
+    }
+    // fallback (core/state.js failed to load) — inline copy
     const f = this.flatMap || {};
     const bool = (k) => {
       const v = f["vehicle." + k];

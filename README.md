@@ -498,6 +498,23 @@ The `otpExpiring` notification check fires the same warning to other modules.
 npm test
 ```
 
+## Project layout
+
+`core/` holds the platform-agnostic engine, shared verbatim with the planned
+Home Assistant integration and Lovelace card:
+
+| file | purpose |
+| --- | --- |
+| `core/entities.json` | canonical catalogue of vehicle entities — everything else (MQTT discovery, HA entities, docs) generates from this |
+| `core/state.js` | `buildState(flat, opts)` — flat Kia payload → normalised diagram/condition state |
+| `core/visuals.js` | SVG car diagram, battery, sparkline, range ring, charge bar |
+| `core/conditions.js` | edge-triggered alert rules (`evaluate(state, cfg, prev)`) |
+| `core/flatten.js` | flatten / glob-select / format helpers |
+| `core/ha-discovery.js` | Home Assistant MQTT discovery, built from `entities.json` |
+
+The MagicMirror front end (`MMM-KiaAccess.js`), `node_helper.js` and the Python
+bridge (`kia_bridge.py`) stay at the repo root as MagicMirror requires.
+
 ## Credits
 
 - [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
