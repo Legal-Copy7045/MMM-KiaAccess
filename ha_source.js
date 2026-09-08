@@ -2,12 +2,17 @@
  *
  * Used when the module is configured with `source: "homeassistant"`. It reads
  * the Kia Access integration's diagnostic summary sensor (the entity whose
- * attributes carry the whole flat payload, `kia_access_raw: true`) over the HA
- * REST API and returns the same payload shape the Python bridge produces:
+ * attributes carry the whole flat payload, `kia_access_raw: true`) and returns
+ * the same payload shape the Python bridge produces:
  *
  *   { vehicle: { <flat vehicle attrs> }, _meta: { fetchedAt, source, ... } }
  *
- * Node >= 18 (global fetch). No external deps.
+ * Two mechanisms:
+ *   - fetchFromHA(ha)      one-shot REST read           (homeassistant.mode: "poll")
+ *   - new HaLiveClient(..) persistent WebSocket, pushes  (homeassistant.mode: "push", default)
+ *
+ * Node >= 18 for fetch; the WebSocket client needs Node >= 22 (global WebSocket)
+ * and degrades gracefully (node_helper falls back to REST polling). No deps.
  */
 "use strict";
 
@@ -64,6 +69,28 @@ async function findSummaryEntity(base, token, configured) {
   return hit.entity_id;
 }
 
+/** turn an HA state object ({state, attributes, last_changed}) into our payload */
+function payloadFromState(state, entity, via) {
+  const attrs = (state && state.attributes) || {};
+  const vehicle = {};
+  Object.keys(attrs).forEach((k) => {
+    if (SKIP_ATTRS.has(k)) return;
+    vehicle[k] = attrs[k];
+  });
+  const meta = {
+    fetchedAt: new Date().toISOString(),
+    source: "homeassistant",
+    via: via || "rest",
+    haEntity: entity,
+    haLastChanged: (state && state.last_changed) || null
+  };
+  if (attrs.note) meta.note = attrs.note;
+  if (!Object.keys(vehicle).length) {
+    meta.warning = "Home Assistant returned no vehicle attributes yet";
+  }
+  return { vehicle, _meta: meta };
+}
+
 /**
  * @param {object} ha  { url, token, entity? }
  * @returns {Promise<{vehicle: object, _meta: object}>}
@@ -75,25 +102,189 @@ async function fetchFromHA(ha) {
   const base = String(ha.url).replace(/\/+$/, "");
   const entity = await findSummaryEntity(base, ha.token, ha.entity);
   const state = await haGet(base, ha.token, "/api/states/" + encodeURIComponent(entity));
-
-  const attrs = state.attributes || {};
-  const vehicle = {};
-  Object.keys(attrs).forEach((k) => {
-    if (SKIP_ATTRS.has(k)) return;
-    vehicle[k] = attrs[k];
-  });
-
-  const meta = {
-    fetchedAt: new Date().toISOString(),
-    source: "homeassistant",
-    haEntity: entity,
-    haLastChanged: state.last_changed || null
-  };
-  if (attrs.note) meta.note = attrs.note;
-  if (!Object.keys(vehicle).length) {
-    meta.warning = "Home Assistant returned no vehicle attributes yet";
-  }
-  return { vehicle, _meta: meta };
+  return payloadFromState(state, entity, "rest");
 }
 
-module.exports = { fetchFromHA };
+/* ---------------------------------------------------------------------------
+ * HaLiveClient — persistent WebSocket, pushes changes as they happen
+ * ------------------------------------------------------------------------- */
+const PING_MS = 25000;
+const PONG_GRACE_MS = 70000;
+const RECONNECT_MIN_MS = 3000;
+const RECONNECT_MAX_MS = 120000;
+
+class HaLiveClient {
+  /**
+   * @param {object} ha  { url, token, entity? }
+   * @param {object} cb  { onPayload(payload), onStatus(message, {fatal}) }
+   */
+  constructor(ha, cb) {
+    this.ha = ha || {};
+    this.cb = cb || {};
+    this.base = String(this.ha.url || "").replace(/\/+$/, "");
+    this._stopped = false;
+    this._ws = null;
+    this._msgId = 1;
+    this._subId = null;
+    this._entity = null;
+    this._lastPong = 0;
+    this._retry = RECONNECT_MIN_MS;
+    this._pingTimer = null;
+    this._reconnectTimer = null;
+  }
+
+  static get supported() {
+    return typeof WebSocket === "function";
+  }
+
+  get healthy() {
+    return !!(
+      this._ws &&
+      this._ws.readyState === 1 /* OPEN */ &&
+      this._subId !== null &&
+      Date.now() - this._lastPong < PONG_GRACE_MS
+    );
+  }
+
+  start() {
+    if (!HaLiveClient.supported) {
+      this._status("global WebSocket not available (need Node >= 22) — using REST polling", { fatal: false });
+      return;
+    }
+    if (!this.base || !this.ha.token) {
+      this._status("push needs homeassistant.url and homeassistant.token", { fatal: true });
+      return;
+    }
+    this._connect();
+  }
+
+  stop() {
+    this._stopped = true;
+    clearTimeout(this._reconnectTimer);
+    clearInterval(this._pingTimer);
+    try { if (this._ws) this._ws.close(); } catch (e) { /* ignore */ }
+    this._ws = null;
+  }
+
+  _status(msg, opts) {
+    if (typeof this.cb.onStatus === "function") this.cb.onStatus(msg, opts || {});
+  }
+
+  _wsUrl() {
+    return this.base.replace(/^http/i, "ws") + "/api/websocket";
+  }
+
+  async _connect() {
+    if (this._stopped) return;
+    this._subId = null;
+    let ws;
+    try {
+      ws = new WebSocket(this._wsUrl());
+    } catch (err) {
+      return this._scheduleReconnect("connect failed: " + (err && err.message));
+    }
+    this._ws = ws;
+
+    ws.addEventListener("message", (ev) => this._onMessage(String(ev.data)));
+    ws.addEventListener("close", () => this._scheduleReconnect("connection closed"));
+    ws.addEventListener("error", () => {
+      // 'close' fires straight after; let that drive the reconnect
+    });
+  }
+
+  _send(obj) {
+    try { this._ws.send(JSON.stringify(obj)); } catch (e) { /* reconnect will handle */ }
+  }
+
+  async _onMessage(raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+
+    if (msg.type === "auth_required") {
+      this._send({ type: "auth", access_token: this.ha.token });
+      return;
+    }
+    if (msg.type === "auth_invalid") {
+      this._status("Home Assistant rejected the access token", { fatal: true });
+      this.stop();
+      return;
+    }
+    if (msg.type === "auth_ok") {
+      try {
+        this._entity = await findSummaryEntity(this.base, this.ha.token, this.ha.entity);
+      } catch (err) {
+        return this._scheduleReconnect(err && err.message);
+      }
+      this._subId = this._msgId++;
+      this._send({
+        id: this._subId,
+        type: "subscribe_trigger",
+        trigger: { platform: "state", entity_id: this._entity }
+      });
+      // prime with the current state (triggers only fire on change)
+      this._primeInitial();
+      this._retry = RECONNECT_MIN_MS;
+      this._lastPong = Date.now();
+      clearInterval(this._pingTimer);
+      this._pingTimer = setInterval(() => this._ping(), PING_MS);
+      this._status("push connected (" + this._entity + ")", { fatal: false });
+      return;
+    }
+    if (msg.type === "pong") {
+      this._lastPong = Date.now();
+      return;
+    }
+    if (msg.type === "event" && msg.id === this._subId) {
+      const to =
+        msg.event &&
+        msg.event.variables &&
+        msg.event.variables.trigger &&
+        msg.event.variables.trigger.to_state;
+      if (to && typeof this.cb.onPayload === "function") {
+        this.cb.onPayload(payloadFromState(to, this._entity, "push"));
+      }
+    }
+  }
+
+  async _primeInitial() {
+    try {
+      const state = await haGet(
+        this.base,
+        this.ha.token,
+        "/api/states/" + encodeURIComponent(this._entity)
+      );
+      if (typeof this.cb.onPayload === "function") {
+        this.cb.onPayload(payloadFromState(state, this._entity, "push"));
+      }
+    } catch (e) {
+      /* the periodic fallback poll in node_helper will cover this */
+    }
+  }
+
+  _ping() {
+    if (!this._ws || this._ws.readyState !== 1) return;
+    if (Date.now() - this._lastPong > PONG_GRACE_MS) {
+      this._scheduleReconnect("no pong — connection stale");
+      return;
+    }
+    this._send({ id: this._msgId++, type: "ping" });
+  }
+
+  _scheduleReconnect(why) {
+    if (this._stopped) return;
+    clearInterval(this._pingTimer);
+    this._subId = null;
+    try { if (this._ws) this._ws.close(); } catch (e) { /* ignore */ }
+    this._ws = null;
+    if (this._reconnectTimer) return; // already scheduled
+    this._status("push dropped (" + (why || "unknown") + ") — retrying in " +
+      Math.round(this._retry / 1000) + "s", { fatal: false });
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this._connect();
+    }, this._retry);
+    this._retry = Math.min(this._retry * 2, RECONNECT_MAX_MS);
+  }
+}
+
+module.exports = { fetchFromHA, HaLiveClient };
