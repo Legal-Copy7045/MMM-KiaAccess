@@ -80,6 +80,31 @@
   color: #ff9a9a;
 }
 
+.kiaaccess-compact {
+  font-size: 17px;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.kiaaccess-spark,
+.kiaaccess-ring,
+.kiaaccess-chargebar {
+  display: block;
+  margin: 4px auto 0;
+  max-width: 100%;
+  height: auto;
+}
+
+.kiaaccess-location {
+  gap: 4px;
+}
+
+.kiaaccess-map {
+  border-radius: 6px;
+  margin-top: 4px;
+  opacity: 0.9;
+}
+
 .kiaaccess-footer {
   margin-top: 4px;
   text-align: right;

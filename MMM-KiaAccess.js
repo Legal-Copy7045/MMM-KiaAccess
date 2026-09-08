@@ -24,11 +24,17 @@ Module.register("MMM-KiaAccess", {
     pythonBin: "python3", // command used to run kia_bridge.py
     fetchTimeout: 90, // seconds before the bridge process is killed
 
-    // ---- polling ----
+    // ---- polling / reliability ----
     updateInterval: 30 * 60 * 1000, // 30 min. Be gentle: frequent polls drain the 12V battery.
-    retryInterval: 5 * 60 * 1000,
+    retryInterval: 5 * 60 * 1000, // base delay between retries after a failure
+    backoffMax: 8, // cap the exponential backoff at retryInterval * this
+    maxRequestsPerHour: 0, // 0 = no cap. Protects the Kia account from lock-outs.
     refresh: true, // true = ask the car for live data, false = Kia's cached copy
     geocode: false, // true = resolve vehicle.geocode to a street address (OpenStreetMap)
+    historyDays: 60, // rolling SoC / 12V history kept on disk (sparkline + drain alert)
+    historyMinIntervalMinutes: 30, // don't record history samples closer than this
+    otpLifetimeDays: 30, // assumed Kia refresh-token lifetime (used for the expiry warning)
+    otpWarnDays: 7, // start showing "OTP expires in N days" this many days out
 
     // ---- display ----
     header: "Kia",
@@ -74,6 +80,30 @@ Module.register("MMM-KiaAccess", {
       battery: true, // vertical battery in the centre of the car (charge % + charging bolt)
       rowIcons: true, // Font Awesome icon before each table row
       width: 210, // px width for the car SVG
+      compact: false, // one-line summary instead of the diagram + table
+      chargeProgress: true, // when plugged in: a progress bar + "full at HH:MM"
+      rangeRing: false, // a radial SoC / range gauge under the car
+      socHistory: false, // a battery-% sparkline over the last `socHistoryDays`
+      socHistoryDays: 14,
+      tripStats: false, // distance / consumption / regen from month_trip_info
+      location: {
+        enabled: false,
+        homeLat: null, // set both to show "N mi from home"
+        homeLon: null,
+        map: false, // show a static map image
+        mapZoom: 14,
+        mapWidth: 210,
+        mapHeight: 120,
+        // {lat} {lon} {zoom} {w} {h} are substituted. Default is keyless OSM;
+        // for reliability use your own provider (Geoapify / Mapbox / …).
+        mapUrlTemplate:
+          "https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom={zoom}&size={w}x{h}&markers={lat},{lon},red-pushpin"
+      },
+      chargeCost: {
+        enabled: false,
+        pricePerKwh: 0, // e.g. 0.14
+        currency: "$"
+      },
       // readouts shown under the battery gauge (and removed from the table).
       // Uses your labels / formatters / hideWhenFalsy just like table rows.
       batteryDetail: [
@@ -101,8 +131,10 @@ Module.register("MMM-KiaAccess", {
       // object to override its `level` / thresholds. Anything omitted keeps the
       // built-in default (see conditions.js CHECK_DEFAULTS).
       checks: {
-        // evBatteryLow:  { belowPct: 20, clearPct: 25, level: "warning" },
-        // battery12vLow: { belowPct: 55, clearPct: 60 },
+        // evBatteryLow:   { belowPct: 20, clearPct: 25, level: "warning" },
+        // battery12vLow:  { belowPct: 55, clearPct: 60 },
+        // battery12vDrain:{ dropPct: 8, overHours: 12 }, // 12V falling while parked
+        // otpExpiring:    { warnDays: 7 },
         // windowOpen: false,
         // chargeInterrupted: { minGapPct: 3 },
       }
@@ -118,7 +150,12 @@ Module.register("MMM-KiaAccess", {
       password: "",
       topicPrefix: "kia/ev9",
       retain: true,
-      publishJson: true // also publish <prefix>/state as one JSON blob
+      publishJson: true, // also publish <prefix>/state as one JSON blob
+      homeAssistant: {
+        enabled: false, // publish HA MQTT discovery so entities appear automatically
+        discoveryPrefix: "homeassistant",
+        device: {} // extra fields merged into the HA `device` block
+      }
     }
   },
 
@@ -139,19 +176,25 @@ Module.register("MMM-KiaAccess", {
     this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
     this.conditions = typeof KiaConditions !== "undefined" ? KiaConditions : null;
     this.flatMap = null;
+    this.history = [];
+    this.stale = false;
+    this.staleNote = null;
     this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
     this.firstConditionRun = true;
 
     // MagicMirror merges `config` shallowly, so a user-supplied nested block
     // replaces the default wholesale — re-apply the defaults for any missing keys
-    this.config.visuals = Object.assign({}, this.defaults.visuals, this.config.visuals || {});
-    this.config.icons = Object.assign({}, this.defaults.icons, this.config.icons || {});
-    this.config.notifications = Object.assign(
-      {},
-      this.defaults.notifications,
-      this.config.notifications || {}
+    const merge = (base, over) => Object.assign({}, base, over || {});
+    this.config.visuals = merge(this.defaults.visuals, this.config.visuals);
+    this.config.visuals.location = merge(this.defaults.visuals.location, this.config.visuals.location);
+    this.config.visuals.chargeCost = merge(this.defaults.visuals.chargeCost, this.config.visuals.chargeCost);
+    this.config.icons = merge(this.defaults.icons, this.config.icons);
+    this.config.notifications = merge(this.defaults.notifications, this.config.notifications);
+    this.config.mqtt = merge(this.defaults.mqtt, this.config.mqtt);
+    this.config.mqtt.homeAssistant = merge(
+      this.defaults.mqtt.homeAssistant,
+      this.config.mqtt.homeAssistant
     );
-    this.config.mqtt = Object.assign({}, this.defaults.mqtt, this.config.mqtt || {});
 
     if (!this.config.username || !this.config.password) {
       this.errorMessage = "Set username / password / pin in config.js";
@@ -182,9 +225,12 @@ Module.register("MMM-KiaAccess", {
       region: c.region,
       vin: c.vin,
       refresh: c.refresh,
-      geocode: c.geocode,
+      geocode: c.geocode || (c.visuals && c.visuals.location && c.visuals.location.enabled),
       pythonBin: c.pythonBin,
       fetchTimeout: c.fetchTimeout,
+      maxRequestsPerHour: c.maxRequestsPerHour,
+      historyDays: c.historyDays,
+      historyMinIntervalMinutes: c.historyMinIntervalMinutes,
       mqtt: c.mqtt && c.mqtt.enabled && c.mqtt.url ? c.mqtt : null
     };
   },
@@ -193,21 +239,32 @@ Module.register("MMM-KiaAccess", {
     if (!data || !this.isForMe(data.identifier)) return;
 
     if (notification === "KIA_DATA") {
-      this.errorMessage = null;
       this.loading = false;
       this.rawPayload = data.payload;
-      this.lastUpdated = new Date();
+      const m = data.payload._meta || {};
+      this.history = data.payload.history || [];
+      this.stale = !!m.stale;
+      this.staleNote = m.note || null;
+      this.errorMessage = m.error || null; // shown as a strip; data still renders
+      this.lastUpdated = new Date(m.stale ? m.cachedAt || m.fetchedAt : m.fetchedAt || Date.now());
       this.rebuildView();
       this.processConditions();
       this.updateDom(this.config.animationSpeed);
-      this.scheduleFetch(this.config.updateInterval);
+      this.scheduleFetch(this.nextDelay(m.failStreak || 0, m.retryAfterMs));
     } else if (notification === "KIA_ERROR") {
       this.loading = false;
       this.errorMessage = data.error || "Unknown error";
       Log.error("[MMM-KiaAccess] " + this.errorMessage);
       this.updateDom(this.config.animationSpeed);
-      this.scheduleFetch(this.config.retryInterval);
+      this.scheduleFetch(this.nextDelay(data.failStreak || 1, data.retryAfterMs));
     }
+  },
+
+  nextDelay(failStreak, retryAfterMs) {
+    if (retryAfterMs) return retryAfterMs;
+    if (!failStreak) return this.config.updateInterval;
+    const cap = this.config.retryInterval * (this.config.backoffMax || 8);
+    return Math.min(this.config.retryInterval * Math.pow(2, failStreak - 1), cap);
   },
 
   isForMe(identifier) {
@@ -344,7 +401,17 @@ Module.register("MMM-KiaAccess", {
         const dc = num("ev_charge_limits_dc");
         const vals = [ac, dc].filter((v) => v != null && v > 0);
         return vals.length ? Math.max(...vals) : null;
-      })()
+      })(),
+      capacityKwh: num("ev_battery_capacity"),
+      history: this.history || [],
+      tokenAgeDays: (() => {
+        const t = f["_meta.tokenEnrolledAt"];
+        if (!t) return null;
+        const ms = Date.now() - new Date(t).getTime();
+        return isFinite(ms) && ms >= 0 ? ms / 864e5 : null;
+      })(),
+      otpLifetimeDays: this.config.otpLifetimeDays,
+      otpWarnDays: this.config.otpWarnDays
     };
   },
 
@@ -409,6 +476,227 @@ Module.register("MMM-KiaAccess", {
     }
   },
 
+  // ---------- small helpers for the optional widgets ----------
+
+  agoText(date) {
+    if (!date) return "";
+    const mins = Math.round((Date.now() - date.getTime()) / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return mins + " min ago";
+    const hrs = Math.round(mins / 60);
+    if (hrs < 48) return hrs + " h ago";
+    return Math.round(hrs / 24) + " d ago";
+  },
+
+  fmtDist(km) {
+    if (km == null || isNaN(km)) return null;
+    return this.config.units === "metric"
+      ? Math.round(km) + " km"
+      : Math.round(km * 0.621371) + " mi";
+  },
+
+  // distance in km between two lat/lon (haversine)
+  haversineKm(a, b, c, d) {
+    const R = 6371;
+    const p = Math.PI / 180;
+    const h =
+      0.5 -
+      Math.cos((c - a) * p) / 2 +
+      (Math.cos(a * p) * Math.cos(c * p) * (1 - Math.cos((d - b) * p))) / 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  },
+
+  compactLine() {
+    const s = this.visualState();
+    const bits = [];
+    if (s.batteryPct != null) bits.push(Math.round(s.batteryPct) + "%");
+    const range = this.fmtDist(s.rangeKm);
+    if (range) bits.push(range);
+    if (s.locked === true) bits.push("🔒");
+    else if (s.locked === false) bits.push("🔓");
+    if (s.charging === true) bits.push("⚡" + (s.chargeKw ? " " + s.chargeKw + " kW" : ""));
+    else if (s.plugged === true) bits.push("🔌");
+    return bits.join(" · ");
+  },
+
+  // charge progress bar + "full at HH:MM" when plugged in
+  chargeProgressEl() {
+    const s = this.visualState();
+    if (!(this.config.visuals || {}).chargeProgress) return null;
+    if (s.charging !== true && s.plugged !== true) return null;
+    const el = document.createElement("div");
+    el.className = "kiaaccess-visuals";
+    const target = s.chargeLimitPct;
+    el.innerHTML = this.visuals.chargeBar(s.batteryPct, target, {
+      width: (this.config.visuals || {}).width || 210
+    });
+    const mins = this.utils
+      ? Number(this.flatMap["vehicle.ev_estimated_current_charge_duration"])
+      : NaN;
+    const cap = document.createElement("div");
+    cap.className = "kiaaccess-batt-detail";
+    let msg = s.charging === true ? "Charging" : "Plugged in, not charging";
+    if (s.charging === true && isFinite(mins) && mins > 0) {
+      const done = new Date(Date.now() + mins * 60000);
+      msg = "Full" + (target ? " (" + target + "%)" : "") + " at " +
+        done.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    cap.innerHTML = '<div><span class="kiaaccess-bd-value">' + this.escape(msg) + "</span></div>";
+    el.appendChild(cap);
+    return el;
+  },
+
+  rangeRingEl() {
+    const s = this.visualState();
+    if (!(this.config.visuals || {}).rangeRing || s.batteryPct == null) return null;
+    const el = document.createElement("div");
+    el.className = "kiaaccess-visuals";
+    el.innerHTML = this.visuals.rangeRing(s.batteryPct, {
+      charging: s.charging,
+      centreText: this.fmtDist(s.rangeKm) || ""
+    });
+    return el;
+  },
+
+  socHistoryEl() {
+    const vis = this.config.visuals || {};
+    if (!vis.socHistory) return null;
+    const days = vis.socHistoryDays || 14;
+    const cutoff = Date.now() - days * 864e5;
+    const pts = (this.history || [])
+      .filter((h) => h && h.t >= cutoff && h.ev != null)
+      .map((h) => ({ t: h.t, v: h.ev }));
+    if (pts.length < 2) return null;
+    const el = document.createElement("div");
+    el.className = "kiaaccess-visuals";
+    el.innerHTML = this.visuals.sparkline(pts, {
+      width: vis.width || 210,
+      height: 40,
+      color: this.visuals.COL.ok
+    });
+    const cap = document.createElement("div");
+    cap.className = "kiaaccess-batt-detail";
+    cap.innerHTML =
+      '<div><span class="kiaaccess-bd-label">Battery, last ' + days + " days</span></div>";
+    el.appendChild(cap);
+    return el;
+  },
+
+  locationEl() {
+    const cfg = (this.config.visuals || {}).location || {};
+    if (!cfg.enabled) return null;
+    const f = this.flatMap || {};
+    const lat = Number(f["vehicle.location_latitude"]);
+    const lon = Number(f["vehicle.location_longitude"]);
+    if (!isFinite(lat) || !isFinite(lon)) return null;
+
+    const el = document.createElement("div");
+    el.className = "kiaaccess-visuals kiaaccess-location";
+    const lines = [];
+    if (cfg.homeLat != null && cfg.homeLon != null) {
+      const km = this.haversineKm(lat, lon, Number(cfg.homeLat), Number(cfg.homeLon));
+      lines.push(km < 0.15 ? "At home" : (this.fmtDist(km) || "") + " from home");
+    }
+    const addr = f["vehicle.geocode"];
+    if (addr && addr !== "—") lines.push(String(addr));
+    if (lines.length) {
+      const t = document.createElement("div");
+      t.className = "kiaaccess-batt-detail";
+      t.innerHTML = lines
+        .map((l) => '<div><span class="kiaaccess-bd-value">' + this.escape(l) + "</span></div>")
+        .join("");
+      el.appendChild(t);
+    }
+    if (cfg.map) {
+      const url = String(cfg.mapUrlTemplate || "")
+        .replace(/{lat}/g, lat)
+        .replace(/{lon}/g, lon)
+        .replace(/{zoom}/g, cfg.mapZoom || 14)
+        .replace(/{w}/g, cfg.mapWidth || 210)
+        .replace(/{h}/g, cfg.mapHeight || 120);
+      const img = document.createElement("img");
+      img.className = "kiaaccess-map";
+      img.src = url;
+      img.alt = "vehicle location";
+      img.loading = "lazy";
+      img.style.width = (cfg.mapWidth || 210) + "px";
+      img.onerror = () => img.remove();
+      el.appendChild(img);
+    }
+    return el.childNodes.length ? el : null;
+  },
+
+  tripStatsEl() {
+    if (!(this.config.visuals || {}).tripStats) return null;
+    const f = this.flatMap || {};
+    const g = (k) => {
+      const v = f["vehicle.month_trip_info." + k];
+      return v == null || v === "" ? null : v;
+    };
+    const rows = [
+      ["This month", this.fmtDist(Number(g("distance"))), Number(g("distance")) != null],
+      ["Avg consumption", g("average_consumption") != null ? g("average_consumption") + " Wh/km" : null],
+      ["Regen", g("regenerated_energy") != null ? g("regenerated_energy") + " Wh" : null]
+    ].filter((r) => r[1] != null);
+    if (!rows.length) return null;
+    const el = document.createElement("div");
+    el.className = "kiaaccess-batt-detail";
+    el.innerHTML =
+      '<div class="kiaaccess-bd-label" style="text-align:center;margin-bottom:2px">Trip stats</div>' +
+      rows
+        .map(
+          (r) =>
+            '<div><span class="kiaaccess-bd-label">' +
+            this.escape(r[0]) +
+            '</span><span class="kiaaccess-bd-value">' +
+            this.escape(r[1]) +
+            "</span></div>"
+        )
+        .join("");
+    return el;
+  },
+
+  preconditionEl() {
+    const f = this.flatMap || {};
+    const on = f["vehicle.ev_first_departure_enabled"];
+    if (on !== true && on !== "true") return null;
+    const time = f["vehicle.ev_first_departure_time"];
+    const days = f["vehicle.ev_first_departure_days"];
+    const temp = f["vehicle.ev_first_departure_climate_temperature"];
+    const climateOn = f["vehicle.ev_first_departure_climate_enabled"];
+    if (!time) return null;
+    let s = "Departure " + String(time).slice(0, 5);
+    if (days) s += " · " + String(days);
+    if ((climateOn === true || climateOn === "true") && temp) s += " · preheat " + temp + "°";
+    const el = document.createElement("div");
+    el.className = "kiaaccess-batt-detail";
+    el.innerHTML =
+      '<div><span class="kiaaccess-bd-value"><i class="fa-solid fa-clock"></i> ' +
+      this.escape(s) +
+      "</span></div>";
+    return el;
+  },
+
+  chargeCostEl() {
+    const cc = (this.config.visuals || {}).chargeCost || {};
+    if (!cc.enabled || !(cc.pricePerKwh > 0)) return null;
+    const s = this.visualState();
+    if (s.batteryPct == null || s.capacityKwh == null) return null;
+    const target = s.chargeLimitPct != null ? s.chargeLimitPct : 100;
+    const kwh = Math.max(0, ((target - s.batteryPct) / 100) * s.capacityKwh);
+    if (kwh <= 0.1) return null;
+    const cost = kwh * cc.pricePerKwh;
+    const el = document.createElement("div");
+    el.className = "kiaaccess-batt-detail";
+    el.innerHTML =
+      '<div><span class="kiaaccess-bd-label">Est. cost to ' +
+      target +
+      '%</span><span class="kiaaccess-bd-value">' +
+      this.escape((cc.currency || "$") + cost.toFixed(2)) +
+      "</span></div>";
+    return el;
+  },
+
   getHeader() {
     let h = this.data.header || this.config.header || "";
     if (this.config.showHeaderCount && this.viewData && this.viewData.length) {
@@ -417,37 +705,71 @@ Module.register("MMM-KiaAccess", {
     return h;
   },
 
+  otpNoticeText() {
+    const s = this.visualState();
+    if (s.tokenAgeDays == null) return null;
+    const life = this.config.otpLifetimeDays || 30;
+    const warn = this.config.otpWarnDays || 7;
+    const remaining = Math.ceil(life - s.tokenAgeDays);
+    if (life - s.tokenAgeDays > warn) return null;
+    return remaining > 0
+      ? "OTP expires in ~" + remaining + " day" + (remaining === 1 ? "" : "s") + " — re-run enroll.py"
+      : "OTP has likely expired — re-run enroll.py";
+  },
+
   getDom() {
     const wrapper = document.createElement("div");
     wrapper.className = "kiaaccess";
     if (this.config.maxWidth) wrapper.style.maxWidth = this.config.maxWidth;
 
-    if (this.errorMessage) {
-      const err = document.createElement("div");
-      err.className = "kiaaccess-error small dimmed";
-      err.innerHTML = "⚠ " + this.escape(this.errorMessage);
-      wrapper.appendChild(err);
+    const haveData = !!(this.rawPayload && this.flatMap);
+
+    // no data at all -> loading / hard error only
+    if (!haveData) {
+      const l = document.createElement("div");
+      l.className = "small dimmed";
+      l.innerHTML = this.errorMessage
+        ? "⚠ " + this.escape(this.errorMessage)
+        : "Loading Kia data …";
+      l.classList.toggle("kiaaccess-error", !!this.errorMessage);
+      wrapper.appendChild(l);
       return wrapper;
     }
 
-    if (this.loading || !this.viewData) {
-      const l = document.createElement("div");
-      l.className = "kiaaccess-loading small dimmed";
-      l.innerHTML = "Loading Kia data …";
-      wrapper.appendChild(l);
-      return wrapper;
+    // a warning strip while still showing the (possibly stale) data
+    if (this.errorMessage || this.staleNote) {
+      const strip = document.createElement("div");
+      strip.className = "kiaaccess-error xsmall";
+      strip.innerHTML =
+        "⚠ " + this.escape(this.errorMessage || this.staleNote) + " — showing cached data";
+      wrapper.appendChild(strip);
+    }
+    const otp = this.otpNoticeText();
+    if (otp) {
+      const n = document.createElement("div");
+      n.className = "kiaaccess-error xsmall";
+      n.innerHTML = "⚠ " + this.escape(otp);
+      wrapper.appendChild(n);
     }
 
     const V = this.visuals;
     const vis = this.config.visuals || {};
 
-    if (V && vis.enabled && this.flatMap) {
+    // ---- compact one-liner ----
+    if (V && vis.enabled && vis.compact) {
+      const line = document.createElement("div");
+      line.className = "kiaaccess-compact";
+      line.innerHTML = this.escape(this.compactLine());
+      wrapper.appendChild(line);
+      this.appendFooter(wrapper);
+      return wrapper;
+    }
+
+    if (V && vis.enabled) {
       const s = this.visualState();
       const panel = document.createElement("div");
       panel.className = "kiaaccess-visuals";
 
-      // the car carries the vertical battery in its centre; the readouts
-      // (range, charge times) sit directly under it
       if (vis.car) {
         const c = document.createElement("div");
         c.className = "kiaaccess-carwrap";
@@ -458,8 +780,7 @@ Module.register("MMM-KiaAccess", {
         panel.appendChild(c);
       }
 
-      const detail =
-        vis.battery !== false ? this.batteryDetailEntries() : [];
+      const detail = vis.battery !== false ? this.batteryDetailEntries() : [];
       if (detail.length) {
         const dl = document.createElement("div");
         dl.className = "kiaaccess-batt-detail";
@@ -475,8 +796,18 @@ Module.register("MMM-KiaAccess", {
         });
         panel.appendChild(dl);
       }
-
       if (panel.childNodes.length) wrapper.appendChild(panel);
+
+      // extra optional widgets, each returns an element or null
+      [
+        this.chargeProgressEl(),
+        this.rangeRingEl(),
+        this.socHistoryEl(),
+        this.preconditionEl(),
+        this.chargeCostEl(),
+        this.tripStatsEl(),
+        this.locationEl()
+      ].forEach((el) => el && wrapper.appendChild(el));
     }
 
     if (this.viewData.length === 0) {
@@ -486,6 +817,7 @@ Module.register("MMM-KiaAccess", {
         n.innerHTML = "No attributes matched your include/exclude config.";
         wrapper.appendChild(n);
       }
+      this.appendFooter(wrapper);
       return wrapper;
     }
 
@@ -519,15 +851,17 @@ Module.register("MMM-KiaAccess", {
     });
 
     wrapper.appendChild(table);
-
-    if (this.config.showUpdatedFooter && this.lastUpdated) {
-      const foot = document.createElement("div");
-      foot.className = "kiaaccess-footer xsmall dimmed";
-      foot.innerHTML = "updated " + this.lastUpdated.toLocaleTimeString();
-      wrapper.appendChild(foot);
-    }
-
+    this.appendFooter(wrapper);
     return wrapper;
+  },
+
+  appendFooter(wrapper) {
+    if (!this.config.showUpdatedFooter || !this.lastUpdated) return;
+    const foot = document.createElement("div");
+    foot.className = "kiaaccess-footer xsmall dimmed";
+    foot.innerHTML =
+      "updated " + this.agoText(this.lastUpdated) + (this.stale ? " · cached" : "");
+    wrapper.appendChild(foot);
   },
 
   escape(s) {

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ["18", "20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax check
+        run: |
+          for f in MMM-KiaAccess.js node_helper.js flatten.js visuals.js conditions.js ha_discovery.js setup_python.js docs/build-gallery.js; do
+            echo "node --check $f"; node --check "$f"
+          done
+      - name: Unit tests
+        run: node test/flatten.test.js && node test/conditions.test.js && node test/ha_discovery.test.js
+      - name: Gallery regenerates
+        run: node docs/build-gallery.js && git diff --exit-code docs/car-states.html || (echo "docs/car-states.html is stale — run: node docs/build-gallery.js" && exit 1)
+
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Byte-compile
+        run: python -m py_compile kia_bridge.py enroll.py
