@@ -182,6 +182,7 @@ g.KiaAccessCommands={
       batteryPct: num("ev_battery_percentage"),
       rangeKm: num("ev_driving_range"),
       chargeKw: num("ev_charging_power"),
+      chargeEtaMin: num("ev_estimated_current_charge_duration"),
       charging: bool("ev_battery_is_charging"),
       plugged: bool("ev_battery_is_plugged_in"),
       v2l: bool("ev_v2l_status"),
@@ -267,6 +268,15 @@ g.KiaAccessCommands={
     if (c == null || isNaN(c)) return null;
     var v = unit === "F" ? c * 9 / 5 + 32 : c;
     return Math.round(v) + "°";
+  }
+
+  // minutes -> "2h 45m" / "45m" / "3h"  (null unless a positive number)
+  function hoursMins(min) {
+    if (min == null || isNaN(min) || min <= 0) return null;
+    var t = Math.round(min);
+    var h = Math.floor(t / 60);
+    var m = t % 60;
+    return h ? (m ? h + "h " + m + "m" : h + "h") : m + "m";
   }
 
   function batteryColor(pct) {
@@ -555,7 +565,8 @@ g.KiaAccessCommands={
    * charger + animated energy flow appear there when plugged in).
    * @param {object} s state flags (bool|null unless noted):
    *   locked, carOn, headlights;
-   *   charging, plugged, v2l, v2x, batteryPct (number|null), car12vPct (number|null);
+   *   charging, plugged, v2l, v2x, batteryPct (number|null), car12vPct (number|null),
+   *   chargeKw (number, shown while charging), chargeEtaMin (minutes to target);
    *   doorFL/FR/RL/RR (open), winFL/FR/RL/RR (window open), hood (frunk),
    *   trunk (liftgate), sunroof;
    *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null),
@@ -634,6 +645,31 @@ g.KiaAccessCommands={
           '" stroke-width="2"><animate attributeName="r" values="4;13" dur="1.5s" repeatCount="indefinite"/>' +
           '<animate attributeName="opacity" values="0.75;0" dur="1.5s" repeatCount="indefinite"/></circle>'
         : "";
+
+    // live charge readout — only while actually charging: kW drawn + "2h 45m" to
+    // the current target. Sits under the wall box, clear of the car body and
+    // inside the right viewBox edge (x 232).
+    var chargeInfo = "";
+    if (s.charging === true) {
+      var kwNum = Number(s.chargeKw);
+      var kw = isFinite(kwNum) && kwNum > 0
+        ? (kwNum >= 100 ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + " kW"
+        : null;
+      var eta = hoursMins(s.chargeEtaMin);
+      var rows = [];
+      if (kw) rows.push([kw, COL.ok]);
+      if (eta) rows.push(["~" + eta, COL.text]);
+      if (rows.length) {
+        chargeInfo =
+          '<g transform="translate(205 289)" text-anchor="middle" ' +
+          'style="paint-order:stroke;stroke:#000;stroke-width:2.6px">' +
+          rows.map(function (r, i) {
+            return '<text x="0" y="' + (i * 11.5) + '" font-size="9.5" ' +
+              'font-weight="700" fill="' + r[1] + '">' + esc(r[0]) + "</text>";
+          }).join("") +
+          "</g>";
+      }
+    }
 
     // headlights: solid white when on, hollow outline when off/unknown
     var lampFill = s.headlights === true ? COL.text : "none";
@@ -752,6 +788,8 @@ g.KiaAccessCommands={
       wheel(159, 230, tyre("RR")) +
       // charger + cable + energy flow (right strip; empty when unplugged)
       charger +
+      // kW + time-to-target, only while charging
+      chargeInfo +
       // charge port — rear, passenger (right) side, between wheel and taillight
       '<rect x="148" y="266" width="14" height="16" rx="2" fill="#2a2c2e" stroke="' +
       COL.dim + '" stroke-width="1"/>' +

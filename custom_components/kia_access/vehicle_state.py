@@ -107,6 +107,7 @@ def build_state(flat, opts=None):
         "batteryPct": _num(f, "ev_battery_percentage"),
         "rangeKm": _num(f, "ev_driving_range"),
         "chargeKw": _num(f, "ev_charging_power"),
+        "chargeEtaMin": _num(f, "ev_estimated_current_charge_duration"),
         "charging": _bool(f, "ev_battery_is_charging"),
         "plugged": _bool(f, "ev_battery_is_plugged_in"),
         "v2l": _bool(f, "ev_v2l_status"),
