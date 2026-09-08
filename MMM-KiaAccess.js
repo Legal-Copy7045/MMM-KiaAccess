@@ -133,10 +133,10 @@ Module.register("MMM-KiaAccess", {
       },
       // readouts shown under the battery gauge (and removed from the table).
       // Uses your labels / formatters / hideWhenFalsy just like table rows.
+      // charge power (kW) + current (A) show on the diagram under the charger
+      // while charging, so they're not repeated here by default
       batteryDetail: [
         "vehicle.ev_driving_range",
-        "vehicle.ev_charging_power",
-        "vehicle.ev_charging_current",
         "vehicle.ev_estimated_current_charge_duration",
         "vehicle.ev_estimated_fast_charge_duration",
         "vehicle.ev_estimated_station_charge_duration",

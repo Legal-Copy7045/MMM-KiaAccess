@@ -26,8 +26,8 @@ const GROUPS = [
   ["Charging / plug (rear-right port)", [
     ["Unplugged", {}],
     ["Plugged, not charging", { plugged: true }],
-    ["Charging (AC)", { charging: true, batteryPct: 64, chargeKw: 7.4, chargeEtaMin: 165 }],
-    ["Charging (DC fast)", { charging: true, batteryPct: 41, chargeKw: 150, chargeEtaMin: 22 }],
+    ["Charging (AC)", { charging: true, batteryPct: 64, chargeKw: 7.4, chargeAmps: 32 }],
+    ["Charging (DC fast)", { charging: true, batteryPct: 41, chargeKw: 150, chargeAmps: 375 }],
     ["Exporting (V2L / V2X)", { v2l: true, batteryPct: 64 }],
   ]],
   ["Doors, frunk, liftgate", [

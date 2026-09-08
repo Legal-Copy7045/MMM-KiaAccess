@@ -40,18 +40,6 @@
     return Math.round(v) + "°";
   }
 
-  // minutes -> "2h 45m" / "45m" / "3h"  (null unless a positive number).
-  // 10h+ drops the minutes ("12h") — the precision is noise and it keeps the
-  // on-diagram readout narrow.
-  function hoursMins(min) {
-    if (min == null || isNaN(min) || min <= 0) return null;
-    var t = Math.round(min);
-    var h = Math.floor(t / 60);
-    var m = t % 60;
-    if (h >= 10) return h + "h";
-    return h ? (m ? h + "h " + m + "m" : h + "h") : m + "m";
-  }
-
   function batteryColor(pct) {
     if (pct == null || isNaN(pct)) return COL.dim;
     if (pct <= 15) return COL.bad;
@@ -339,7 +327,7 @@
    * @param {object} s state flags (bool|null unless noted):
    *   locked, carOn, headlights;
    *   charging, plugged, v2l, v2x, batteryPct (number|null), car12vPct (number|null),
-   *   chargeKw (number, shown while charging), chargeEtaMin (minutes to target);
+   *   chargeKw + chargeAmps (numbers, shown under the charger while charging);
    *   doorFL/FR/RL/RR (open), winFL/FR/RL/RR (window open), hood (frunk),
    *   trunk (liftgate), sunroof;
    *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null),
@@ -419,19 +407,20 @@
           '<animate attributeName="opacity" values="0.75;0" dur="1.5s" repeatCount="indefinite"/></circle>'
         : "";
 
-    // live charge readout — only while actually charging: kW drawn + "2h 45m" to
-    // the current target. Centred under the wall box (its centre is x214),
-    // clear of the car body, kept inside the right viewBox edge (x 232).
+    // live charge readout — only while actually charging: kW drawn + current (A).
+    // Centred under the wall box (its centre is x214), clear of the car body,
+    // kept inside the right viewBox edge (x 232).
     var chargeInfo = "";
     if (s.charging === true) {
       var kwNum = Number(s.chargeKw);
       var kw = isFinite(kwNum) && kwNum > 0
         ? (kwNum >= 100 ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + " kW"
         : null;
-      var eta = hoursMins(s.chargeEtaMin);
+      var aNum = Number(s.chargeAmps);
+      var amps = isFinite(aNum) && aNum > 0 ? Math.round(aNum) + " A" : null;
       var rows = [];
       if (kw) rows.push([kw, COL.ok]);
-      if (eta) rows.push([eta, COL.text]);
+      if (amps) rows.push([amps, COL.text]);
       if (rows.length) {
         chargeInfo =
           '<g transform="translate(214 289)" text-anchor="middle" ' +
