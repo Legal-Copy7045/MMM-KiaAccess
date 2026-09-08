@@ -138,7 +138,8 @@ Module.register("MMM-KiaAccess", {
     notifications: {
       enabled: false,
       alertModule: true, // also emit SHOW_ALERT for the built-in `alert` module (warning + critical)
-      alertSeconds: 15, // SHOW_ALERT auto-dismiss timer
+      alertSeconds: 15, // warning-level SHOW_ALERT auto-dismiss timer (seconds)
+      criticalAlertSeconds: 0, // critical-level alerts: 0 = stay on screen until the condition clears
       notifyOnStartup: "critical", // false | "critical" | true — which levels fire on the first data after (re)start
       quietWhileDriving: true, // suppress open-part / unlocked alerts while the car is on
       title: "Kia EV9",
@@ -519,17 +520,22 @@ Module.register("MMM-KiaAccess", {
           vin: vin,
           at: new Date().toISOString()
         });
-        if (
-          cfg.alertModule !== false &&
-          becameActive &&
-          (c.level === "warning" || c.level === "critical")
-        ) {
-          this.sendNotification("SHOW_ALERT", {
-            type: "notification",
-            title: c.title,
-            message: c.message,
-            timer: (cfg.alertSeconds || 15) * 1000
-          });
+        if (cfg.alertModule !== false && (c.level === "warning" || c.level === "critical")) {
+          const critical = c.level === "critical";
+          const secs = critical
+            ? (cfg.criticalAlertSeconds != null ? cfg.criticalAlertSeconds : 0)
+            : (cfg.alertSeconds != null ? cfg.alertSeconds : 15);
+          if (becameActive) {
+            const alert = { type: "notification", title: c.title, message: c.message };
+            if (secs > 0) alert.timer = secs * 1000; // no timer -> stays until HIDE_ALERT
+            this.sendNotification("SHOW_ALERT", alert);
+            this._alertShown = this._alertShown || {};
+            if (secs === 0) this._alertShown[c.reason] = true;
+          } else if (cleared && this._alertShown && this._alertShown[c.reason]) {
+            // a persistent alert's condition cleared — dismiss it
+            this.sendNotification("HIDE_ALERT");
+            this._alertShown[c.reason] = false;
+          }
         }
       }
       if (c.active !== null) this.prevCond[c.reason] = c.active;

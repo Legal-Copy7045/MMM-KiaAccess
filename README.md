@@ -391,10 +391,11 @@ Common EV9 (US) paths:
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
 | `mqtt.enabled` | `false` | publish full state to retained MQTT topics — see [MQTT](#mqtt-state-publishing) |
+| `notifications.criticalAlertSeconds` | `0` | critical `alert` popups: `0` = stay until the condition clears; `>0` = auto-dismiss after N s |
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
 | `maxWidth` | `"420px"` | CSS max-width |
-| `animationSpeed` | `500` | DOM update fade (ms) |
+| `animationSpeed` | `500` | fade (ms) when the module re-renders; **`0` = no fade**. The module only re-renders when the data changed, so at rest there's no fade regardless |
 | `debug` | `false` | extra logging |
 
 ### Graphical mode
@@ -536,8 +537,9 @@ not on every refresh.
 ```js
 notifications: {
   enabled: true,
-  alertModule: true,          // also pop MagicMirror's built-in `alert` module
-  alertSeconds: 15,
+  alertModule: true,           // also pop MagicMirror's built-in `alert` module
+  alertSeconds: 15,            // warning alerts auto-dismiss after this many seconds
+  criticalAlertSeconds: 0,    // critical alerts: 0 = stay on screen until the condition clears
   notifyOnStartup: "critical", // false | "critical" | true — what fires on the
                                //   first data after a restart
   quietWhileDriving: true,     // suppress open-part / unlocked while the car is on
@@ -545,18 +547,36 @@ notifications: {
     evBatteryLow:  { belowPct: 20, clearPct: 25 },   // hysteresis: alert at ≤20,
     battery12vLow: { belowPct: 55, clearPct: 60 },    //   clear only at ≥25
     windowOpen: false,                                // disable a check entirely
+    doorOpen: { level: "critical" },                  // promote to a persistent alert
     chargeInterrupted: { minGapPct: 3 }
   }
 }
 ```
 
-Every check can be turned off (`checkName: false`) or tuned (`level`, thresholds).
-Built-in checks: `evBatteryLow`, `battery12vLow`, **`battery12vDrain`** (12V
-falling `dropPct` over `overHours` while parked — the "won't start on a cold
-morning" warning), `unlocked`, `doorOpen`, `windowOpen`, `hoodOpen`,
-`liftgateOpen`, `sunroofOpen`, `tyrePressure`, `chargeComplete`,
-`chargeInterrupted`, **`otpExpiring`** (see below). Levels are
-`info` / `warning` / `critical`; `alertModule` only pops for `warning` and `critical`.
+**Levels & persistence.** Each check has a `level` — `info` / `warning` /
+`critical`. `alertModule` pops the `alert` module for `warning` and `critical`
+only. A `warning` alert auto-dismisses after `alertSeconds` (15 s); a `critical`
+alert stays on screen until the condition **clears** (set `criticalAlertSeconds`
+> 0 to auto-dismiss it instead). Override any check's level —
+`checks: { doorOpen: { level: "critical" } }` — to make it persist.
+
+**Built-in checks** (default level in brackets):
+
+| check | default | fires when |
+|---|---|---|
+| `tyrePressure` | **critical** | a tyre-pressure warning is on |
+| `evBatteryLow` | warning | drive battery ≤ `belowPct` (20) |
+| `battery12vLow` | warning | 12V battery ≤ `belowPct` (55) |
+| `battery12vDrain` | warning | 12V fell `dropPct` over `overHours` while parked — the "won't start on a cold morning" one |
+| `unlocked` | warning | vehicle unlocked (muted while driving) |
+| `doorOpen` / `hoodOpen` / `liftgateOpen` | warning | that part is open |
+| `windowOpen` / `sunroofOpen` | info | *(info = no `alert` popup)* |
+| `chargeComplete` | info | charging finished at target (one-shot) |
+| `chargeInterrupted` | warning | charging stopped early (one-shot) |
+| `otpExpiring` | warning | OTP within `otpWarnDays` of expiry (mode A) |
+
+`info`-level checks broadcast the `KIA_ACCESS_STATE_CHANGED` notification but
+don't pop the `alert` module.
 
 **For other modules** — a semantic notification is broadcast each time:
 
