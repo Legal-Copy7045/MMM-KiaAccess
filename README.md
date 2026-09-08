@@ -412,7 +412,8 @@ Common EV9 (US) paths:
 | `notifications.criticalAlertSeconds` | `0` | **critical** `alert`: `0` = centre popup that stays until the condition clears; `>0` = corner growl that auto-dismisses after N s |
 | `mqtt.enabled` | `false` | publish full state to retained MQTT topics — see [MQTT](#mqtt-state-publishing) |
 | `showHeaderCount` | `true` | append attribute count to the header |
-| `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
+| `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer (when *we* last fetched) |
+| `showReportedInHeader` | `false` | append `" - as of: <time>"` to the header from `vehicle.last_updated_at` (when the *car* last reported) and drop that row from the table. Shows `14:32` for today, `Sep 7 14:32` otherwise |
 | `maxWidth` | `"420px"` | CSS max-width |
 | `animationSpeed` | `500` | fade (ms) when the module re-renders; **`0` = no fade**. The module only re-renders when the data changed, so at rest there's no fade regardless |
 | `debug` | `false` | extra logging |

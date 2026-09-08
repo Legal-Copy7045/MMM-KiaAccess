@@ -89,6 +89,8 @@ Module.register("MMM-KiaAccess", {
 
     showHeaderCount: true,
     showUpdatedFooter: true,
+    showReportedInHeader: false, // append " - as of: <time>" (vehicle.last_updated_at)
+                                //   to the header and drop that row from the table
     maxWidth: "420px",
     animationSpeed: 500,
     debug: false,
@@ -376,7 +378,34 @@ Module.register("MMM-KiaAccess", {
       }
       entries = entries.filter((e) => !moved.has(e.key));
     }
+    // "car last reported" can live in the header instead of the table
+    if (this.config.showReportedInHeader) {
+      entries = entries.filter((e) => e.key !== "vehicle.last_updated_at");
+    }
     this.viewData = this.applyCombine(entries);
+  },
+
+  // vehicle.last_updated_at as a short "as of" string for the header:
+  // "14:32" today, "Sep 7 14:32" otherwise, null if missing / unparseable
+  reportedAt() {
+    const raw = (this.flatMap || {})["vehicle.last_updated_at"];
+    if (raw == null || raw === "") return null;
+    let d;
+    const m = String(raw).match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/);
+    if (m) d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+    else d = new Date(raw);
+    if (isNaN(d.getTime())) return null;
+    // follow the mirror's global 12/24h setting when it's reachable
+    const h12 =
+      typeof config !== "undefined" && config && config.timeFormat === 12;
+    const time = d.toLocaleTimeString([], {
+      hour: h12 ? "numeric" : "2-digit",
+      minute: "2-digit",
+      hour12: h12
+    });
+    return d.toDateString() === new Date().toDateString()
+      ? time
+      : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + time;
   },
 
   // `combine: { "vehicle.geocode": ["vehicle.location_last_updated_at"] }` folds
@@ -778,6 +807,10 @@ Module.register("MMM-KiaAccess", {
 
   getHeader() {
     let h = this.data.header || this.config.header || "";
+    if (this.config.showReportedInHeader) {
+      const at = this.reportedAt();
+      if (at) h += " - as of: " + at;
+    }
     if (this.config.showHeaderCount && this.viewData && this.viewData.length) {
       h += ` (${this.viewData.length})`;
     }
