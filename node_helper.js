@@ -206,7 +206,13 @@ module.exports = NodeHelper.create({
     payload._meta = Object.assign({ fetchedAt: new Date().toISOString(), failStreak: 0 }, payload._meta || {});
     if (payload._meta.warning) Log.warn("[MMM-KiaAccess] " + payload._meta.warning);
 
-    // ---- record history ----
+    // did the vehicle data actually move since last poll? (mode C polls often)
+    const vehJson = JSON.stringify(vehicle);
+    const dataChanged = vehJson !== s._lastVehJson;
+    s._lastVehJson = vehJson;
+
+    // ---- record history (append at most every minGap; between gaps keep the
+    // latest slot current, but only when a value actually changed) ----
     const minGap = (Number(config.historyMinIntervalMinutes) || 30) * 60e3;
     const last = s.history[s.history.length - 1];
     const sample = {
@@ -214,13 +220,23 @@ module.exports = NodeHelper.create({
       ev: numOrNull(vehicle.ev_battery_percentage),
       v12: numOrNull(vehicle.car_battery_percentage)
     };
-    if (!last || sample.t - last.t >= minGap) s.history.push(sample);
-    else s.history[s.history.length - 1] = sample; // refresh the latest slot
+    let histChanged = false;
+    if (!last || sample.t - last.t >= minGap) {
+      s.history.push(sample);
+      histChanged = true;
+    } else if (last.ev !== sample.ev || last.v12 !== sample.v12) {
+      s.history[s.history.length - 1] = sample;
+      histChanged = true;
+    }
+    const beforePrune = s.history.length;
     this.pruneHistory(s, Number(config.historyDays) || 60);
+    if (s.history.length !== beforePrune) histChanged = true;
 
     s.failStreak = 0;
     s.lastGood = payload;
-    this.persist(id);
+    // only touch the disk cache when something changed — avoids an SD-card
+    // write every poll when nothing moved
+    if (dataChanged || histChanged) this.persist(id);
 
     this.emitData(id, config, payload);
     this.publishMqtt(config, payload);

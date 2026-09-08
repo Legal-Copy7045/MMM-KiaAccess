@@ -223,6 +223,14 @@ Module.register("MMM-KiaAccess", {
       if (!ha.url || !ha.token) {
         configErr = "Set homeassistant.url and homeassistant.token in config.js";
       }
+      // reading from HA is a cheap local call — poll much more often than the
+      // 30-min Kia default (unless the user picked their own interval)
+      if (this.config.updateInterval === this.defaults.updateInterval) {
+        this.config.updateInterval = 30 * 1000;
+      }
+      if (this.config.retryInterval === this.defaults.retryInterval) {
+        this.config.retryInterval = 30 * 1000;
+      }
     } else if (!this.config.username || !this.config.password) {
       configErr = "Set username / password / pin in config.js";
     }
@@ -290,9 +298,17 @@ Module.register("MMM-KiaAccess", {
       this.staleNote = m.note || null;
       this.errorMessage = m.error || null; // shown as a strip; data still renders
       this.lastUpdated = new Date(m.stale ? m.cachedAt || m.fetchedAt : m.fetchedAt || Date.now());
-      this.rebuildView();
-      this.processConditions();
-      this.updateDom(this.config.animationSpeed);
+
+      // with a short poll interval (mode C) most fetches return identical data —
+      // only rebuild / re-render / re-check conditions when something changed
+      const sig = JSON.stringify(data.payload.vehicle || {}) +
+        "|" + this.stale + "|" + (this.errorMessage || "") + "|" + (this.staleNote || "");
+      if (sig !== this._lastSig) {
+        this._lastSig = sig;
+        this.rebuildView();
+        this.processConditions();
+        this.updateDom(this.config.animationSpeed);
+      }
       this.scheduleFetch(this.nextDelay(m.failStreak || 0, m.retryAfterMs));
     } else if (notification === "KIA_ERROR") {
       this.loading = false;
