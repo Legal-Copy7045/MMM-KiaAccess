@@ -91,6 +91,9 @@ Module.register("MMM-KiaAccess", {
     showUpdatedFooter: true,
     showReportedInHeader: false, // append " - as of: <time>" (vehicle.last_updated_at)
                                 //   to the header and drop that row from the table
+    showTable: true, // false = drop the details table entirely (the diagram +
+                     //   widgets carry the state); Range etc. still show via
+                     //   visuals.batteryDetail
     maxWidth: "420px",
     animationSpeed: 500,
     debug: false,
@@ -811,7 +814,8 @@ Module.register("MMM-KiaAccess", {
       const at = this.reportedAt();
       if (at) h += " - as of: " + at;
     }
-    if (this.config.showHeaderCount && this.viewData && this.viewData.length) {
+    if (this.config.showTable !== false && this.config.showHeaderCount &&
+        this.viewData && this.viewData.length) {
       h += ` (${this.viewData.length})`;
     }
     return h;
@@ -925,49 +929,52 @@ Module.register("MMM-KiaAccess", {
       ].forEach((el) => el && wrapper.appendChild(el));
     }
 
-    if (this.viewData.length === 0) {
-      if (!(V && vis.enabled)) {
-        const n = document.createElement("div");
-        n.className = "small dimmed";
-        n.innerHTML = "No attributes matched your include/exclude config.";
-        wrapper.appendChild(n);
-      }
-      this.appendFooter(wrapper);
-      return wrapper;
+    // the details table — `showTable: false` drops it entirely (the diagram +
+    // widgets carry the state); keep the "nothing matched" hint only when there
+    // are no visuals to fall back on
+    if (this.config.showTable !== false && this.viewData.length) {
+      const rowIcons = !!(V && vis.enabled && vis.rowIcons);
+      const table = document.createElement("table");
+      table.className = "kiaaccess-table";
+
+      this.viewData.forEach((entry) => {
+        const row = document.createElement("tr");
+
+        if (rowIcons) {
+          const ic = document.createElement("td");
+          ic.className = "kiaaccess-icon";
+          const cls = V.iconFor(entry.key, this.config.icons);
+          if (cls) ic.innerHTML = '<i class="' + this.escape(cls) + '"></i>';
+          row.appendChild(ic);
+        }
+
+        const label = document.createElement("td");
+        label.className = "kiaaccess-label";
+        label.innerHTML = this.escape(entry.label);
+        label.title = entry.key;
+
+        const value = document.createElement("td");
+        value.className = "kiaaccess-value bright";
+        let valTxt = this.utils.formatValue(entry, this.config);
+        if (entry.combinedSuffix) valTxt += " · " + entry.combinedSuffix;
+        value.innerHTML = this.escape(valTxt);
+
+        row.appendChild(label);
+        row.appendChild(value);
+        table.appendChild(row);
+      });
+      wrapper.appendChild(table);
+    } else if (
+      this.config.showTable !== false &&
+      this.viewData.length === 0 &&
+      !(V && vis.enabled)
+    ) {
+      const n = document.createElement("div");
+      n.className = "small dimmed";
+      n.innerHTML = "No attributes matched your include/exclude config.";
+      wrapper.appendChild(n);
     }
 
-    const rowIcons = !!(V && vis.enabled && vis.rowIcons);
-    const table = document.createElement("table");
-    table.className = "kiaaccess-table";
-
-    this.viewData.forEach((entry) => {
-      const row = document.createElement("tr");
-
-      if (rowIcons) {
-        const ic = document.createElement("td");
-        ic.className = "kiaaccess-icon";
-        const cls = V.iconFor(entry.key, this.config.icons);
-        if (cls) ic.innerHTML = '<i class="' + this.escape(cls) + '"></i>';
-        row.appendChild(ic);
-      }
-
-      const label = document.createElement("td");
-      label.className = "kiaaccess-label";
-      label.innerHTML = this.escape(entry.label);
-      label.title = entry.key;
-
-      const value = document.createElement("td");
-      value.className = "kiaaccess-value bright";
-      let valTxt = this.utils.formatValue(entry, this.config);
-      if (entry.combinedSuffix) valTxt += " · " + entry.combinedSuffix;
-      value.innerHTML = this.escape(valTxt);
-
-      row.appendChild(label);
-      row.appendChild(value);
-      table.appendChild(row);
-    });
-
-    wrapper.appendChild(table);
     this.appendFooter(wrapper);
     return wrapper;
   },
