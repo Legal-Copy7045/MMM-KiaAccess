@@ -56,10 +56,12 @@
   text-align: center;
 }
 
-/* readouts under the car: centred label + value pairs */
+/* readouts under the car: centred label + value pairs.
+   --kia-scale (set on .kiaaccess when visuals.scale != 1) grows the text with
+   the diagram; defaults to 1 so unscaled setups are unchanged. */
 .kiaaccess-batt-detail {
   margin-top: 5px;
-  font-size: 16px;
+  font-size: calc(16px * var(--kia-scale, 1));
   line-height: 1.5;
   text-align: center;
 }
@@ -81,7 +83,7 @@
 }
 
 .kiaaccess-compact {
-  font-size: 17px;
+  font-size: calc(17px * var(--kia-scale, 1));
   padding: 2px 0;
   white-space: nowrap;
 }

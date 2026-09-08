@@ -397,7 +397,8 @@ Common EV9 (US) paths:
 | `formatters` | see defaults | key path → formatter name |
 | `visuals.enabled` | `false` | master switch for the graphical widgets |
 | `visuals.car` / `.battery` / `.rowIcons` | `true` | individual widget toggles (need `visuals.enabled`) |
-| `visuals.width` | `210` | px width of the car SVG |
+| `visuals.width` | `210` | px width of the car SVG (base size) |
+| `visuals.scale` | `1` | multiplies the whole visuals block — diagram, its fonts, the sparklines / ring and the readout text. `1.3` = 130%. Clamped 0.5–3 |
 | `visuals.compact` | `false` | one-line summary (`78% · 312 mi · 🔒`) instead of the diagram + table |
 | `visuals.chargeProgress` | `true` | progress bar + "full at HH:MM" while plugged in |
 | `visuals.rangeRing` | `false` | radial SoC / range gauge under the car |

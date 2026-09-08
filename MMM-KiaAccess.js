@@ -107,7 +107,9 @@ Module.register("MMM-KiaAccess", {
       battery: true, // vertical battery in the centre of the car (charge % + charging bolt).
                      //   drops the SoC row + the batteryDetail rows from the table
       rowIcons: true, // Font Awesome icon before each table row
-      width: 210, // px width for the car SVG
+      width: 210, // px width for the car SVG (base size)
+      scale: 1, // multiplies the whole visuals block — diagram, its fonts, the
+                //   sparklines/ring and the readout text. e.g. 1.3 = 130%. 0.5–3.
       compact: false, // one-line summary instead of the diagram + table
       chargeProgress: true, // when plugged in: a progress bar + "full at HH:MM"
       rangeRing: false, // a radial SoC / range gauge under the car
@@ -232,6 +234,9 @@ Module.register("MMM-KiaAccess", {
     this.config.mqtt.homeAssistant = merge(
       this.defaults.mqtt.homeAssistant,
       this.config.mqtt.homeAssistant
+    );
+    this.config.visuals.scale = Math.max(
+      0.5, Math.min(3, Number(this.config.visuals.scale) || 1)
     );
 
     const src = String(this.config.source || "kia").toLowerCase();
@@ -573,6 +578,17 @@ Module.register("MMM-KiaAccess", {
 
   // ---------- small helpers for the optional widgets ----------
 
+  // user scale for the whole visuals block (clamped in start())
+  visScale() {
+    return (this.config.visuals && this.config.visuals.scale) || 1;
+  },
+
+  // scaled px width for the car SVG + the sparklines / charge bar
+  visWidth() {
+    const base = (this.config.visuals && this.config.visuals.width) || 210;
+    return Math.round(base * this.visScale());
+  },
+
   agoText(date) {
     if (!date) return "";
     const mins = Math.round((Date.now() - date.getTime()) / 60000);
@@ -623,7 +639,7 @@ Module.register("MMM-KiaAccess", {
     el.className = "kiaaccess-visuals";
     const target = s.chargeLimitPct;
     el.innerHTML = this.visuals.chargeBar(s.batteryPct, target, {
-      width: (this.config.visuals || {}).width || 210
+      width: this.visWidth()
     });
     const mins = Number(
       (this.flatMap || {})["vehicle.ev_estimated_current_charge_duration"]
@@ -648,7 +664,8 @@ Module.register("MMM-KiaAccess", {
     el.className = "kiaaccess-visuals";
     el.innerHTML = this.visuals.rangeRing(s.batteryPct, {
       charging: s.charging,
-      centreText: this.fmtDist(s.rangeKm) || ""
+      centreText: this.fmtDist(s.rangeKm) || "",
+      size: Math.round(132 * this.visScale())
     });
     return el;
   },
@@ -663,8 +680,8 @@ Module.register("MMM-KiaAccess", {
     const el = document.createElement("div");
     el.className = "kiaaccess-visuals";
     el.innerHTML = this.visuals.sparkline(pts, {
-      width: (this.config.visuals || {}).width || 210,
-      height: 40,
+      width: this.visWidth(),
+      height: Math.round(40 * this.visScale()),
       color: color
     });
     const cap = document.createElement("div");
@@ -837,6 +854,11 @@ Module.register("MMM-KiaAccess", {
     const wrapper = document.createElement("div");
     wrapper.className = "kiaaccess";
     if (this.config.maxWidth) wrapper.style.maxWidth = this.config.maxWidth;
+    // scales the HTML readout text (the SVGs scale via their px width);
+    // CSS reads --kia-scale in calc()
+    if (this.visScale() !== 1) {
+      wrapper.style.setProperty("--kia-scale", String(this.visScale()));
+    }
 
     const haveData = !!(this.rawPayload && this.flatMap);
 
@@ -891,7 +913,7 @@ Module.register("MMM-KiaAccess", {
         const c = document.createElement("div");
         c.className = "kiaaccess-carwrap";
         c.innerHTML = V.carDiagram(s, {
-          width: vis.width || 210,
+          width: this.visWidth(),
           battery: vis.battery !== false,
           tempUnit: this.config.units === "metric" ? "C" : "F"
         });
