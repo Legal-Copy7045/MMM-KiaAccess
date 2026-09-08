@@ -105,17 +105,29 @@ def dump_vehicle(vehicle):
     except Exception:
         pass
 
-    # The library reports cabin / outside temperatures in the account's local
-    # unit — °F for USA & Canada — but every downstream formatter (state.js,
-    # visuals.js, the HA `outside_temperature` sensor's °C device class) assumes
-    # Celsius. Normalise to °C here, at the one place both surfaces share.
+    # The library pairs each temperature / distance with the account's local
+    # unit (°F + miles for USA & Canada) but stores the raw value — while every
+    # downstream formatter (state.js, visuals.js, the HA sensors' device classes)
+    # assumes °C / km. Normalise here, the one place both surfaces share.
+    _F = ("F", "°F", "FAHRENHEIT")
+    _MI = ("MI", "MILES", "MILE")
     for base in ("air_temperature", "outside_temperature"):
         unit = getattr(vehicle, "_" + base + "_unit", None)
         val = out.get(base)
-        if isinstance(val, (int, float)) and str(unit).strip().upper() in (
-            "F", "°F", "FAHRENHEIT",
-        ):
+        if isinstance(val, (int, float)) and not isinstance(val, bool) and \
+                str(unit).strip().upper() in _F:
             out[base] = round((val - 32) * 5.0 / 9.0, 1)
+    for base in (
+        "odometer", "ev_driving_range", "total_driving_range",
+        "fuel_driving_range", "next_service_distance", "last_service_distance",
+    ):
+        unit = getattr(vehicle, "_" + base + "_unit", None)
+        val = out.get(base)
+        if isinstance(val, (int, float)) and not isinstance(val, bool) and \
+                str(unit).strip().upper() in _MI:
+            out[base] = round(val * 1.609344, 1)
+            if base + "_unit" in out:
+                out[base + "_unit"] = "km"
 
     return out
 
