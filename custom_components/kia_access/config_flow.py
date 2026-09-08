@@ -65,8 +65,10 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 result = await self.hass.async_add_executor_job(self._try_login)
             except _NeedOtp:
                 return await self.async_step_otp()
-            except Exception:  # noqa: BLE001
-                _LOGGER.debug("Kia reauth failed", exc_info=True)
+            except Exception as err:  # noqa: BLE001
+                # no exc_info: the traceback can run through library frames that
+                # hold the auth request — a one-line reason is enough here
+                _LOGGER.debug("Kia reauth failed: %s", type(err).__name__)
                 errors["base"] = "auth"
             else:
                 return self._finish(result)
@@ -97,7 +99,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except _NeedOtp:
                 return await self.async_step_otp()
             except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Kia login failed", exc_info=True)
+                _LOGGER.debug("Kia login failed: %s", type(err).__name__)
                 errors["base"] = "auth"
             else:
                 return self._finish(result)

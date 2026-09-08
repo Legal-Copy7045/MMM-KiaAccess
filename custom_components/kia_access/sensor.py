@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import MATCH_ALL, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -53,11 +53,16 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
 
 class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
     """One diagnostic sensor whose attributes carry the whole flat vehicle
-    payload — the Lovelace card reads this instead of 20+ entities."""
+    payload — the Lovelace card reads this instead of 20+ entities.
+
+    Its attributes include VIN and GPS coordinates, so keep the whole
+    attribute blob out of the recorder / history / logbook.
+    """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:car-info"
+    _unrecorded_attributes = frozenset({MATCH_ALL})
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "summary")

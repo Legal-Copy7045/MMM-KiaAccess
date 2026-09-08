@@ -114,11 +114,17 @@ def _register_services(hass: HomeAssistant) -> None:
     for spec in COMMANDS:
         opt_schema = {vol.Optional("entry_id"): cv.string}
         for opt_name, meta in (spec.get("options") or {}).items():
-            typ = {
+            base = {
                 "int": vol.Coerce(int),
                 "float": vol.Coerce(float),
                 "bool": cv.boolean,
             }.get(meta.get("type"), cv.string)
+            if meta.get("type") in ("int", "float") and (
+                meta.get("min") is not None or meta.get("max") is not None
+            ):
+                typ = vol.All(base, vol.Range(min=meta.get("min"), max=meta.get("max")))
+            else:
+                typ = base
             opt_schema[vol.Optional(opt_name)] = typ
 
         def _make_handler(command_key: str):

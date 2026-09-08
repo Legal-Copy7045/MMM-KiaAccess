@@ -234,6 +234,19 @@ class HaLiveClient {
       this._lastPong = Date.now();
       return;
     }
+    // the reply to our subscribe_trigger — if HA rejected it we are NOT
+    // subscribed, so drop the "healthy" claim and reconnect (otherwise
+    // node_helper would keep skipping the REST fallback forever)
+    if (msg.type === "result" && msg.id === this._subId) {
+      if (msg.success === false) {
+        this._subId = null;
+        return this._scheduleReconnect(
+          "subscribe rejected: " +
+            ((msg.error && msg.error.message) || "unknown")
+        );
+      }
+      return;
+    }
     if (msg.type === "event" && msg.id === this._subId) {
       const to =
         msg.event &&
