@@ -8,6 +8,7 @@ core/commands.json.
 from __future__ import annotations
 
 import logging
+import os
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -29,8 +30,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass)
+    await _register_frontend(hass)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
+
+
+CARD_URL = f"/{DOMAIN}/kia-access-card.js"
+_CARD_PATH = os.path.join(os.path.dirname(__file__), "frontend", "kia-access-card.js")
+
+
+async def _register_frontend(hass: HomeAssistant) -> None:
+    """Serve and auto-load the Lovelace card (best-effort)."""
+    if hass.data[DOMAIN].get("_frontend"):
+        return
+    hass.data[DOMAIN]["_frontend"] = True
+    if not os.path.exists(_CARD_PATH):
+        _LOGGER.warning("Kia Access card bundle missing at %s", _CARD_PATH)
+        return
+    try:
+        try:
+            from homeassistant.components.http import StaticPathConfig
+
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(CARD_URL, _CARD_PATH, False)]
+            )
+        except ImportError:  # HA < 2024.7
+            hass.http.register_static_path(CARD_URL, _CARD_PATH, False)
+
+        from homeassistant.components.frontend import add_extra_js_url
+
+        add_extra_js_url(hass, CARD_URL)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Could not auto-register Kia Access card: %s", err)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

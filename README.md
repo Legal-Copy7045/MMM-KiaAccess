@@ -541,6 +541,21 @@ dialog. Running both this and the MagicMirror module against one account? Point
 MM at HA instead of Kia (planned `source: "homeassistant"`) to avoid double
 polling.
 
+### Lovelace card
+
+The integration bundles and auto-loads a custom card that renders the same
+top-down diagram as MagicMirror, with the details table and control buttons:
+
+```yaml
+type: custom:kia-access-card
+# entity: sensor.kia_status   # optional — auto-detected otherwise
+```
+
+The card reads one diagnostic sensor (`…_status`, `kia_access_raw` attribute)
+that carries the whole flat payload, so adding it costs no extra polling. If the
+card doesn't appear after install, hard-refresh the browser or add
+`/kia_access/kia-access-card.js` as a Lovelace resource manually.
+
 ## Credits
 
 - [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
