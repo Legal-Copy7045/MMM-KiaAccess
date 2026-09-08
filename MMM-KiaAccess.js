@@ -83,8 +83,10 @@ Module.register("MMM-KiaAccess", {
       compact: false, // one-line summary instead of the diagram + table
       chargeProgress: true, // when plugged in: a progress bar + "full at HH:MM"
       rangeRing: false, // a radial SoC / range gauge under the car
-      socHistory: false, // a battery-% sparkline over the last `socHistoryDays`
+      socHistory: false, // an EV-battery-% sparkline over the last `socHistoryDays`
       socHistoryDays: 14,
+      v12History: false, // a 12V-battery-% sparkline (spot vampire drain / a dying 12V)
+      v12HistoryDays: 14,
       tripStats: false, // distance / consumption / regen from month_trip_info
       location: {
         enabled: false,
@@ -558,28 +560,44 @@ Module.register("MMM-KiaAccess", {
     return el;
   },
 
-  socHistoryEl() {
-    const vis = this.config.visuals || {};
-    if (!vis.socHistory) return null;
-    const days = vis.socHistoryDays || 14;
+  historySparkEl(series, days, color, caption) {
     const cutoff = Date.now() - days * 864e5;
     const pts = (this.history || [])
-      .filter((h) => h && h.t >= cutoff && h.ev != null)
-      .map((h) => ({ t: h.t, v: h.ev }));
+      .filter((h) => h && h.t >= cutoff && h[series] != null)
+      .map((h) => ({ t: h.t, v: h[series] }));
     if (pts.length < 2) return null;
+    const last = pts[pts.length - 1].v;
     const el = document.createElement("div");
     el.className = "kiaaccess-visuals";
     el.innerHTML = this.visuals.sparkline(pts, {
-      width: vis.width || 210,
+      width: (this.config.visuals || {}).width || 210,
       height: 40,
-      color: this.visuals.COL.ok
+      color: color
     });
     const cap = document.createElement("div");
     cap.className = "kiaaccess-batt-detail";
     cap.innerHTML =
-      '<div><span class="kiaaccess-bd-label">Battery, last ' + days + " days</span></div>";
+      '<div><span class="kiaaccess-bd-label">' +
+      this.escape(caption) +
+      '</span><span class="kiaaccess-bd-value">' +
+      Math.round(last) +
+      "%</span></div>";
     el.appendChild(cap);
     return el;
+  },
+
+  socHistoryEl() {
+    const vis = this.config.visuals || {};
+    if (!vis.socHistory) return null;
+    const days = vis.socHistoryDays || 14;
+    return this.historySparkEl("ev", days, this.visuals.COL.ok, "EV battery, last " + days + " d");
+  },
+
+  v12HistoryEl() {
+    const vis = this.config.visuals || {};
+    if (!vis.v12History) return null;
+    const days = vis.v12HistoryDays || 14;
+    return this.historySparkEl("v12", days, this.visuals.COL.warn, "12V battery, last " + days + " d");
   },
 
   locationEl() {
@@ -803,6 +821,7 @@ Module.register("MMM-KiaAccess", {
         this.chargeProgressEl(),
         this.rangeRingEl(),
         this.socHistoryEl(),
+        this.v12HistoryEl(),
         this.preconditionEl(),
         this.chargeCostEl(),
         this.tripStatsEl(),
