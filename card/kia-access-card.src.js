@@ -17,12 +17,12 @@
   var C = self.KiaConditions;
   var CATALOGUE = (self.KiaAccessEntities && self.KiaAccessEntities.entities) || [];
   var COMMANDS = (self.KiaAccessCommands && self.KiaAccessCommands.commands) || [];
-  // one-tap buttons: the no-argument commands, plus start_climate (fires with
-  // the catalogue defaults — a "warm the car up" tap). set_charge_limits and a
-  // custom start_climate stay services only, since a stray tap would change
-  // settings.
+  // one-tap buttons: the no-argument commands. start_climate / stop_climate have
+  // their own panel (temperature + duration + toggles); set_charge_limits and
+  // send_to_car stay services only.
+  var CLIMATE_KEYS = { start_climate: 1, stop_climate: 1 };
   var BUTTON_COMMANDS = COMMANDS.filter(function (c) {
-    return !c.options || c.key === "start_climate";
+    return !c.options && !CLIMATE_KEYS[c.key];
   });
   var CMD_BY_KEY = {};
   COMMANDS.forEach(function (c) { CMD_BY_KEY[c.key] = c; });
@@ -54,6 +54,28 @@
     "font-size:.85em;font-family:inherit;cursor:pointer}" +
     ".ka-btns button:hover{background:var(--secondary-background-color)}" +
     ".ka-btns ha-icon{--mdc-icon-size:16px;width:16px;height:16px}" +
+    ".ka-clim{display:flex;flex-direction:column;gap:7px;margin-top:2px}" +
+    ".ka-clim-row{display:flex;align-items:center;justify-content:space-between;gap:10px}" +
+    ".ka-clim-row>span{font-size:.85em;color:var(--primary-text-color)}" +
+    ".ka-step{display:inline-flex;align-items:center;border:1px solid var(--divider-color);" +
+    "border-radius:16px;overflow:hidden}" +
+    ".ka-step button{border:0;background:var(--card-background-color);color:var(--primary-text-color);" +
+    "font:inherit;font-size:1.05em;line-height:1;width:30px;height:28px;cursor:pointer}" +
+    ".ka-step button:hover{background:var(--secondary-background-color)}" +
+    ".ka-step button:disabled{opacity:.35;cursor:default}" +
+    ".ka-step .ka-step-val{min-width:52px;text-align:center;font-size:.9em;" +
+    "color:var(--primary-text-color);font-variant-numeric:tabular-nums}" +
+    ".ka-toggles{display:flex;flex-wrap:wrap;gap:6px}" +
+    ".ka-toggles label{display:inline-flex;align-items:center;gap:5px;font-size:.8em;" +
+    "color:var(--primary-text-color);" +
+    "border:1px solid var(--divider-color);border-radius:14px;padding:3px 10px;cursor:pointer}" +
+    ".ka-toggles input{accent-color:var(--primary-color)}" +
+    ".ka-clim-go{display:flex;gap:6px;margin-top:2px}" +
+    ".ka-clim-go button{flex:1;border-radius:16px;border:1px solid var(--divider-color);" +
+    "font:inherit;font-size:.85em;padding:6px 10px;cursor:pointer;" +
+    "background:var(--card-background-color);color:var(--primary-text-color)}" +
+    ".ka-clim-go button.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:transparent}" +
+    ".ka-clim-note{font-size:.78em;color:var(--secondary-text-color);min-height:1em}" +
     ".ka-table{width:100%;border-collapse:collapse;margin-top:14px;font-size:.9em}" +
     ".ka-table td{padding:2px 0;border-bottom:1px solid var(--divider-color)}" +
     ".ka-table td:last-child{text-align:right;color:var(--secondary-text-color)}" +
@@ -116,7 +138,8 @@
       (c.confirm ? " data-confirm='1'" : "") + ">" + ic + esc(c.name) + "</button>";
   }
 
-  function actionsHtml() {
+  // button groups only (no wrapper) — the climate panel is rendered alongside
+  function actionsGroupsHtml() {
     var seen = {};
     var html = CAT_ORDER.map(function (cat) {
       var items = BUTTON_COMMANDS.filter(function (c) { return (c.category || "other") === cat; });
@@ -131,7 +154,74 @@
       html += "<div class='ka-group'><div class='ka-btns'>" +
         rest.map(buttonHtml).join("") + "</div></div>";
     }
-    return html ? "<div class='ka-actions'>" + html + "</div>" : "";
+    return html;
+  }
+
+  // ---- climate control panel -------------------------------------------------
+  // The Kia USA API takes the set-point in °F (62–82). We keep the canonical
+  // value in °F and only convert for display when the dashboard is metric.
+  var CLIM_OPTS = (CMD_BY_KEY.start_climate && CMD_BY_KEY.start_climate.options) || {};
+  var TEMP_F_MIN = (CLIM_OPTS.set_temp && CLIM_OPTS.set_temp.min) || 62;
+  var TEMP_F_MAX = (CLIM_OPTS.set_temp && CLIM_OPTS.set_temp.max) || 82;
+  var TEMP_F_DEF = (CLIM_OPTS.set_temp && CLIM_OPTS.set_temp.default) || 70;
+  var DUR_MIN = (CLIM_OPTS.duration && CLIM_OPTS.duration.min) || 1;
+  var DUR_MAX = (CLIM_OPTS.duration && CLIM_OPTS.duration.max) || 30;
+  var DUR_DEF = (CLIM_OPTS.duration && CLIM_OPTS.duration.default) || 10;
+  var CLIM_STORE = "kia-access-card:climate";
+
+  var fToC = function (f) { return (f - 32) * 5 / 9; };
+  var cToF = function (c) { return c * 9 / 5 + 32; };
+  var clamp = function (n, lo, hi) { return Math.max(lo, Math.min(hi, n)); };
+
+  function loadClim() {
+    var d = { tempF: TEMP_F_DEF, duration: DUR_DEF, defrost: false, rearDefrost: false, wheel: false };
+    try {
+      var s = JSON.parse(window.localStorage.getItem(CLIM_STORE) || "{}");
+      if (typeof s.tempF === "number") d.tempF = clamp(Math.round(s.tempF), TEMP_F_MIN, TEMP_F_MAX);
+      if (typeof s.duration === "number") d.duration = clamp(Math.round(s.duration), DUR_MIN, DUR_MAX);
+      d.defrost = !!s.defrost; d.rearDefrost = !!s.rearDefrost; d.wheel = !!s.wheel;
+    } catch (e) { /* first run / private mode */ }
+    return d;
+  }
+  function saveClim(c) {
+    try { window.localStorage.setItem(CLIM_STORE, JSON.stringify(c)); } catch (e) { /* ignore */ }
+  }
+
+  function stepRow(label, id, valTxt, atMin, atMax) {
+    return "<div class='ka-clim-row'><span>" + esc(label) + "</span>" +
+      "<span class='ka-step'>" +
+      "<button type='button' data-step='" + id + ":-1'" + (atMin ? " disabled" : "") + ">−</button>" +
+      "<span class='ka-step-val'>" + esc(valTxt) + "</span>" +
+      "<button type='button' data-step='" + id + ":1'" + (atMax ? " disabled" : "") + ">+</button>" +
+      "</span></div>";
+  }
+
+  // `unit` is "C" or "F"
+  function climateHtml(clim, unit) {
+    var tempTxt = unit === "C"
+      ? Math.round(fToC(clim.tempF)) + " °C"
+      : Math.round(clim.tempF) + " °F";
+    var cb = function (id, lbl, on) {
+      return "<label><input type='checkbox' data-clim='" + id + "'" +
+        (on ? " checked" : "") + ">" + esc(lbl) + "</label>";
+    };
+    return "<div class='ka-group'><div class='ka-group-label'>Climate</div>" +
+      "<div class='ka-clim'>" +
+      stepRow("Temperature", "temp", tempTxt,
+        clim.tempF <= TEMP_F_MIN, clim.tempF >= TEMP_F_MAX) +
+      stepRow("Run for", "dur", clim.duration + " min",
+        clim.duration <= DUR_MIN, clim.duration >= DUR_MAX) +
+      "<div class='ka-toggles'>" +
+      cb("defrost", "Defrost", clim.defrost) +
+      cb("rearDefrost", "Rear + mirrors", clim.rearDefrost) +
+      cb("wheel", "Heated wheel", clim.wheel) +
+      "</div>" +
+      "<div class='ka-clim-go'>" +
+      "<button type='button' class='primary' data-clim-go='start'>Start climate</button>" +
+      "<button type='button' data-clim-go='stop'>Stop</button>" +
+      "</div>" +
+      "<div class='ka-clim-note' data-clim-note></div>" +
+      "</div></div>";
   }
 
   class KiaAccessCard extends HTMLElement {
@@ -181,6 +271,100 @@
           this._render();
         }.bind(this), 3200);
       }
+    }
+
+    // "C" / "F" for the climate panel — card config wins, else the HA unit system
+    _tempUnit() {
+      var c = this._config && this._config.temperature_unit;
+      if (c === "C" || c === "F") return c;
+      var us = this._hass && this._hass.config && this._hass.config.unit_system;
+      return us && us.temperature === "°F" ? "F" : "C";
+    }
+
+    _clim() {
+      if (!this._climState) this._climState = loadClim();
+      return this._climState;
+    }
+
+    // re-render only the climate panel, keeping its scroll / focus context light
+    _climRefresh() {
+      var panel = this._root && this._root.querySelector(".ka-clim");
+      if (!panel) { this._sig = null; this._render(); return; }
+      var host = panel.closest(".ka-group");
+      host.outerHTML = climateHtml(this._clim(), this._tempUnit());
+      this._wireClimate();
+    }
+
+    _climStep(id, dir) {
+      var c = this._clim();
+      if (id === "temp") {
+        // step by 1 °F, or ~1 °C worth (nearest °F) when the card shows °C
+        var d = this._tempUnit() === "C" ? 2 * dir : dir;
+        c.tempF = clamp(c.tempF + d, TEMP_F_MIN, TEMP_F_MAX);
+      } else if (id === "dur") {
+        c.duration = clamp(c.duration + dir, DUR_MIN, DUR_MAX);
+      }
+      saveClim(c);
+      this._climRefresh();
+    }
+
+    _climToggle(id, on) {
+      var c = this._clim();
+      c[id] = on;
+      saveClim(c);
+    }
+
+    _climNote(msg) {
+      var n = this._root && this._root.querySelector("[data-clim-note]");
+      if (n) n.textContent = msg || "";
+    }
+
+    _startClimate() {
+      if (!this._hass) return;
+      var c = this._clim();
+      var data = {
+        set_temp: c.tempF,
+        duration: c.duration,
+        climate: true,
+        defrost: !!c.defrost,
+        heating: c.rearDefrost ? 1 : 0,
+        steering_wheel: c.wheel ? 2 : 0
+      };
+      if (this._entryId) data.entry_id = this._entryId;
+      var shown = this._tempUnit() === "C"
+        ? Math.round(fToC(c.tempF)) + " °C" : c.tempF + " °F";
+      this._hass.callService("kia_access", "start_climate", data);
+      this._climNote("Starting climate at " + shown + " for " + c.duration + " min…");
+    }
+
+    _stopClimate() {
+      if (!this._hass) return;
+      var data = {};
+      if (this._entryId) data.entry_id = this._entryId;
+      this._hass.callService("kia_access", "stop_climate", data);
+      this._climNote("Stopping climate…");
+    }
+
+    _wireClimate() {
+      var root = this._root;
+      var card = this;
+      root.querySelectorAll("[data-step]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          var p = b.getAttribute("data-step").split(":");
+          card._climStep(p[0], parseInt(p[1], 10));
+        });
+      });
+      root.querySelectorAll("[data-clim]").forEach(function (cb) {
+        cb.addEventListener("change", function () {
+          card._climToggle(cb.getAttribute("data-clim"), cb.checked);
+        });
+      });
+      root.querySelectorAll("[data-clim-go]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          if (b.getAttribute("data-clim-go") === "start") card._startClimate();
+          else card._stopClimate();
+        });
+      });
     }
 
     _render() {
@@ -243,7 +427,10 @@
         "<div class='ka-sub'>" + esc(updated) + "</div>" +
         chipHtml + note +
         "</div></div>" +
-        actionsHtml() +
+        "<div class='ka-actions'>" +
+        climateHtml(this._clim(), this._tempUnit()) +
+        actionsGroupsHtml() +
+        "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";
 
@@ -253,6 +440,7 @@
           card._callCommand(b.getAttribute("data-cmd"), b.getAttribute("data-confirm") === "1");
         });
       });
+      this._wireClimate();
     }
   }
 
