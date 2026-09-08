@@ -434,14 +434,20 @@ Module.register("MMM-KiaAccess", {
 
   // canonical vehicle state for the diagram + conditions — delegated to the
   // shared core/state.js (loaded via getScripts) so MM, the HA card and the
-  // contract tests all run the identical logic
+  // contract tests all run the identical logic. Cached per flatMap: getDom()
+  // and processConditions() ask for it many times per cycle.
   visualState() {
     if (!this.stateBuilder) return {}; // core/state.js failed to load
-    return this.stateBuilder.buildState(this.flatMap || {}, {
+    if (this._stateCache && this._stateCacheKey === this.flatMap) {
+      return this._stateCache;
+    }
+    this._stateCache = this.stateBuilder.buildState(this.flatMap || {}, {
       history: this.history || [],
       otpLifetimeDays: this.config.otpLifetimeDays,
       otpWarnDays: this.config.otpWarnDays
     });
+    this._stateCacheKey = this.flatMap;
+    return this._stateCache;
   },
 
   // edge-triggered vehicle-state notifications
@@ -526,8 +532,8 @@ Module.register("MMM-KiaAccess", {
     });
   },
 
-  // allow live config edits via MM's module dev tooling / notifications
-  notificationReceived(notification, payload) {
+  // let another module (or a button) force an immediate refresh
+  notificationReceived(notification) {
     if (notification === "MMM_KIA_ACCESS_REFRESH") {
       this.scheduleFetch(0);
     }
@@ -587,9 +593,9 @@ Module.register("MMM-KiaAccess", {
     el.innerHTML = this.visuals.chargeBar(s.batteryPct, target, {
       width: (this.config.visuals || {}).width || 210
     });
-    const mins = this.utils
-      ? Number(this.flatMap["vehicle.ev_estimated_current_charge_duration"])
-      : NaN;
+    const mins = Number(
+      (this.flatMap || {})["vehicle.ev_estimated_current_charge_duration"]
+    );
     const cap = document.createElement("div");
     cap.className = "kiaaccess-batt-detail";
     let msg = s.charging === true ? "Charging" : "Plugged in, not charging";
