@@ -543,12 +543,21 @@ Module.register("MMM-KiaAccess", {
           const secs = critical
             ? (cfg.criticalAlertSeconds != null ? cfg.criticalAlertSeconds : 0)
             : (cfg.alertSeconds != null ? cfg.alertSeconds : 15);
+          // A `notification`-type alert ALWAYS gets a ttl from the alert module
+          // (its display_time when no timer is given) — it can't truly persist.
+          // Only a `type: "alert"` with no `timer` stays until HIDE_ALERT.
+          const persistent = critical && !(secs > 0);
           if (becameActive) {
-            const alert = { type: "notification", title: c.title, message: c.message };
-            if (secs > 0) alert.timer = secs * 1000; // no timer -> stays until HIDE_ALERT
+            const alert = { title: c.title, message: c.message };
+            if (persistent) {
+              alert.type = "alert"; // centre popup, stays until HIDE_ALERT
+            } else {
+              alert.type = "notification"; // corner growl
+              alert.timer = (secs > 0 ? secs : 15) * 1000;
+            }
             this.sendNotification("SHOW_ALERT", alert);
             this._alertShown = this._alertShown || {};
-            if (secs === 0) this._alertShown[c.reason] = true;
+            if (persistent) this._alertShown[c.reason] = true;
           } else if (cleared && this._alertShown && this._alertShown[c.reason]) {
             // a persistent alert's condition cleared — dismiss it
             this.sendNotification("HIDE_ALERT");
