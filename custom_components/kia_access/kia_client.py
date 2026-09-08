@@ -232,7 +232,12 @@ def connect(job, token_file=None):
     except AuthenticationOTPRequired as exc:
         raise OtpRequired(ENROLL_HINT) from exc
 
-    _save_token(token_file, vm, enrolled_at)
+    # Persist the rotated token to token.json only for the file-based caller
+    # (the MagicMirror bridge). When the token was handed in as a dict, the
+    # caller (Home Assistant) persists it itself via fetch()'s meta["token"] —
+    # don't write into the HACS-managed integration folder.
+    if not job.get("token"):
+        _save_token(token_file, vm, enrolled_at)
     return vm, enrolled_at
 
 

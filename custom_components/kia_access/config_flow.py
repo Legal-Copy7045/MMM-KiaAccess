@@ -134,7 +134,11 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class KiaAccessOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
+        # HA >= 2024.11 sets .config_entry automatically; only assign on older
+        try:
+            self.config_entry  # noqa: B018
+        except AttributeError:
+            self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
