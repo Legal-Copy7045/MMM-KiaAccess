@@ -380,9 +380,9 @@ Common EV9 (US) paths:
 | `nullText` | `"—"` | shown for `null` / `undefined` |
 | `include` | `[]` | glob paths to show; empty = all |
 | `exclude` | `["vehicle.data.*", "vehicle.VIN"]` | glob paths to hide |
-| `hideWhenFalsy` | `[]` | glob paths whose row is dropped when the value is `false` / `0` / `null` / `""` / `"—"` (use for "only show when true / non-zero") |
+| `hideWhenFalsy` | `[]` | glob paths whose row is dropped when the value is `false` / `0` / `null` / `""` / `"—"` (use for "only show when true / non-zero"). Set to `"*"` to drop **every** empty row — keeps the table tidy before the car's first sync |
 | `order` | `[]` | glob paths shown first, in listed order |
-| `combine` | `{}` | `{ primaryKey: [otherKey, …] }` — fold the other rows onto the primary one as a `"value · value"` suffix and drop them as separate rows (e.g. `{ "vehicle.geocode": ["vehicle.location_last_updated_at"] }` → one `address · 5 min ago` line) |
+| `combine` | `{}` | `{ primaryKey: [otherKey, …] }` — fold the other rows onto the primary one as a `"value · value"` suffix (e.g. `{ "vehicle.geocode": ["vehicle.location_last_updated_at"] }` → one `Location: address · 5 min ago` line). The folded keys never render as their own rows; if the primary is also empty the whole row is dropped |
 | `labels` | `{}` | key path → display label |
 | `formatters` | see defaults | key path → formatter name |
 | `visuals.enabled` | `false` | master switch for the graphical widgets |
