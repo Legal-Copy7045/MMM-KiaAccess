@@ -1,6 +1,6 @@
 /* node test/conditions.test.js */
 const assert = require("assert");
-const C = require("../conditions.js");
+const C = require("../core/conditions.js");
 
 const base = {}; // all fields undefined -> null / unknown
 

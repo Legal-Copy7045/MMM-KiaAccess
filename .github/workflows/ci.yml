@@ -19,7 +19,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Syntax check
         run: |
-          for f in MMM-KiaAccess.js node_helper.js flatten.js visuals.js conditions.js ha_discovery.js setup_python.js docs/build-gallery.js; do
+          for f in MMM-KiaAccess.js node_helper.js core/flatten.js core/visuals.js core/conditions.js core/ha-discovery.js setup_python.js docs/build-gallery.js; do
             echo "node --check $f"
             node --check "$f"
           done
