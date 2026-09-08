@@ -591,9 +591,9 @@ Animations (pulses, charge flow, heater shimmer) play live here; car-states.png 
       '" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + (frac * C).toFixed(1) + " " + C.toFixed(1) +
       '" transform="rotate(-90 ' + cx + " " + cy + ')"/>' +
       (o.charging === true
-        ? '<path d="M ' + (cx + 5) + " " + (cy - 16) +
-          ' l -11 17 h 7 l -4 14 l 13 -19 h -8 z" fill="' + COL.text +
-          '"><animate attributeName="opacity" values="0.4;1;0.4" dur="1.5s" repeatCount="indefinite"/></path>'
+        ? '<path d="M ' + (cx + 3) + " " + (cy - r - 1) +
+          ' l -8 12 h 5 l -3 10 l 9 -14 h -6 z" fill="' + COL.text +
+          '" stroke="#000" stroke-width="0.5"><animate attributeName="opacity" values="0.4;1;0.4" dur="1.5s" repeatCount="indefinite"/></path>'
         : "") +
       '<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" font-size="20" font-weight="700" fill="' +
       COL.text + '">' + esc(label) + "</text>" +
