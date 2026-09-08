@@ -1,25 +1,50 @@
-# MMM-KiaAccess
+# Kia Access — MagicMirror module + Home Assistant integration
 
 [![CI](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml/badge.svg)](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml)
 
-A [MagicMirror²](https://magicmirror.builders/) module that shows **configurable**
-data from a Kia Connect / Bluelink account. Built for a **Kia EV9 (Kia USA)** but works
-with any Hyundai/Kia/Genesis supported by
-[`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api).
+Kia Connect / Bluelink vehicle data on **two surfaces built from one shared
+engine**. Built for a **Kia EV9 (Kia USA)**, works with any Hyundai/Kia/Genesis
+that [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
+supports.
 
-The node helper runs a small Python bridge (`kia_bridge.py`) that pulls **every**
-attribute the library exposes for your vehicle. The frontend flattens that into
-`path → value` rows, and you choose exactly which ones appear, in what order, with what
-labels and units.
+- **MagicMirror² module** — a configurable `key → value` table plus an animated
+  top-down car diagram (doors, lock, charge, climate, tyres…). Read-only.
+- **Home Assistant integration** — sensors and binary sensors, **plus control**
+  (lock / unlock / climate / charging), a Lovelace card that renders the same
+  diagram, and `kia_access_alert` events for automations.
 
-> **Why a Python bridge and not a Node library?**
-> Kia USA sits behind Cloudflare bot protection that returns **HTTP 403** to the Node
-> `bluelinky` library. `hyundai_kia_connect_api` (the library behind the Home Assistant
-> Kia/Hyundai integration) handles it and is actively maintained.
+The two work **independently**. Or run both and have the module take its data
+**from Home Assistant** instead of polling Kia itself — so the car is woken once,
+not twice.
+
+> **Why a Python library, not a Node one?**
+> Kia USA sits behind Cloudflare bot protection that returns **HTTP 403** to the
+> Node `bluelinky` library. `hyundai_kia_connect_api` (the library behind Home
+> Assistant's Kia/Hyundai integration) handles it and is actively maintained.
+
+---
+
+## Which setup do you want?
+
+| | who polls Kia | needs on the mirror | car control | dashboard |
+|---|---|---|---|---|
+| **A · MagicMirror only** | the module | Python venv + one-time OTP | – | the mirror |
+| **B · Home Assistant only** | the integration | – | **yes** | Lovelace card |
+| **C · MagicMirror fed by HA** | the integration (only) | just a HA token | via HA | both |
+
+- Just a mirror, no Home Assistant → **A**.
+- Home Assistant user who wants control and a dashboard tile → **B** (add a
+  mirror later with **C**).
+- Both a mirror **and** Home Assistant → **C**: HA polls the car once, the mirror
+  reads that locally. No Python or OTP on the mirror.
 
 ---
 
 ## Install
+
+### A · MagicMirror only
+
+The module polls Kia directly through a small Python bridge (`kia_bridge.py`).
 
 ```bash
 cd ~/MagicMirror/modules
@@ -28,9 +53,29 @@ cd MMM-KiaAccess
 npm install          # runs setup_python.js: builds ./venv and installs the Python dep
 ```
 
-Restart MagicMirror afterwards. `node_helper` automatically uses `./venv/bin/python3`.
+Then add to `~/MagicMirror/config/config.js` and restart MagicMirror:
 
-### Python version
+```js
+{
+  module: "MMM-KiaAccess",
+  position: "top_left",
+  header: "Kia EV9",
+  config: {
+    username: "you@example.com",
+    password: "••••••••",
+    pin: "1234",
+    brand: "KIA",            // KIA | HYUNDAI | GENESIS
+    region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
+    visuals: { enabled: true }
+    // include / labels / formatters / notifications / mqtt — see Configuration
+  }
+}
+```
+
+Mode A needs two more things: a modern **Python** (auto-provisioned, below) and a
+**one-time OTP** enrollment (Kia USA, below).
+
+#### Python version (mode A)
 
 `hyundai_kia_connect_api` needs **Python ≥ 3.10** (current releases: 3.12+).
 Anything older than 3.10 can only install v3.24.0, which **can no longer log in to
@@ -59,7 +104,7 @@ Or set `pythonBin` in the module config to an absolute path.
 
 If venv creation fails on Debian/RPi OS: `sudo apt install python3-venv`.
 
-### One-time OTP enrollment (Kia USA)
+#### One-time OTP enrollment (mode A, Kia USA)
 
 Kia USA requires a one-time passcode when a new client first logs in. Run the enrollment
 script **once**, on the mirror, using the module's venv Python:
@@ -79,7 +124,105 @@ and silently refreshes that token — no more prompts until Kia expires the refr
 (months away), at which point just run `enroll.py` again. If the module ever shows
 *"OTP enrollment required"*, that's the signal.
 
+### B · Home Assistant only
+
+A native integration — the same data as mode A, **plus control**, plus a
+Lovelace card. No MagicMirror required.
+
+1. **Install the integration.** HACS → ⋮ → **Custom repositories** → add
+   `https://github.com/Legal-Copy7045/MMM-KiaAccess`, category **Integration** →
+   **Download** → **restart Home Assistant**.
+   (Or copy `custom_components/kia_access/` into `config/custom_components/` and
+   restart.)
+2. **Add it.** **Settings → Devices & Services → + Add Integration → “Kia
+   Access”**. Enter email / password / PIN / region; enter the SMS or email
+   **OTP** when prompted. Tick *Reverse-geocode the parked location* if you want
+   a location.
+3. You now have one **device per vehicle**:
+   - sensors + binary sensors (battery, range, charge power, doors, lock, plug,
+     climate, tyre warning, …), generated from `core/entities.json`
+   - **buttons**: `lock`, `unlock`, `start/stop climate`, `start/stop charge`
+   - **services**: `kia_access.lock` … `kia_access.set_charge_limits`, and
+     `kia_access.start_climate` with `set_temp` / `duration` / `defrost`
+   - **`kia_access_alert`** events on the event bus for the same edge-triggered
+     conditions the mirror notifies on (battery low, left unlocked, door open,
+     charge complete / interrupted, 12V drain, OTP expiry) — use them in
+     automations
+4. **Add the dashboard card.** Edit a dashboard → **+ Add Card** → search “Kia
+   Access”, or paste:
+   ```yaml
+   type: custom:kia-access-card
+   # entity: sensor.<vehicle>_status   # optional; auto-detected otherwise
+   ```
+   The integration serves and auto-registers `/kia_access/kia-access-card.js`.
+   If the card doesn't show up, hard-refresh the browser, or add that path as a
+   **Lovelace resource** (type: JavaScript Module) manually.
+
+Poll interval and the live-wake-up timeout are in the integration's
+**Configure** dialog. The rotated refresh token is stored in the config entry —
+nothing is written into the HACS-managed folder.
+
+### C · MagicMirror fed by Home Assistant
+
+Do **mode B first** so Home Assistant is polling the car. Then the module reads
+from HA over the local REST API — **no Kia credentials, no OTP, no Python bridge
+on the mirror**, and the car is only ever woken by HA.
+
+```bash
+cd ~/MagicMirror/modules
+git clone https://github.com/Legal-Copy7045/MMM-KiaAccess.git
+cd MMM-KiaAccess
+npm install
+```
+
+(`npm install` still builds the Python venv via `postinstall`; it's unused in
+this mode and harmless. Set `MMM_KIA_NO_DOWNLOAD=1` to skip the download.)
+
+In Home Assistant: your profile → **Security → Long-Lived Access Tokens →
+Create Token**. Then in `~/MagicMirror/config/config.js`:
+
+```js
+{
+  module: "MMM-KiaAccess",
+  position: "top_left",
+  header: "Kia EV9",
+  config: {
+    source: "homeassistant",
+    homeassistant: {
+      url: "http://homeassistant.local:8123",   // or http://<ha-ip>:8123
+      token: "<the long-lived access token>",
+      entity: "sensor.my_ev9_status"             // optional; Developer Tools → States → filter your car
+    },
+    visuals: { enabled: true }
+    // include / labels / formatters / notifications / mqtt all work exactly as in mode A
+  }
+}
+```
+
+Check it before restarting MagicMirror (this runs the exact code path the module
+uses):
+
+```bash
+cd ~/MagicMirror/modules/MMM-KiaAccess
+node -e "require('./ha_source.js').fetchFromHA({url:'http://homeassistant.local:8123',token:'<token>',entity:'sensor.my_ev9_status'}).then(r=>console.log(JSON.stringify(r._meta,null,2))).catch(e=>console.error('FAIL:',e.message))"
+```
+
+Good output: `{ "source": "homeassistant", "haEntity": "…", … }`. The vehicle
+values may be `null` until the car's first Kia sync — that only means the
+connection works. A `FAIL:` line gives the exact reason (bad token, wrong URL,
+entity not found).
+
+From here the module is identical to mode A — same diagram, table, sparklines,
+history, notifications and optional MQTT re-publishing — it just gets its data
+from Home Assistant. It re-reads HA every `updateInterval` (a local call, so this
+can be short — 5–15 min).
+
 ## Configuration
+
+> Applies to the **MagicMirror module** (modes A and C). In mode C, drop
+> `username` / `password` / `pin` and add the `source` / `homeassistant` block
+> shown above; everything else below is the same. Home Assistant's own options
+> are in its **Configure** dialog.
 
 ```js
 {
@@ -484,7 +627,8 @@ The `otpExpiring` notification check fires the same warning to other modules.
 - **12V battery:** every `refresh: true` poll wakes the car. Kia's own app polls roughly
   every 30–60 min. Lower risks draining the 12V battery in cold weather. Use
   `refresh: false` for frequent updates from Kia's cache.
-- Read-only: no lock/unlock/charge commands are exposed.
+- The MagicMirror module is **read-only**. Car control (lock / unlock / climate /
+  charging) is in the Home Assistant integration — see mode B.
 - Test the bridge directly:
   ```bash
   echo '{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA","refresh":false}' | python3 kia_bridge.py
@@ -529,68 +673,22 @@ run `npm run sync` after editing `core/`.
 The MagicMirror front end (`MMM-KiaAccess.js`), `node_helper.js` and the Python
 bridge (`kia_bridge.py`) stay at the repo root as MagicMirror requires.
 
-## Home Assistant
+## Home Assistant — reference
 
-The same account/data, plus **control** (lock, unlock, climate, charging), as a
-native integration. Install `custom_components/kia_access/` via HACS (add this
-repo as a custom repository, type *Integration*) or copy the folder into your HA
-`config/custom_components/`, restart, then **Settings → Devices & Services → Add
-Integration → Kia Access**. It handles the one-time OTP in the setup dialog.
+Install and setup are **mode B** above. Some details:
 
-You get a device per vehicle with:
-
-- sensors / binary sensors generated from `core/entities.json` (battery, range,
-  charge power, doors, lock, plug, climate, tyre warning, …)
-- buttons for `lock`, `unlock`, `start/stop climate`, `start/stop charge`
-- services `kia_access.lock` … `kia_access.set_charge_limits` (and
-  `kia_access.start_climate` with `set_temp` / `duration` / `defrost`)
-- `kia_access_alert` events on the HA event bus for the same edge-triggered
-  conditions the mirror notifies on (battery low, left unlocked, door open,
-  charge complete / interrupted, 12V drain, …) — use them in automations
-
-Poll interval and live-wake-up timeout are in the integration's **Configure**
-dialog.
-
-### MagicMirror reading from Home Assistant
-
-Running both this and the MagicMirror module against one account doubles the
-polling of the car. Instead, let HA do the polling and point the module at it —
-no Python bridge, no OTP on the mirror:
-
-```js
-{
-  module: "MMM-KiaAccess",
-  position: "top_left",
-  config: {
-    source: "homeassistant",
-    homeassistant: {
-      url: "http://homeassistant.local:8123",
-      token: "<a HA long-lived access token>"
-      // entity: "sensor.kia_ev9_status"   // optional, auto-detected
-    },
-    // no username/password/pin needed in this mode
-    visuals: { enabled: true }
-  }
-}
-```
-
-It reads the integration's diagnostic summary sensor, so the diagram, table,
-notifications and MQTT re-publishing all work exactly as in direct mode.
-
-### Lovelace card
-
-The integration bundles and auto-loads a custom card that renders the same
-top-down diagram as MagicMirror, with the details table and control buttons:
-
-```yaml
-type: custom:kia-access-card
-# entity: sensor.kia_status   # optional — auto-detected otherwise
-```
-
-The card reads one diagnostic sensor (`…_status`, `kia_access_raw` attribute)
-that carries the whole flat payload, so adding it costs no extra polling. If the
-card doesn't appear after install, hard-refresh the browser or add
-`/kia_access/kia-access-card.js` as a Lovelace resource manually.
+- **How the card gets its data.** The integration adds one diagnostic sensor,
+  `sensor.<vehicle>_status`, whose attributes carry the whole flat vehicle
+  payload (`kia_access_raw: true`). The card — and the module in mode C — read
+  only that one entity, so neither costs any extra polling of Kia.
+- **Control.** Buttons cover the no-argument commands; `set_charge_limits` and
+  the parameterised `start_climate` are services only. All of them refresh the
+  coordinator afterwards. Multiple accounts: pass `entry_id` in the service
+  call.
+- **Alerts in automations.** Trigger on `event_type: kia_access_alert`; the
+  `event_data` has `reason`, `level`, `active`, `message`, `vin`, `entry_id`.
+- **Token.** The refresh token lives in the config entry and is re-saved when
+  Kia rotates it — nothing is written into the HACS-managed integration folder.
 
 ## Credits
 
