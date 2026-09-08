@@ -64,6 +64,16 @@ const GROUPS = [
     ["Heating", { climate: "heat" }],
     ["Cooling", { climate: "cool" }],
     ["On (direction unknown)", { climate: "on" }],
+    ["Heating + set-point", { climate: "heat", airTempC: 21 }],
+  ]],
+  ["Temperatures & 12V battery", [
+    ["Outside temp (thermometer)", { outsideTempC: 3 }],
+    ["12V battery — healthy", { car12vPct: 88 }],
+    ["12V battery — low", { car12vPct: 42 }],
+    ["12V + outside + set-point", { car12vPct: 71, outsideTempC: 3, climate: "heat", airTempC: 22 }],
+  ]],
+  ["Find the car", [
+    ["Lamps flashing amber", { flashing: true }],
   ]],
   ["Combined example", [
     ["Cold morning, many states", {

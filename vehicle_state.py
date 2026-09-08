@@ -53,15 +53,16 @@ def build_state(flat, opts=None):
         t = hs.strip().lower()
         headlights = bool(t and t not in ("off", "none", "0"))
 
+    air_temp_c = _num(f, "air_temperature")        # climate set-point
+    outside_temp_c = _num(f, "outside_temperature")
+
     def climate():
         if _bool(f, "air_control_is_on") is not True:
             return None
-        set_t = _num(f, "air_temperature")
-        out_t = _num(f, "outside_temperature")
-        if set_t is not None and out_t is not None:
-            if set_t - out_t >= 1:
+        if air_temp_c is not None and outside_temp_c is not None:
+            if air_temp_c - outside_temp_c >= 1:
                 return "heat"
-            if out_t - set_t >= 1:
+            if outside_temp_c - air_temp_c >= 1:
                 return "cool"
         return "on"
 
@@ -129,6 +130,8 @@ def build_state(flat, opts=None):
         "mirrorHeat": _bool(f, "side_mirror_heater_is_on"),
         "steerHeat": _bool(f, "steering_wheel_heater_is_on"),
         "climate": climate(),
+        "airTempC": air_temp_c,
+        "outsideTempC": outside_temp_c,
         "tyreAny": _bool(f, "tire_pressure_all_warning_is_on"),
         "tyreFL": _bool(f, "tire_pressure_front_left_warning_is_on"),
         "tyreFR": _bool(f, "tire_pressure_front_right_warning_is_on"),

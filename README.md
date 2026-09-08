@@ -382,6 +382,7 @@ Common EV9 (US) paths:
 | `exclude` | `["vehicle.data.*", "vehicle.VIN"]` | glob paths to hide |
 | `hideWhenFalsy` | `[]` | glob paths whose row is dropped when the value is `false` / `0` / `null` / `""` / `"—"` (use for "only show when true / non-zero") |
 | `order` | `[]` | glob paths shown first, in listed order |
+| `combine` | `{}` | `{ primaryKey: [otherKey, …] }` — fold the other rows onto the primary one as a `"value · value"` suffix and drop them as separate rows (e.g. `{ "vehicle.geocode": ["vehicle.location_last_updated_at"] }` → one `address · 5 min ago` line) |
 | `labels` | `{}` | key path → display label |
 | `formatters` | see defaults | key path → formatter name |
 | `visuals.enabled` | `false` | master switch for the graphical widgets |
@@ -455,7 +456,14 @@ The car diagram:
   ring in the driver's area.
 - **air conditioning** (`air_control_is_on`) → four air streams from a front vent
   bar: **orange when heating, cyan when cooling** (inferred from `air_temperature`
-  vs `outside_temperature`), neutral white when the direction is unknown.
+  vs `outside_temperature`), neutral white when the direction is unknown. While
+  climate is on the **set-point** (`air_temperature`) prints above the airflow.
+- **outside temperature** (`outside_temperature`) → a small thermometer + reading
+  in the top-left margin, always shown when the value is present.
+- **12V battery** (`car_battery_percentage`) → a lead-acid battery icon in the
+  front-left nose with the charge % inside, coloured green / amber / red.
+- **find the car** — after a `flash_lights` / `find_car` command all four lamps
+  pulse amber five times.
 - **wheels** show a `!` on a per-tyre pressure warning (all four for the
   "all tyres" warning).
 - **critical issue** → a pulsing red warning triangle in the right margin, on

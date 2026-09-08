@@ -168,6 +168,19 @@
       var data = {};
       if (this._entryId) data.entry_id = this._entryId;
       this._hass.callService("kia_access", key, data);
+
+      // acknowledge a hazards/find-the-car command by flashing the diagram lamps
+      // (~3s covers the 5 SMIL flashes); the API has no live state to follow
+      if (key === "flash_lights" || key === "find_car") {
+        this._flashing = true;
+        this._render();
+        clearTimeout(this._flashT);
+        this._flashT = setTimeout(function () {
+          this._flashing = false;
+          this._sig = null;
+          this._render();
+        }.bind(this), 3200);
+      }
     }
 
     _render() {
@@ -196,6 +209,7 @@
           });
         } catch (e) { /* ignore */ }
       }
+      state.flashing = this._flashing === true;
       var diagram = V.carDiagram(state, { width: 230, battery: true });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";
