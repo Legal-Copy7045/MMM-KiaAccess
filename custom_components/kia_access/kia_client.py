@@ -104,6 +104,19 @@ def dump_vehicle(vehicle):
         out["data"] = jsonable(getattr(vehicle, "data", {}) or {})
     except Exception:
         pass
+
+    # The library reports cabin / outside temperatures in the account's local
+    # unit — °F for USA & Canada — but every downstream formatter (state.js,
+    # visuals.js, the HA `outside_temperature` sensor's °C device class) assumes
+    # Celsius. Normalise to °C here, at the one place both surfaces share.
+    for base in ("air_temperature", "outside_temperature"):
+        unit = getattr(vehicle, "_" + base + "_unit", None)
+        val = out.get(base)
+        if isinstance(val, (int, float)) and str(unit).strip().upper() in (
+            "F", "°F", "FAHRENHEIT",
+        ):
+            out[base] = round((val - 32) * 5.0 / 9.0, 1)
+
     return out
 
 
