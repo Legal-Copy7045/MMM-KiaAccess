@@ -35,6 +35,12 @@ cf = importlib.import_module(f"{pkg}.config_flow")
 assert hasattr(cf, "KiaAccessConfigFlow")
 assert hasattr(cf.KiaAccessConfigFlow, "async_step_otp")
 
+init = importlib.import_module(pkg)
+assert hasattr(init, "_register_frontend")
+assert os.path.exists(
+    os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
+), "card bundle not vendored"
+
 # strings.json <-> translations/en.json identical, and cover the flow steps
 s = json.load(open(os.path.join(ROOT, "custom_components/kia_access/strings.json"), encoding="utf-8"))
 e = json.load(open(os.path.join(ROOT, "custom_components/kia_access/translations/en.json"), encoding="utf-8"))

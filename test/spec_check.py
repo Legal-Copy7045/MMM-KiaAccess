@@ -38,5 +38,12 @@ for name in ("entities.json", "commands.json", "kia_client.py"):
         f"{name} out of sync — run node scripts/sync-core.js"
     )
 
+# the Lovelace card bundle must be generated and reference the shared globals
+card = os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
+assert os.path.exists(card), "card bundle missing — run node scripts/sync-core.js"
+card_src = open(card, encoding="utf-8").read()
+for needle in ("KiaAccessState", "KiaAccessVisuals", 'customElements.define("kia-access-card"'):
+    assert needle in card_src, f"card bundle missing {needle} — regenerate"
+
 print("spec_check: all specs valid")
 sys.exit(0)
