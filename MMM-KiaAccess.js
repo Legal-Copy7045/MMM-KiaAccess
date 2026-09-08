@@ -23,6 +23,8 @@ Module.register("MMM-KiaAccess", {
     // ---- runtime ----
     pythonBin: "python3", // command used to run kia_bridge.py
     fetchTimeout: 90, // seconds before the bridge process is killed
+    forceRefreshTimeout: 45, // seconds to wait for the car's live wake-up (`refresh: true`)
+                             // before falling back to Kia's cached copy for this poll
 
     // ---- polling / reliability ----
     updateInterval: 30 * 60 * 1000, // 30 min. Be gentle: frequent polls drain the 12V battery.
@@ -214,6 +216,15 @@ Module.register("MMM-KiaAccess", {
   doFetch() {
     if (this.config.debug) Log.info("[MMM-KiaAccess] requesting data");
     this.sendSocketNotification("KIA_FETCH", this.serialisableConfig());
+    // watchdog: never leave "Loading …" up forever if the helper goes quiet
+    clearTimeout(this._watchdog);
+    this._watchdog = setTimeout(() => {
+      if (this.loading && !this.rawPayload) {
+        this.errorMessage = "no response from the vehicle bridge yet — retrying";
+        this.updateDom(this.config.animationSpeed);
+      }
+      this.scheduleFetch(this.config.retryInterval);
+    }, ((this.config.fetchTimeout || 90) + 25) * 1000);
   },
 
   serialisableConfig() {
@@ -230,6 +241,7 @@ Module.register("MMM-KiaAccess", {
       geocode: c.geocode || (c.visuals && c.visuals.location && c.visuals.location.enabled),
       pythonBin: c.pythonBin,
       fetchTimeout: c.fetchTimeout,
+      forceRefreshTimeout: c.forceRefreshTimeout,
       maxRequestsPerHour: c.maxRequestsPerHour,
       historyDays: c.historyDays,
       historyMinIntervalMinutes: c.historyMinIntervalMinutes,
@@ -239,6 +251,7 @@ Module.register("MMM-KiaAccess", {
 
   socketNotificationReceived(notification, data) {
     if (!data || !this.isForMe(data.identifier)) return;
+    clearTimeout(this._watchdog);
 
     if (notification === "KIA_DATA") {
       this.loading = false;
