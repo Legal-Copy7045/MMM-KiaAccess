@@ -483,11 +483,11 @@ The car diagram:
   `notifications` are enabled.
 - **plugged in** → a wall-box + cable appear at the rear-right charge port.
   Charging: the port pulses green, particles flow charger → car, and the
-  **kW being drawn** (`ev_charging_power`) + **time to the target**
-  (`ev_estimated_current_charge_duration`, shown as `2h 45m`) print under the
-  wall box — only while actually charging. Exporting (`ev_v2l_status` /
-  `ev_v2x_status`): the flow reverses in cyan. Plugged but idle: a static amber
-  cable, no readout.
+  **kW being drawn** (`ev_charging_power`) + **current in amps**
+  (`ev_charging_current`) print under the wall box — only while actually
+  charging, and each line only when its value is present. Exporting
+  (`ev_v2l_status` / `ev_v2x_status`): the flow reverses in cyan. Plugged but
+  idle: a static amber cable, no readout.
 
 **Anything a widget already shows is dropped from the table automatically** so
 nothing is said twice — with `visuals.battery` on: `ev_battery_percentage` +
