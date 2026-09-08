@@ -142,9 +142,10 @@ Lovelace card. No MagicMirror required.
      climate, tyre warning, next-service distance, valet mode, battery
      preconditioning, …), generated from `core/entities.json`
    - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
-     car), `open` / `close charge port`, `stop climate`, `start` / `stop charge`
+     car), `open` / `close charge port`, `start` / `stop charge`
    - **services**: the no-arg buttons above, plus `kia_access.start_climate`
-     (`set_temp` / `duration` / `defrost` / `heating`),
+     (`set_temp` — **°F, 62–82** for the USA region — `duration`, `climate`,
+     `defrost`, `heating`, `steering_wheel`), `kia_access.stop_climate`,
      `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`) and
      `kia_access.send_to_car` (`name` + `address`, or `latitude` / `longitude`)
      — see [Send to car](#send-to-car)
@@ -159,10 +160,18 @@ Lovelace card. No MagicMirror required.
    ```yaml
    type: custom:kia-access-card
    # entity: sensor.<vehicle>_status   # optional; auto-detected otherwise
+   # temperature_unit: F               # optional; "C" / "F" — otherwise follows HA
    ```
    The integration serves and auto-registers `/kia_access/kia-access-card.js`.
    If the card doesn't show up, hard-refresh the browser, or add that path as a
    **Lovelace resource** (type: JavaScript Module) manually.
+
+   The card has a **Climate panel**: a temperature stepper (shown in °C / °F per
+   your HA unit system, or the `temperature_unit` option; sent to the car as °F),
+   a run-time stepper, Defrost / Rear+mirrors / Heated-wheel toggles, and
+   **Start climate** / **Stop** buttons. Your last settings are remembered in the
+   browser. For a fixed one-tap warm-up, call `kia_access.start_climate` from a
+   script or automation instead.
 
 Poll interval and the live-wake-up timeout are in the integration's
 **Configure** dialog. The rotated refresh token is stored in the config entry —
@@ -828,10 +837,17 @@ Install and setup are **mode B** above. Some details:
   `sensor.<vehicle>_status`, whose attributes carry the whole flat vehicle
   payload (`kia_access_raw: true`). The card — and the module in mode C — read
   only that one entity, so neither costs any extra polling of Kia.
-- **Control.** Buttons cover the no-argument commands; `set_charge_limits` and
-  the parameterised `start_climate` are services only. All of them refresh the
+- **Control.** Buttons cover the no-argument commands; `set_charge_limits`,
+  `send_to_car` and the parameterised `start_climate` are services only —
+  though the card's **Climate panel** drives `start_climate` / `stop_climate`
+  with a temperature + duration + toggles UI. All commands refresh the
   coordinator afterwards. Multiple accounts: pass `entry_id` in the service
   call.
+- **Climate temperature unit.** For the **USA** region the library sends
+  `set_temp` in **Fahrenheit** (62–82; outside that it becomes "LOW" / "HIGH"),
+  and `climate: true` is what actually turns the A/C on. `commands.json`
+  reflects that; EU/other regions use °C 16–30 and would need the option bounds
+  adjusted.
 - **Alerts in automations.** Trigger on `event_type: kia_access_alert`; the
   `event_data` has `reason`, `level`, `active`, `message`, `vin`, `entry_id`.
 - **Token / re-auth.** The refresh token lives in the config entry and is

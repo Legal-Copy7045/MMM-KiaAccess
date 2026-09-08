@@ -86,14 +86,14 @@ start_climate:
     set_temp:
       name: "Set temp"
       required: false
-      default: 21
+      default: 70
       selector:
         number:
-          min: 16
-          max: 30
-          step: 0.5
+          min: 62
+          max: 82
+          step: 1
           mode: "box"
-          unit_of_measurement: "°C"
+          unit_of_measurement: "°F"
     duration:
       name: "Duration"
       required: false
@@ -104,6 +104,12 @@ start_climate:
           max: 30
           mode: "box"
           unit_of_measurement: "min"
+    climate:
+      name: "Climate"
+      required: false
+      default: true
+      selector:
+        boolean: {}
     defrost:
       name: "Defrost"
       required: false
@@ -113,9 +119,21 @@ start_climate:
     heating:
       name: "Heating"
       required: false
-      default: false
+      default: 0
       selector:
-        boolean: {}
+        number:
+          min: 0
+          max: 4
+          mode: "box"
+    steering_wheel:
+      name: "Steering wheel"
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 2
+          mode: "box"
 
 stop_climate:
   name: "Stop climate"
