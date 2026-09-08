@@ -105,7 +105,24 @@ module.exports = NodeHelper.create({
       return;
     }
 
-    // ---- request/hour guard ----
+    // ---- alternative source: pull from a Home Assistant instance ----
+    // (local read — not subject to the Kia request/hour cap)
+    if (String(config.source || "kia").toLowerCase() === "homeassistant") {
+      this.inFlight[id] = true;
+      haSource
+        .fetchFromHA(config.homeassistant || {})
+        .then((payload) => {
+          this.inFlight[id] = false;
+          this.onPayload(id, config, payload);
+        })
+        .catch((err) => {
+          this.inFlight[id] = false;
+          this.fail(id, config, "Home Assistant source: " + err.message);
+        });
+      return;
+    }
+
+    // ---- request/hour guard (Kia source only) ----
     const now = Date.now();
     s.reqTimes = s.reqTimes.filter((t) => now - t < 3600e3);
     const cap = Number(config.maxRequestsPerHour) || 0;
@@ -120,21 +137,6 @@ module.exports = NodeHelper.create({
     }
     s.reqTimes.push(now);
     this.inFlight[id] = true;
-
-    // ---- alternative source: pull from a Home Assistant instance ----
-    if (String(config.source || "kia").toLowerCase() === "homeassistant") {
-      haSource
-        .fetchFromHA(config.homeassistant || {})
-        .then((payload) => {
-          this.inFlight[id] = false;
-          this.onPayload(id, config, payload);
-        })
-        .catch((err) => {
-          this.inFlight[id] = false;
-          this.fail(id, config, "Home Assistant source: " + err.message);
-        });
-      return;
-    }
 
     const pythonBin = resolvePython(config.pythonBin);
     const script = path.join(__dirname, "kia_bridge.py");
@@ -237,7 +239,6 @@ module.exports = NodeHelper.create({
     if (!s.lastGood) {
       this.sendSocketNotification("KIA_ERROR", {
         identifier: id,
-        config,
         error: opts.error || opts.note || "no data yet",
         failStreak: s.failStreak || 0,
         retryAfterMs: opts.retryAfterMs
@@ -259,7 +260,8 @@ module.exports = NodeHelper.create({
   emitData(id, config, payload) {
     const s = this.st(id);
     payload.history = s.history.slice();
-    this.sendSocketNotification("KIA_DATA", { identifier: id, config, payload });
+    // note: `config` (credentials / token) is deliberately NOT echoed back
+    this.sendSocketNotification("KIA_DATA", { identifier: id, payload });
   },
 
   // ---- optional MQTT state publisher ----
@@ -318,9 +320,12 @@ module.exports = NodeHelper.create({
       }
     }
 
+    // don't fan the full raw API dump (vehicle.data.*) out to retained topics
+    const skip = m.publishRaw === true ? null : /^data\./;
     Object.keys(flat).forEach((k) => {
       const v = flat[k];
       if (v === undefined) return;
+      if (skip && skip.test(k)) return;
       client.publish(prefix + "/" + k.replace(/\./g, "/"), v === null ? "" : String(v), { retain });
     });
     client.publish(prefix + "/_meta/fetched_at", String(payload._meta.fetchedAt || ""), { retain });

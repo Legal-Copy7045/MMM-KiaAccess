@@ -12,5 +12,4 @@ venv/
 .venv/
 python-standalone/
 token.json
-token.json
 cache/

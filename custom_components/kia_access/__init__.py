@@ -21,17 +21,21 @@ from .coordinator import KiaAccessCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# module-level (not in hass.data[DOMAIN], which is the {entry_id: coordinator} map)
+_FRONTEND_REGISTERED = False
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kia Access from a config entry."""
     coordinator = KiaAccessCoordinator(hass, entry)
+    coordinator.last_options = dict(entry.options)
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass)
     await _register_frontend(hass)
-    entry.async_on_unload(entry.add_update_listener(_async_reload))
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
 
@@ -40,10 +44,11 @@ _CARD_PATH = os.path.join(os.path.dirname(__file__), "frontend", "kia-access-car
 
 
 async def _register_frontend(hass: HomeAssistant) -> None:
-    """Serve and auto-load the Lovelace card (best-effort)."""
-    if hass.data[DOMAIN].get("_frontend"):
+    """Serve and auto-load the Lovelace card (best-effort, once per HA start)."""
+    global _FRONTEND_REGISTERED
+    if _FRONTEND_REGISTERED:
         return
-    hass.data[DOMAIN]["_frontend"] = True
+    _FRONTEND_REGISTERED = True
     if not os.path.exists(_CARD_PATH):
         _LOGGER.warning("Kia Access card bundle missing at %s", _CARD_PATH)
         return
@@ -68,24 +73,35 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        if not hass.data[DOMAIN]:
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        if not hass.data.get(DOMAIN):
             for spec in COMMANDS:
                 hass.services.async_remove(DOMAIN, spec["key"])
     return unload_ok
 
 
-async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload only when the user changed options — not when we persist a
+    rotated token into entry.data (that fires this listener too)."""
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is not None and getattr(coordinator, "last_options", None) == dict(entry.options):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _coordinator_for(hass: HomeAssistant, call: ServiceCall) -> KiaAccessCoordinator:
-    store = hass.data.get(DOMAIN, {})
+    store = {
+        k: v
+        for k, v in hass.data.get(DOMAIN, {}).items()
+        if isinstance(v, KiaAccessCoordinator)
+    }
     entry_id = call.data.get("entry_id")
     if entry_id and entry_id in store:
         return store[entry_id]
     if len(store) == 1:
         return next(iter(store.values()))
+    if not store:
+        raise HomeAssistantError("Kia Access is not set up.")
     raise HomeAssistantError(
         "Multiple Kia Access accounts configured — pass entry_id in the service call."
     )

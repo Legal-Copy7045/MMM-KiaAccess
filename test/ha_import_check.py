@@ -52,6 +52,6 @@ assert os.path.exists(
 s = json.load(open(os.path.join(ROOT, "custom_components/kia_access/strings.json"), encoding="utf-8"))
 e = json.load(open(os.path.join(ROOT, "custom_components/kia_access/translations/en.json"), encoding="utf-8"))
 assert s == e, "strings.json and translations/en.json differ"
-assert set(s["config"]["step"]) == {"user", "otp"}
+assert {"user", "otp", "reauth_confirm"} <= set(s["config"]["step"])
 
 print("ha_import_check: ok")

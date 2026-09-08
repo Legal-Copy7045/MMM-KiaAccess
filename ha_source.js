@@ -13,6 +13,9 @@
 
 const SKIP_ATTRS = new Set([
   "kia_access_raw",
+  "entry_id",
+  "vehicle_name",
+  "note",
   "friendly_name",
   "icon",
   "device_class",
@@ -22,10 +25,25 @@ const SKIP_ATTRS = new Set([
   "supported_features"
 ]);
 
+const HTTP_TIMEOUT_MS = 20000;
+
 async function haGet(base, token, urlPath) {
-  const res = await fetch(base + urlPath, {
-    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }
-  });
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), HTTP_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(base + urlPath, {
+      headers: { Authorization: "Bearer " + token },
+      signal: ctl.signal
+    });
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      throw new Error("HA " + urlPath + " timed out after " + HTTP_TIMEOUT_MS / 1000 + "s");
+    }
+    throw new Error("HA " + urlPath + " -> " + (err && err.message ? err.message : String(err)));
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     throw new Error("HA " + urlPath + " -> HTTP " + res.status + " " + res.statusText);
   }

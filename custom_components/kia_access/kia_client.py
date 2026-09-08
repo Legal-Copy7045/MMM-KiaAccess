@@ -233,10 +233,11 @@ def connect(job, token_file=None):
         raise OtpRequired(ENROLL_HINT) from exc
 
     # Persist the rotated token to token.json only for the file-based caller
-    # (the MagicMirror bridge). When the token was handed in as a dict, the
-    # caller (Home Assistant) persists it itself via fetch()'s meta["token"] —
-    # don't write into the HACS-managed integration folder.
-    if not job.get("token"):
+    # (the MagicMirror bridge, which never puts a "token" key in the job). When
+    # the caller manages the token itself (Home Assistant passes it in the job
+    # and reads it back from fetch()'s meta["token"]), don't write anything into
+    # the HACS-managed integration folder.
+    if "token" not in job:
         _save_token(token_file, vm, enrolled_at)
     return vm, enrolled_at
 
@@ -323,18 +324,37 @@ def run_command(job, token_file=None):
             f"hyundai_kia_connect_api has no '{spec['method']}' — library too old?"
         )
 
-    kwargs = {}
     opts = job.get("options") or {}
-    for opt_name in (spec.get("options") or {}):
-        if opt_name in opts:
-            kwargs[opt_name] = opts[opt_name]
+    opt_specs = spec.get("options") or {}
+    call = spec.get("call", "bare")
+
+    def _with_default(key):
+        if key in opts:
+            return opts[key]
+        return (opt_specs.get(key) or {}).get("default")
 
     try:
-        if spec.get("options"):
-            method(vehicle_id, **kwargs) if kwargs else method(vehicle_id)
+        if call == "climate_options":
+            try:
+                from hyundai_kia_connect_api.ApiImpl import ClimateRequestOptions
+            except Exception as exc:  # noqa: BLE001
+                raise ClientError(
+                    "this hyundai_kia_connect_api version has no ClimateRequestOptions"
+                ) from exc
+            co = ClimateRequestOptions()
+            for key in opt_specs:
+                val = _with_default(key)
+                if val is not None and hasattr(co, key):
+                    setattr(co, key, val)
+            method(vehicle_id, co)
+        elif call == "positional":
+            args = [_with_default(a) for a in spec.get("args", [])]
+            method(vehicle_id, *args)
         else:
             method(vehicle_id)
-    except TypeError:
-        # some library versions take a ClimateRequestOptions object; fall back
-        method(vehicle_id)
+    except ClientError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ClientError(f"{spec['method']} failed: {type(exc).__name__}: {exc}") from exc
+
     return {"ok": True, "command": name, "vehicleId": vehicle_id}

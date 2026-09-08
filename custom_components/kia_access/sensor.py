@@ -1,7 +1,7 @@
 """Kia Access sensors, generated from entities.json."""
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -35,14 +35,14 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
         if spec.get("state_class"):
             self._attr_state_class = spec["state_class"]
         if spec.get("icon"):
-            self._attr_icon = spec["icon"].replace("mdi:", "mdi:")
+            self._attr_icon = spec["icon"]
 
     @property
     def native_value(self):
         val = self._raw()
         if val in (None, "", "null"):
             return None
-        if self._attr_device_class == "timestamp":
+        if self.device_class == SensorDeviceClass.TIMESTAMP:
             return dt_util.parse_datetime(str(val))
         try:
             num = float(val)
@@ -56,6 +56,7 @@ class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
     payload — the Lovelace card reads this instead of 20+ entities."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:car-info"
 
     def __init__(self, coordinator) -> None:
