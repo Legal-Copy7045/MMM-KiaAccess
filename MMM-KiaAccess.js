@@ -58,6 +58,8 @@ Module.register("MMM-KiaAccess", {
     exclude: ["vehicle.data.*", "vehicle.VIN"], // raw API dump + VIN hidden by default
     hideWhenFalsy: [], // paths/globs: drop the row when its value is false / 0 / null / "" / "—"
     order: [], // paths / globs listed here are shown first, in this order
+    combine: {}, // { "vehicle.geocode": ["vehicle.location_last_updated_at"] } — fold
+                 //   the listed keys onto the primary row ("address · 5 min ago")
     labels: {
       // "vehicle.ev_battery_percentage": "Battery",
     },
@@ -358,7 +360,32 @@ Module.register("MMM-KiaAccess", {
       );
       entries = entries.filter((e) => !moved.has(e.key));
     }
-    this.viewData = entries;
+    this.viewData = this.applyCombine(entries);
+  },
+
+  // `combine: { "vehicle.geocode": ["vehicle.location_last_updated_at"] }` folds
+  // the listed keys onto the primary row ("address · 5 min ago") and drops them
+  // as separate rows.
+  applyCombine(entries) {
+    const combine = this.config.combine || {};
+    const keys = Object.keys(combine);
+    if (!keys.length) return entries;
+    const byKey = {};
+    entries.forEach((e) => { byKey[e.key] = e; });
+    const drop = new Set();
+    keys.forEach((primary) => {
+      const host = byKey[primary];
+      if (!host) return;
+      const parts = (combine[primary] || [])
+        .map((k) => byKey[k])
+        .filter(Boolean)
+        .map((e) => this.utils.formatValue(e, this.config))
+        .filter((v) => v && v !== this.config.nullText);
+      if (!parts.length) return;
+      host.combinedSuffix = parts.join(" · ");
+      (combine[primary] || []).forEach((k) => drop.add(k));
+    });
+    return entries.filter((e) => !drop.has(e.key));
   },
 
   batteryDetailEntries() {
@@ -797,7 +824,8 @@ Module.register("MMM-KiaAccess", {
         c.className = "kiaaccess-carwrap";
         c.innerHTML = V.carDiagram(s, {
           width: vis.width || 210,
-          battery: vis.battery !== false
+          battery: vis.battery !== false,
+          tempUnit: this.config.units === "metric" ? "C" : "F"
         });
         panel.appendChild(c);
       }
@@ -866,7 +894,9 @@ Module.register("MMM-KiaAccess", {
 
       const value = document.createElement("td");
       value.className = "kiaaccess-value bright";
-      value.innerHTML = this.escape(this.utils.formatValue(entry, this.config));
+      let valTxt = this.utils.formatValue(entry, this.config);
+      if (entry.combinedSuffix) valTxt += " · " + entry.combinedSuffix;
+      value.innerHTML = this.escape(valTxt);
 
       row.appendChild(label);
       row.appendChild(value);

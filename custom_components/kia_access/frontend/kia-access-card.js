@@ -127,13 +127,13 @@ g.KiaAccessCommands={
       headlights = t && t !== "off" && t !== "none" && t !== "0" ? true : false;
     }
 
+    var airTempC = num("air_temperature");       // climate set-point
+    var outsideTempC = num("outside_temperature");
     var climate = (function () {
       if (bool("air_control_is_on") !== true) return null;
-      var set = num("air_temperature");
-      var out = num("outside_temperature");
-      if (set != null && out != null) {
-        if (set - out >= 1) return "heat";
-        if (out - set >= 1) return "cool";
+      if (airTempC != null && outsideTempC != null) {
+        if (airTempC - outsideTempC >= 1) return "heat";
+        if (outsideTempC - airTempC >= 1) return "cool";
       }
       return "on";
     })();
@@ -203,6 +203,8 @@ g.KiaAccessCommands={
       mirrorHeat: bool("side_mirror_heater_is_on"),
       steerHeat: bool("steering_wheel_heater_is_on"),
       climate: climate,
+      airTempC: airTempC,
+      outsideTempC: outsideTempC,
       tyreAny: bool("tire_pressure_all_warning_is_on"),
       tyreFL: bool("tire_pressure_front_left_warning_is_on"),
       tyreFR: bool("tire_pressure_front_right_warning_is_on"),
@@ -256,6 +258,13 @@ g.KiaAccessCommands={
     return String(s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+
+  // Celsius number -> "21°" (or "70°" for unit "F")
+  function tempStr(c, unit) {
+    if (c == null || isNaN(c)) return null;
+    var v = unit === "F" ? c * 9 / 5 + 32 : c;
+    return Math.round(v) + "°";
   }
 
   function batteryColor(pct) {
@@ -514,6 +523,29 @@ g.KiaAccessCommands={
     );
   }
 
+  /** Small 12V (lead-acid) battery icon tucked in the nose behind the front-left
+   *  headlight, with two terminal posts and the charge % shown inside. */
+  function battery12v(pct) {
+    if (pct == null || isNaN(pct)) return "";
+    var x = 48, y = 44, w = 28, h = 16;       // full size, in the front-left
+                                              // nose behind the headlight
+    var frac = Math.max(0, Math.min(1, Number(pct) / 100));
+    var col = batteryColor(pct);
+    return (
+      '<g class="kiaaccess-12v">' +
+      '<rect x="' + (x + 3.5) + '" y="' + (y - 2.6) + '" width="4" height="3" rx="1" fill="' + COL.outline + '"/>' +
+      '<rect x="' + (x + w - 7.5) + '" y="' + (y - 2.6) + '" width="4" height="3" rx="1" fill="' + COL.outline + '"/>' +
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+      '" rx="2.5" fill="#111214" stroke="' + COL.outline + '" stroke-width="1.5"/>' +
+      '<rect x="' + (x + 1.6) + '" y="' + (y + 1.6) + '" width="' + (frac * (w - 3.2)) + '" height="' + (h - 3.2) +
+      '" rx="1.4" fill="' + col + '" opacity="0.9"/>' +
+      '<text x="' + (x + w / 2) + '" y="' + (y + h / 2 + 3) + '" text-anchor="middle" font-size="7.5" ' +
+      'font-weight="700" fill="' + COL.text + '" style="paint-order:stroke;stroke:#000;stroke-width:2.2px">' +
+      Math.round(pct) + "%</text>" +
+      "</g>"
+    );
+  }
+
   /**
    * Top-down SUV status diagram — front at the top (direction of travel = up).
    * The canvas is a FIXED size in every state: the car body is always at the
@@ -521,13 +553,16 @@ g.KiaAccessCommands={
    * charger + animated energy flow appear there when plugged in).
    * @param {object} s state flags (bool|null unless noted):
    *   locked, carOn, headlights;
-   *   charging, plugged, v2l, v2x, batteryPct (number|null);
+   *   charging, plugged, v2l, v2x, batteryPct (number|null), car12vPct (number|null);
    *   doorFL/FR/RL/RR (open), winFL/FR/RL/RR (window open), hood (frunk),
    *   trunk (liftgate), sunroof;
-   *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null);
+   *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null),
+   *   airTempC (climate set-point °C), outsideTempC (°C);
    *   tyreFL/FR/RL/RR, tyreAny;
-   *   critical (bool) -> shows a warning triangle in the front-right margin
-   * @param {object} o { width, battery:false to omit the centre battery }
+   *   critical (bool) -> shows a warning triangle in the front-right margin;
+   *   flashing (bool) -> pulses head + tail lights amber (find-the-car / hazards)
+   * @param {object} o { width, battery:false to omit the centre battery,
+   *   tempUnit:"C"|"F" for the two on-diagram temperatures }
    */
   function carDiagram(s, o) {
     s = s || {};
@@ -624,6 +659,41 @@ g.KiaAccessCommands={
     var mirrorFill = s.mirrorHeat === true ? COL.heat : COL.dim;
     var mirrorAnim = s.mirrorHeat === true ? pulse("opacity", "0.4", "1", 1.4) : "";
 
+    // find-the-car / hazards: amber pulse on all four lamps. 5 flashes then stop
+    // (the API has no live "hazards on" state to follow; the caller clears it).
+    var HEAD_L = "M 45 31 q 14 -8 25 -2 l -2 8 q -12 -5 -23 2 z";
+    var HEAD_R = "M 155 31 q -14 -8 -25 -2 l 2 8 q 12 -5 23 2 z";
+    var flashAnim =
+      '<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.45;1" ' +
+      'dur="0.55s" repeatCount="5"/>';
+    var flashLamps =
+      s.flashing === true
+        ? '<path d="' + HEAD_L + '" fill="' + COL.warn + '" opacity="0">' + flashAnim + "</path>" +
+          '<path d="' + HEAD_R + '" fill="' + COL.warn + '" opacity="0">' + flashAnim + "</path>" +
+          '<rect x="46" y="293" width="30" height="7" rx="2" fill="' + COL.warn + '" opacity="0">' + flashAnim + "</rect>" +
+          '<rect x="124" y="293" width="30" height="7" rx="2" fill="' + COL.warn + '" opacity="0">' + flashAnim + "</rect>"
+        : "";
+
+    // temperatures
+    var tUnit = o.tempUnit === "F" ? "F" : "C";
+    var setT = tempStr(s.airTempC, tUnit);       // shown only while climate is on
+    var outT = tempStr(s.outsideTempC, tUnit);   // always shown, outside the body
+    var setpointText =
+      s.climate && setT
+        ? '<text x="100" y="85" text-anchor="middle" font-size="13" font-weight="700" fill="' +
+          climCol + '" style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' + setT + "</text>"
+        : "";
+    // small thermometer glyph + the reading, top-left margin, outside the body
+    var outsideText = outT
+      ? '<g transform="translate(-25 20)">' +
+        '<path d="M 4 1.5 a 2.4 2.4 0 0 1 2.4 2.4 v 5.4 a 3.5 3.5 0 1 1 -4.8 0 V 3.9 A 2.4 2.4 0 0 1 4 1.5 z" ' +
+        'fill="none" stroke="' + COL.dim + '" stroke-width="1.2"/>' +
+        '<path d="M 4 5.5 V 12" stroke="' + COL.dim + '" stroke-width="2.2" stroke-linecap="round"/>' +
+        '<circle cx="4" cy="12" r="2.4" fill="' + COL.dim + '"/>' +
+        '<text x="13" y="11.5" font-size="12.5" font-weight="600" fill="' + COL.text + '">' + outT + "</text>" +
+        "</g>"
+      : "";
+
     return (
       '<svg class="kiaaccess-car" xmlns="http://www.w3.org/2000/svg" ' +
       'xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="' + VB + '" width="' + w +
@@ -635,11 +705,13 @@ g.KiaAccessCommands={
       // front grille bar
       '<rect x="78" y="24" width="44" height="7" rx="2" fill="' + COL.dim + '"/>' +
       // headlights (front corners)
-      headlight("M 45 31 q 14 -8 25 -2 l -2 8 q -12 -5 -23 2 z") +
-      headlight("M 155 31 q -14 -8 -25 -2 l 2 8 q 12 -5 23 2 z") +
+      headlight(HEAD_L) +
+      headlight(HEAD_R) +
       // taillights (rear)
       taillight(46) +
       taillight(124) +
+      // find-the-car amber flash on all four lamps
+      flashLamps +
       // SUV liftgate (rear window + tailgate combined), raised off the lights
       liftgate(s.trunk) +
       // raked windscreen
@@ -653,8 +725,9 @@ g.KiaAccessCommands={
       '<rect x="138.5" y="96" width="3.5" height="146" rx="1.75" fill="' + COL.dim + '"/>' +
       // sunroof (grey outline shut / red pulse open — same as windows)
       sunroof(s.sunroof) +
-      // air conditioning (heat / cool / on)
+      // air conditioning (heat / cool / on) + the set-point above the airflow
       (s.climate ? airWaves(climCol) : "") +
+      setpointText +
       // steering-wheel heater — driver (left) side, toward the front
       (s.steerHeat === true
         ? '<circle cx="80" cy="107" r="6" fill="none" stroke="' + COL.heat +
@@ -682,12 +755,14 @@ g.KiaAccessCommands={
       COL.dim + '" stroke-width="1"/>' +
       portRing +
       '<circle cx="155" cy="274" r="4.2" fill="' + port + '"/>' +
-      // vertical battery in the middle (lock state is shown by the body colour)
+      // drive battery (centre) + 12V battery (beside it) — lock state is the body colour
       (o.battery === false
         ? ""
-        : verticalBattery(s.batteryPct, s.charging)) +
+        : verticalBattery(s.batteryPct, s.charging) + battery12v(s.car12vPct)) +
       // critical-issue warning triangle (front-right margin)
       (s.critical === true ? criticalBadge() : "") +
+      // outside temperature — always, in the top-left margin
+      outsideText +
       "</svg>"
     );
   }
@@ -1298,6 +1373,19 @@ g.KiaAccessCommands={
       var data = {};
       if (this._entryId) data.entry_id = this._entryId;
       this._hass.callService("kia_access", key, data);
+
+      // acknowledge a hazards/find-the-car command by flashing the diagram lamps
+      // (~3s covers the 5 SMIL flashes); the API has no live state to follow
+      if (key === "flash_lights" || key === "find_car") {
+        this._flashing = true;
+        this._render();
+        clearTimeout(this._flashT);
+        this._flashT = setTimeout(function () {
+          this._flashing = false;
+          this._sig = null;
+          this._render();
+        }.bind(this), 3200);
+      }
     }
 
     _render() {
@@ -1326,6 +1414,7 @@ g.KiaAccessCommands={
           });
         } catch (e) { /* ignore */ }
       }
+      state.flashing = this._flashing === true;
       var diagram = V.carDiagram(state, { width: 230, battery: true });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";

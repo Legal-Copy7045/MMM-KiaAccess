@@ -52,13 +52,13 @@
       headlights = t && t !== "off" && t !== "none" && t !== "0" ? true : false;
     }
 
+    var airTempC = num("air_temperature");       // climate set-point
+    var outsideTempC = num("outside_temperature");
     var climate = (function () {
       if (bool("air_control_is_on") !== true) return null;
-      var set = num("air_temperature");
-      var out = num("outside_temperature");
-      if (set != null && out != null) {
-        if (set - out >= 1) return "heat";
-        if (out - set >= 1) return "cool";
+      if (airTempC != null && outsideTempC != null) {
+        if (airTempC - outsideTempC >= 1) return "heat";
+        if (outsideTempC - airTempC >= 1) return "cool";
       }
       return "on";
     })();
@@ -128,6 +128,8 @@
       mirrorHeat: bool("side_mirror_heater_is_on"),
       steerHeat: bool("steering_wheel_heater_is_on"),
       climate: climate,
+      airTempC: airTempC,
+      outsideTempC: outsideTempC,
       tyreAny: bool("tire_pressure_all_warning_is_on"),
       tyreFL: bool("tire_pressure_front_left_warning_is_on"),
       tyreFR: bool("tire_pressure_front_right_warning_is_on"),
