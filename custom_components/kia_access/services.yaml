@@ -184,3 +184,44 @@ set_charge_limits:
           max: 100
           mode: "box"
           unit_of_measurement: "%"
+
+send_to_car:
+  name: "Send to car"
+  description: "Send to car — Kia Access (not available in all regions yet — returns an error until it is)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+    name:
+      name: "Name"
+      required: false
+      default: "Destination"
+      selector:
+        text: {}
+    address:
+      name: "Address"
+      required: false
+      selector:
+        text: {}
+    latitude:
+      name: "Latitude"
+      required: false
+      selector:
+        number:
+          min: -90
+          max: 90
+          step: 0.000001
+          mode: "box"
+    longitude:
+      name: "Longitude"
+      required: false
+      selector:
+        number:
+          min: -180
+          max: 180
+          step: 0.000001
+          mode: "box"

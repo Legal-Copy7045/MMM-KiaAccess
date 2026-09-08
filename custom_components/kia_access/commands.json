@@ -1,6 +1,6 @@
 {
-  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file.",
-  "version": 2,
+  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)); \"poi\" = method(vehicle_id, [POIInfo(...)]) built from name/address or latitude/longitude (address is geocoded). `dormant: true` marks a command whose library method exists but isn't implemented for all regions yet (it returns a clear error until it is). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file.",
+  "version": 3,
   "commands": [
     { "key": "lock", "name": "Lock", "method": "lock", "call": "bare", "icon": "mdi:lock", "category": "security" },
     { "key": "unlock", "name": "Unlock", "method": "unlock", "call": "bare", "icon": "mdi:lock-open", "category": "security", "confirm": true },
@@ -25,6 +25,15 @@
       "options": {
         "ac_limit": { "type": "int", "default": 80, "min": 50, "max": 100, "unit": "%" },
         "dc_limit": { "type": "int", "default": 100, "min": 50, "max": 100, "unit": "%" }
+      }
+    },
+    { "key": "send_to_car", "name": "Send to car", "method": "set_navigation", "call": "poi",
+      "icon": "mdi:map-marker-path", "category": "navigation", "dormant": true,
+      "options": {
+        "name": { "type": "string", "default": "Destination" },
+        "address": { "type": "string" },
+        "latitude": { "type": "float", "min": -90, "max": 90, "step": 0.000001 },
+        "longitude": { "type": "float", "min": -180, "max": 180, "step": 0.000001 }
       }
     }
   ]

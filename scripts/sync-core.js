@@ -45,7 +45,7 @@ outputs[path.join(HA, "frontend", "kia-access-card.js")] = [
 const commands = JSON.parse(fs.readFileSync(path.join(ROOT, "core/commands.json"), "utf8")).commands;
 const TYPE_SELECTOR = {
   int: (o) => ({ number: { min: o.min, max: o.max, mode: "box", unit_of_measurement: o.unit } }),
-  float: (o) => ({ number: { min: o.min, max: o.max, step: 0.5, mode: "box", unit_of_measurement: o.unit } }),
+  float: (o) => ({ number: { min: o.min, max: o.max, step: o.step || 0.5, mode: "box", unit_of_measurement: o.unit } }),
   bool: () => ({ boolean: {} }),
   string: () => ({ text: {} })
 };
@@ -54,7 +54,10 @@ let yaml =
 for (const c of commands) {
   yaml += `\n${c.key}:\n`;
   yaml += `  name: ${JSON.stringify(c.name)}\n`;
-  yaml += `  description: ${JSON.stringify((c.name) + " — Kia Access")}\n`;
+  yaml += `  description: ${JSON.stringify(
+    c.name + " — Kia Access" +
+      (c.dormant ? " (not available in all regions yet — returns an error until it is)" : "")
+  )}\n`;
   yaml += "  fields:\n";
   yaml += "    entry_id:\n";
   yaml += "      name: Account\n";

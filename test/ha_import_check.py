@@ -36,7 +36,9 @@ assert importlib.import_module(f"{pkg}.const").EVENT_STATE_CHANGED == "kia_acces
 
 const = importlib.import_module(f"{pkg}.const")
 assert len(const.ENTITIES) >= 20
-assert {c["key"] for c in const.COMMANDS} >= {"lock", "unlock", "start_climate"}
+assert {c["key"] for c in const.COMMANDS} >= {"lock", "unlock", "start_climate", "send_to_car"}
+_calls = {c.get("call", "bare") for c in const.COMMANDS}
+assert _calls <= {"bare", "positional", "climate_options", "poi"}, f"unknown call style: {_calls}"
 
 cf = importlib.import_module(f"{pkg}.config_flow")
 assert hasattr(cf, "KiaAccessConfigFlow")
