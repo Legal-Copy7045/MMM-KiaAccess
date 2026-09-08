@@ -141,9 +141,10 @@ Lovelace card. No MagicMirror required.
 3. You now have one **device per vehicle**:
    - sensors + binary sensors (battery, range, charge power, doors, lock, plug,
      climate, tyre warning, …), generated from `core/entities.json`
-   - **buttons**: `lock`, `unlock`, `start/stop climate`, `start/stop charge`
-   - **services**: `kia_access.lock` … `kia_access.set_charge_limits`, and
-     `kia_access.start_climate` with `set_temp` / `duration` / `defrost`
+   - **buttons**: `lock`, `unlock`, `stop climate`, `start charge`, `stop charge`
+   - **services**: `kia_access.lock` … `kia_access.stop_charge` (no-arg), plus
+     `kia_access.start_climate` (`set_temp` / `duration` / `defrost` / `heating`)
+     and `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`)
    - **`kia_access_alert`** events on the event bus for the same edge-triggered
      conditions the mirror notifies on (battery low, left unlocked, door open,
      charge complete / interrupted, 12V drain, OTP expiry) — use them in
@@ -330,11 +331,15 @@ Common EV9 (US) paths:
 
 | Option | Default | Notes |
 |---|---|---|
-| `username` / `password` / `pin` | `""` | Kia Connect / Bluelink credentials. **Required.** |
-| `brand` | `"KIA"` | `KIA` \| `HYUNDAI` \| `GENESIS` |
-| `region` | `"USA"` | `USA` `CA` `EU` `AU` `CN` `IN` `NZ` `BR` |
-| `vin` | `""` | Blank = first vehicle on the account |
-| `pythonBin` | `"python3"` | Command used to run the bridge (`PYTHON` env var also works) |
+| `source` | `"kia"` | `"kia"` = poll Kia directly (modes A). `"homeassistant"` = read from the native integration (mode C) |
+| `homeassistant.url` | `""` | mode C only — e.g. `http://homeassistant.local:8123` |
+| `homeassistant.token` | `""` | mode C only — a HA long-lived access token |
+| `homeassistant.entity` | `""` | mode C only — the `…_status` summary sensor; auto-detected when blank |
+| `username` / `password` / `pin` | `""` | Kia Connect / Bluelink credentials. **Required for mode A**; not used when `source: "homeassistant"` |
+| `brand` | `"KIA"` | `KIA` \| `HYUNDAI` \| `GENESIS` (mode A) |
+| `region` | `"USA"` | `USA` `CA` `EU` `AU` `CN` `IN` `NZ` `BR` (mode A) |
+| `vin` | `""` | Blank = first vehicle on the account (mode A) |
+| `pythonBin` | `"python3"` | mode A — command used to run the bridge (`PYTHON` env var also works) |
 | `fetchTimeout` | `90` | Seconds before the bridge process is killed |
 | `updateInterval` | `1800000` | ms between fetches |
 | `retryInterval` | `300000` | ms before retrying after an error |
@@ -558,8 +563,14 @@ Everything else fires on both edges.
 
 ## MQTT (state publishing)
 
+> **Do you need this?** Only in **mode A**. If you run the native Home Assistant
+> integration (mode B/C) you already have proper entities — don't also enable
+> `mqtt.homeAssistant` or you'll get a second, duplicate set. MQTT here is the
+> way to get a mode-A mirror's data into HA / Node-RED / dashboards *without*
+> the integration.
+
 Optional — publishes the **full flattened vehicle state** to retained topics
-after every fetch, for Home Assistant / dashboards / Node-RED. Needs the `mqtt`
+after every fetch. Needs the `mqtt`
 package (an `optionalDependency`, installed by `npm install`; if it's missing the
 module just logs a warning):
 
@@ -581,7 +592,11 @@ Topics: `kia/ev9/ev_battery_percentage`, `kia/ev9/is_locked`,
 (`online` / `offline` via LWT). Current-state only — derive change triggers
 downstream, or use the `KIA_ACCESS_STATE_CHANGED` notification above.
 
-### Home Assistant discovery
+### Home Assistant discovery (mode A only)
+
+**Skip this if you use the native integration (mode B/C)** — it already gives
+you these entities, better. This path is for a mode-A mirror that wants entities
+in HA without installing the integration.
 
 ```js
 mqtt: {
