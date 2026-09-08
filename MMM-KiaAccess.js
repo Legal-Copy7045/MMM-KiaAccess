@@ -86,7 +86,40 @@ Module.register("MMM-KiaAccess", {
         "vehicle.ev_estimated_portable_charge_duration"
       ]
     },
-    icons: {} // key path -> Font Awesome class, overrides the built-in map
+    icons: {}, // key path -> Font Awesome class, overrides the built-in map
+
+    // ---- outgoing notifications when a vehicle state changes ----
+    // Edge-triggered: fires only when a condition flips, not every refresh.
+    notifications: {
+      enabled: false,
+      alertModule: true, // also emit SHOW_ALERT for the built-in `alert` module (warning + critical)
+      alertSeconds: 15, // SHOW_ALERT auto-dismiss timer
+      notifyOnStartup: "critical", // false | "critical" | true — which levels fire on the first data after (re)start
+      quietWhileDriving: true, // suppress open-part / unlocked alerts while the car is on
+      title: "Kia EV9",
+      // Per-condition config. Set any key to `false` to disable it, or pass an
+      // object to override its `level` / thresholds. Anything omitted keeps the
+      // built-in default (see conditions.js CHECK_DEFAULTS).
+      checks: {
+        // evBatteryLow:  { belowPct: 20, clearPct: 25, level: "warning" },
+        // battery12vLow: { belowPct: 55, clearPct: 60 },
+        // windowOpen: false,
+        // chargeInterrupted: { minGapPct: 3 },
+      }
+    },
+
+    // ---- optional MQTT state publisher (node_helper) ----
+    // Publishes the full flattened vehicle state to retained topics after every
+    // fetch. Needs the `mqtt` npm package (optionalDependency).
+    mqtt: {
+      enabled: false,
+      url: "", // e.g. "mqtt://192.168.1.8:1883"
+      username: "",
+      password: "",
+      topicPrefix: "kia/ev9",
+      retain: true,
+      publishJson: true // also publish <prefix>/state as one JSON blob
+    }
   },
 
   getStyles() {
@@ -94,7 +127,7 @@ Module.register("MMM-KiaAccess", {
   },
 
   getScripts() {
-    return [this.file("flatten.js"), this.file("visuals.js")];
+    return [this.file("flatten.js"), this.file("visuals.js"), this.file("conditions.js")];
   },
 
   start() {
@@ -104,12 +137,21 @@ Module.register("MMM-KiaAccess", {
     this.lastUpdated = null;
     this.utils = typeof KiaAccessUtils !== "undefined" ? KiaAccessUtils : null;
     this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
+    this.conditions = typeof KiaConditions !== "undefined" ? KiaConditions : null;
     this.flatMap = null;
+    this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
+    this.firstConditionRun = true;
 
-    // MagicMirror merges `config` shallowly, so a user-supplied `visuals` block
+    // MagicMirror merges `config` shallowly, so a user-supplied nested block
     // replaces the default wholesale — re-apply the defaults for any missing keys
     this.config.visuals = Object.assign({}, this.defaults.visuals, this.config.visuals || {});
     this.config.icons = Object.assign({}, this.defaults.icons, this.config.icons || {});
+    this.config.notifications = Object.assign(
+      {},
+      this.defaults.notifications,
+      this.config.notifications || {}
+    );
+    this.config.mqtt = Object.assign({}, this.defaults.mqtt, this.config.mqtt || {});
 
     if (!this.config.username || !this.config.password) {
       this.errorMessage = "Set username / password / pin in config.js";
@@ -142,7 +184,8 @@ Module.register("MMM-KiaAccess", {
       refresh: c.refresh,
       geocode: c.geocode,
       pythonBin: c.pythonBin,
-      fetchTimeout: c.fetchTimeout
+      fetchTimeout: c.fetchTimeout,
+      mqtt: c.mqtt && c.mqtt.enabled && c.mqtt.url ? c.mqtt : null
     };
   },
 
@@ -155,6 +198,7 @@ Module.register("MMM-KiaAccess", {
       this.rawPayload = data.payload;
       this.lastUpdated = new Date();
       this.rebuildView();
+      this.processConditions();
       this.updateDom(this.config.animationSpeed);
       this.scheduleFetch(this.config.updateInterval);
     } else if (notification === "KIA_ERROR") {
@@ -224,7 +268,9 @@ Module.register("MMM-KiaAccess", {
       return null;
     };
     const num = (k) => {
-      const v = Number(f["vehicle." + k]);
+      const raw = f["vehicle." + k];
+      if (raw == null || raw === "") return null; // Number(null) is 0 — guard it
+      const v = Number(raw);
       return isFinite(v) ? v : null;
     };
     const anyTrue = (...ks) => {
@@ -290,8 +336,70 @@ Module.register("MMM-KiaAccess", {
       tyreFL: bool("tire_pressure_front_left_warning_is_on"),
       tyreFR: bool("tire_pressure_front_right_warning_is_on"),
       tyreRL: bool("tire_pressure_rear_left_warning_is_on"),
-      tyreRR: bool("tire_pressure_rear_right_warning_is_on")
+      tyreRR: bool("tire_pressure_rear_right_warning_is_on"),
+      // extra fields used by conditions.js (not drawn)
+      car12vPct: num("car_battery_percentage"),
+      chargeLimitPct: (() => {
+        const ac = num("ev_charge_limits_ac");
+        const dc = num("ev_charge_limits_dc");
+        const vals = [ac, dc].filter((v) => v != null && v > 0);
+        return vals.length ? Math.max(...vals) : null;
+      })()
     };
+  },
+
+  // edge-triggered vehicle-state notifications
+  processConditions() {
+    const cfg = this.config.notifications || {};
+    if (!cfg.enabled || !this.conditions || !this.flatMap) return;
+
+    const res = this.conditions.evaluate(this.visualState(), cfg, this.prevCond);
+    const vin = (this.rawPayload && this.rawPayload.vehicle && this.rawPayload.vehicle.VIN) || null;
+    const startup = this.firstConditionRun;
+    const startupAllows = (level) =>
+      cfg.notifyOnStartup === true ||
+      (cfg.notifyOnStartup === "critical" && level === "critical");
+
+    this.announcedActive = this.announcedActive || {};
+    res.conditions.forEach((c) => {
+      const was = this.prevCond[c.reason];
+      const becameActive = c.active === true && was !== true;
+      // only announce a "cleared" if we actually announced it becoming active
+      const cleared =
+        !c.oneShot && c.active === false && was === true && this.announcedActive[c.reason];
+
+      const fire = startup ? becameActive && startupAllows(c.level) : becameActive || cleared;
+      if (becameActive && fire) this.announcedActive[c.reason] = true;
+      if (cleared) this.announcedActive[c.reason] = false;
+      if (fire) {
+        this.sendNotification("KIA_ACCESS_STATE_CHANGED", {
+          reason: c.reason,
+          level: c.level,
+          active: c.active,
+          title: c.title,
+          message: c.message,
+          value: c.value,
+          vin: vin,
+          at: new Date().toISOString()
+        });
+        if (
+          cfg.alertModule !== false &&
+          becameActive &&
+          (c.level === "warning" || c.level === "critical")
+        ) {
+          this.sendNotification("SHOW_ALERT", {
+            type: "notification",
+            title: c.title,
+            message: c.message,
+            timer: (cfg.alertSeconds || 15) * 1000
+          });
+        }
+      }
+      if (c.active !== null) this.prevCond[c.reason] = c.active;
+    });
+
+    this.prevCond._charging = res.meta.charging;
+    this.firstConditionRun = false;
   },
 
   // allow live config edits via MM's module dev tooling / notifications
