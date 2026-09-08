@@ -21,7 +21,14 @@ import threading
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_TOKEN_FILE = os.path.join(_HERE, "token.json")
-COMMANDS_FILE = os.path.join(_HERE, "core", "commands.json")
+# repo layout: <root>/core/commands.json ; HA vendored copy: alongside this file
+COMMANDS_FILE = next(
+    (p for p in (
+        os.path.join(_HERE, "core", "commands.json"),
+        os.path.join(_HERE, "commands.json"),
+    ) if os.path.exists(p)),
+    os.path.join(_HERE, "core", "commands.json"),
+)
 
 ENROLL_HINT = (
     "OTP enrollment required. Run once on the mirror: "
@@ -108,15 +115,34 @@ def load_commands():
 # ---------------------------------------------------------------------------
 # token.json
 # ---------------------------------------------------------------------------
-def _load_token(token_file, Token):
-    if not os.path.exists(token_file):
+def _load_token(token_file, Token, token_dict=None):
+    """Prefer an inline token dict (HA config entry); fall back to token.json."""
+    raw = None
+    if isinstance(token_dict, dict) and token_dict:
+        raw = token_dict
+    elif token_file and os.path.exists(token_file):
+        try:
+            with open(token_file, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except Exception:
+            raw = None
+    if not raw:
         return None, None
     try:
-        with open(token_file, encoding="utf-8") as fh:
-            raw = json.load(fh)
         return Token.from_dict(raw), raw.get("enrolled_at")
     except Exception:
         return None, None
+
+
+def token_dict(vm, enrolled_at=None):
+    """Serialise vm.token for storage, keeping the original enrolment time."""
+    if vm.token is None:
+        return None
+    tok = vm.token.to_dict()
+    tok["enrolled_at"] = enrolled_at or datetime.datetime.now(
+        datetime.timezone.utc
+    ).isoformat()
+    return tok
 
 
 def _save_token(token_file, vm, enrolled_at):
@@ -137,6 +163,38 @@ def _save_token(token_file, vm, enrolled_at):
 # ---------------------------------------------------------------------------
 # connect
 # ---------------------------------------------------------------------------
+def _region_brand(job):
+    region = REGION_INT.get(str(job.get("region", "USA")).upper())
+    brand = BRAND_INT.get(str(job.get("brand", "KIA")).upper())
+    if region is None:
+        raise ClientError(f"unknown region {job.get('region')!r}")
+    if brand is None:
+        raise ClientError(f"unknown brand {job.get('brand')!r}")
+    return region, brand
+
+
+def make_manager(job, saved_token=None):
+    """Build a VehicleManager without logging in (used by the HA OTP flow)."""
+    try:
+        from hyundai_kia_connect_api import VehicleManager
+    except Exception as exc:
+        raise ClientError(
+            "hyundai_kia_connect_api is not installed."
+        ) from exc
+    region, brand = _region_brand(job)
+    geocode = bool(job.get("geocode", False))
+    return VehicleManager(
+        region=region,
+        brand=brand,
+        username=job["username"],
+        password=job["password"],
+        pin=str(job.get("pin", "")),
+        token=saved_token,
+        geocode_api_enable=geocode,
+        geocode_api_use_email=geocode,
+    )
+
+
 def connect(job, token_file=None):
     """Return (vm, enrolled_at). Raises OtpRequired / ClientError."""
     token_file = token_file or job.get("tokenFile") or DEFAULT_TOKEN_FILE
@@ -155,14 +213,9 @@ def connect(job, token_file=None):
         class AuthenticationOTPRequired(Exception):
             pass
 
-    region = REGION_INT.get(str(job.get("region", "USA")).upper())
-    brand = BRAND_INT.get(str(job.get("brand", "KIA")).upper())
-    if region is None:
-        raise ClientError(f"unknown region {job.get('region')!r}")
-    if brand is None:
-        raise ClientError(f"unknown brand {job.get('brand')!r}")
+    region, brand = _region_brand(job)
 
-    saved_token, enrolled_at = _load_token(token_file, Token)
+    saved_token, enrolled_at = _load_token(token_file, Token, job.get("token"))
     geocode = bool(job.get("geocode", False))
     vm = VehicleManager(
         region=region,
@@ -229,6 +282,11 @@ def fetch(job, token_file=None):
         meta["note"] = meta_note
     if enrolled_at:
         meta["tokenEnrolledAt"] = enrolled_at
+    # hand back the (possibly rotated) token so an in-process caller (HA) can
+    # persist it; the MM bridge ignores this and relies on token.json
+    tok = token_dict(vm, enrolled_at)
+    if tok:
+        meta["token"] = tok
     first = vehicles[0]
     if not first.get("last_updated_at") and not (first.get("data") or {}):
         meta["warning"] = (

@@ -39,6 +39,10 @@ def main():
             result = kia_client.run_command(job)
         else:
             result = kia_client.fetch(job)
+            # the raw token is only for in-process HA callers — never expose it
+            # to the Node side (it would reach the frontend / MQTT)
+            if isinstance(result.get("meta"), dict):
+                result["meta"].pop("token", None)
         print(json.dumps(result))
     except kia_client.OtpRequired as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
