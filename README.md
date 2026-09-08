@@ -390,8 +390,9 @@ Common EV9 (US) paths:
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
+| `notifications.alertSeconds` | `15` | seconds a **warning** `alert` stays before auto-dismissing |
+| `notifications.criticalAlertSeconds` | `0` | **critical** `alert`: `0` = centre popup that stays until the condition clears; `>0` = corner growl that auto-dismisses after N s |
 | `mqtt.enabled` | `false` | publish full state to retained MQTT topics — see [MQTT](#mqtt-state-publishing) |
-| `notifications.criticalAlertSeconds` | `0` | critical `alert` popups: `0` = stay until the condition clears; `>0` = auto-dismiss after N s |
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
 | `maxWidth` | `"420px"` | CSS max-width |
@@ -449,9 +450,10 @@ The car diagram:
   vs `outside_temperature`), neutral white when the direction is unknown.
 - **wheels** show a `!` on a per-tyre pressure warning (all four for the
   "all tyres" warning).
-- **critical issue** → a pulsing red warning triangle in the front-right margin
-  whenever any `critical` condition is active (tyre pressure, a fault lamp, a
-  hard-low battery). Shows regardless of whether `notifications` are enabled.
+- **critical issue** → a pulsing red warning triangle in the right margin, on
+  the wall-charger centre-line, whenever any `critical` condition is active
+  (tyre pressure, a fault lamp, a hard-low battery). Shows regardless of whether
+  `notifications` are enabled.
 - **plugged in** → a wall-box + cable appear at the rear-right charge port.
   Charging: the port pulses green and particles flow charger → car. Exporting
   (`ev_v2l_status` / `ev_v2x_status`): the flow reverses in cyan. Plugged but
@@ -558,10 +560,16 @@ notifications: {
 
 **Levels & persistence.** Each check has a `level` — `info` / `warning` /
 `critical`. `alertModule` pops the `alert` module for `warning` and `critical`
-only. A `warning` alert auto-dismisses after `alertSeconds` (15 s); a `critical`
-alert stays on screen until the condition **clears** (set `criticalAlertSeconds`
-> 0 to auto-dismiss it instead). Override any check's level —
-`checks: { doorOpen: { level: "critical" } }` — to make it persist.
+only.
+
+- a **`warning`** shows as a corner growl that auto-dismisses after
+  `alertSeconds` (15 s);
+- a **`critical`** shows as a **centre popup that stays until the condition
+  clears** — set `criticalAlertSeconds` > 0 to make it a timed corner growl
+  instead.
+
+Override any check's level — `checks: { doorOpen: { level: "critical" } }` — to
+promote it to a persistent critical.
 
 **Built-in checks** (default level in brackets):
 
