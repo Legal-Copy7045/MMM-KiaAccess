@@ -10,6 +10,7 @@
     { "key": "ev_charging_power", "domain": "sensor", "name": "Charge power", "device_class": "power", "unit": "kW" },
     { "key": "ev_estimated_current_charge_duration", "domain": "sensor", "name": "Time to full", "device_class": "duration", "unit": "min" },
     { "key": "odometer", "domain": "sensor", "name": "Odometer", "device_class": "distance", "unit": "km", "state_class": "total_increasing" },
+    { "key": "next_service_distance", "domain": "sensor", "name": "Next service in", "device_class": "distance", "unit": "km", "icon": "mdi:wrench-clock" },
     { "key": "outside_temperature", "domain": "sensor", "name": "Outside temperature", "device_class": "temperature", "unit": "°C" },
     { "key": "last_updated_at", "domain": "sensor", "name": "Car last reported", "device_class": "timestamp" },
 
@@ -25,6 +26,8 @@
     { "key": "sunroof_is_open", "domain": "binary_sensor", "name": "Sunroof", "device_class": "window" },
     { "key": "tire_pressure_all_warning_is_on", "domain": "binary_sensor", "name": "Tyre pressure warning", "device_class": "problem" },
     { "key": "defrost_is_on", "domain": "binary_sensor", "name": "Defrost", "device_class": "running" },
-    { "key": "air_control_is_on", "domain": "binary_sensor", "name": "Climate", "device_class": "running" }
+    { "key": "air_control_is_on", "domain": "binary_sensor", "name": "Climate", "device_class": "running" },
+    { "key": "ev_battery_precondition_enabled", "domain": "binary_sensor", "name": "Battery preconditioning", "device_class": "running" },
+    { "key": "valet_mode_active", "domain": "binary_sensor", "name": "Valet mode", "device_class": "running" }
   ]
 }

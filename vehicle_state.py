@@ -47,7 +47,8 @@ def build_state(flat, opts=None):
 
     hs = f.get("vehicle.headlamp_status")
     headlights = _any_true(f, "headlamp_left_low", "headlamp_right_low",
-                           "headlamp_left_high", "headlamp_right_high")
+                           "headlamp_left_high", "headlamp_right_high",
+                           "headlamp_left_bifunc", "headlamp_right_bifunc")
     if headlights is None and isinstance(hs, str):
         t = hs.strip().lower()
         headlights = bool(t and t not in ("off", "none", "0"))

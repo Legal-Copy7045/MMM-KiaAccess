@@ -12,6 +12,7 @@ g.KiaAccessEntities={
     { "key": "ev_charging_power", "domain": "sensor", "name": "Charge power", "device_class": "power", "unit": "kW" },
     { "key": "ev_estimated_current_charge_duration", "domain": "sensor", "name": "Time to full", "device_class": "duration", "unit": "min" },
     { "key": "odometer", "domain": "sensor", "name": "Odometer", "device_class": "distance", "unit": "km", "state_class": "total_increasing" },
+    { "key": "next_service_distance", "domain": "sensor", "name": "Next service in", "device_class": "distance", "unit": "km", "icon": "mdi:wrench-clock" },
     { "key": "outside_temperature", "domain": "sensor", "name": "Outside temperature", "device_class": "temperature", "unit": "°C" },
     { "key": "last_updated_at", "domain": "sensor", "name": "Car last reported", "device_class": "timestamp" },
 
@@ -27,7 +28,9 @@ g.KiaAccessEntities={
     { "key": "sunroof_is_open", "domain": "binary_sensor", "name": "Sunroof", "device_class": "window" },
     { "key": "tire_pressure_all_warning_is_on", "domain": "binary_sensor", "name": "Tyre pressure warning", "device_class": "problem" },
     { "key": "defrost_is_on", "domain": "binary_sensor", "name": "Defrost", "device_class": "running" },
-    { "key": "air_control_is_on", "domain": "binary_sensor", "name": "Climate", "device_class": "running" }
+    { "key": "air_control_is_on", "domain": "binary_sensor", "name": "Climate", "device_class": "running" },
+    { "key": "ev_battery_precondition_enabled", "domain": "binary_sensor", "name": "Battery preconditioning", "device_class": "running" },
+    { "key": "valet_mode_active", "domain": "binary_sensor", "name": "Valet mode", "device_class": "running" }
   ]
 };
 g.KiaAccessCommands={
@@ -36,6 +39,10 @@ g.KiaAccessCommands={
   "commands": [
     { "key": "lock", "name": "Lock", "method": "lock", "call": "bare", "icon": "mdi:lock", "category": "security" },
     { "key": "unlock", "name": "Unlock", "method": "unlock", "call": "bare", "icon": "mdi:lock-open", "category": "security", "confirm": true },
+    { "key": "flash_lights", "name": "Flash hazards", "method": "start_hazard_lights", "call": "bare", "icon": "mdi:hazard-lights", "category": "find" },
+    { "key": "find_car", "name": "Flash and honk", "method": "start_hazard_lights_and_horn", "call": "bare", "icon": "mdi:bugle", "category": "find", "confirm": true },
+    { "key": "open_charge_port", "name": "Open charge port", "method": "open_charge_port", "call": "bare", "icon": "mdi:ev-plug-ccs2", "category": "charge" },
+    { "key": "close_charge_port", "name": "Close charge port", "method": "close_charge_port", "call": "bare", "icon": "mdi:ev-plug-ccs2", "category": "charge" },
     { "key": "start_climate", "name": "Start climate", "method": "start_climate", "call": "climate_options",
       "icon": "mdi:air-conditioner", "category": "climate",
       "options": {
@@ -102,7 +109,9 @@ g.KiaAccessCommands={
       "headlamp_left_low",
       "headlamp_right_low",
       "headlamp_left_high",
-      "headlamp_right_high"
+      "headlamp_right_high",
+      "headlamp_left_bifunc",
+      "headlamp_right_bifunc"
     );
     if (headlights == null && typeof hs === "string") {
       var t = hs.trim().toLowerCase();
@@ -695,6 +704,9 @@ g.KiaAccessCommands={
     "vehicle.ev_driving_range": "fa-solid fa-road",
     "vehicle.total_driving_range": "fa-solid fa-route",
     "vehicle.odometer": "fa-solid fa-gauge",
+    "vehicle.next_service_distance": "fa-solid fa-screwdriver-wrench",
+    "vehicle.ev_battery_precondition_enabled": "fa-solid fa-temperature-arrow-up",
+    "vehicle.valet_mode_active": "fa-solid fa-user-tie",
     "vehicle.is_locked": "fa-solid fa-lock",
     "vehicle.air_control_is_on": "fa-solid fa-fan",
     "vehicle.air_temperature": "fa-solid fa-temperature-half",

@@ -43,7 +43,9 @@
       "headlamp_left_low",
       "headlamp_right_low",
       "headlamp_left_high",
-      "headlamp_right_high"
+      "headlamp_right_high",
+      "headlamp_left_bifunc",
+      "headlamp_right_bifunc"
     );
     if (headlights == null && typeof hs === "string") {
       var t = hs.trim().toLowerCase();

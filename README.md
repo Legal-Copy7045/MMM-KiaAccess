@@ -77,13 +77,13 @@ Mode A needs two more things: a modern **Python** (auto-provisioned, below) and 
 
 #### Python version (mode A)
 
-`hyundai_kia_connect_api` needs **Python ≥ 3.10** (current releases: 3.12+).
-Anything older than 3.10 can only install v3.24.0, which **can no longer log in to
+`hyundai_kia_connect_api` now requires **Python ≥ 3.12** (`python_requires`).
+Older Python can only install ancient releases that **can no longer log in to
 Kia USA**. Raspberry Pi OS *Bullseye* ships Python 3.9 — too old.
 
 `setup_python.js` (run automatically by `npm install`) handles this:
 
-1. Looks for the newest `python3.x` ≥ 3.10 — system, `pyenv`, or a previous download.
+1. Looks for the newest `python3.x` ≥ 3.12 — system, `pyenv`, or a previous download.
 2. If none, on Linux it downloads a **self-contained CPython 3.12** from
    [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
    into `./python-standalone/` (no compiler, ~2 min; arm64 / armv7-hf / x86_64).
@@ -94,9 +94,8 @@ So on a Pi 3.9 box you normally just run `npm install` and it sorts itself out.
 | Situation | Result |
 |---|---|
 | system Python ≥ 3.12 | latest library, used directly |
-| system Python 3.10 / 3.11 | library ≥ 3.24.1, used directly |
-| system Python ≤ 3.9 (Linux) | standalone CPython 3.12 downloaded automatically |
-| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`; install Python ≥ 3.10 yourself, then re-run |
+| system Python ≤ 3.11 (Linux) | standalone CPython 3.12 downloaded automatically |
+| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`; install Python ≥ 3.12 yourself, then re-run |
 
 Overrides (env vars): `MMM_KIA_PYTHON=/abs/path/python3` to force an interpreter,
 `MMM_KIA_PBS_RELEASE=<tag>` to pin a different standalone release.
@@ -140,11 +139,15 @@ Lovelace card. No MagicMirror required.
    a location.
 3. You now have one **device per vehicle**:
    - sensors + binary sensors (battery, range, charge power, doors, lock, plug,
-     climate, tyre warning, …), generated from `core/entities.json`
-   - **buttons**: `lock`, `unlock`, `stop climate`, `start charge`, `stop charge`
-   - **services**: `kia_access.lock` … `kia_access.stop_charge` (no-arg), plus
-     `kia_access.start_climate` (`set_temp` / `duration` / `defrost` / `heating`)
-     and `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`)
+     climate, tyre warning, next-service distance, valet mode, battery
+     preconditioning, …), generated from `core/entities.json`
+   - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
+     car), `open` / `close charge port`, `stop climate`, `start` / `stop charge`
+   - **services**: the no-arg buttons above, plus `kia_access.start_climate`
+     (`set_temp` / `duration` / `defrost` / `heating`) and
+     `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`)
+   - *(commands the car or region doesn't support just return a clear error
+     when pressed)*
    - **`kia_access_alert`** events on the event bus for the same edge-triggered
      conditions the mirror notifies on (battery low, left unlocked, door open,
      charge complete / interrupted, 12V drain, OTP expiry) — use them in
@@ -329,6 +332,9 @@ Common EV9 (US) paths:
 | `vehicle.ev_charge_limits_ac` / `ev_charge_limits_dc` | Charge target % |
 | `vehicle.car_battery_percentage` | 12V battery (%) |
 | `vehicle.odometer` (+ `odometer_unit`) | Mileage |
+| `vehicle.next_service_distance` | Distance until the next service |
+| `vehicle.ev_battery_precondition_enabled` | Winter battery preconditioning on |
+| `vehicle.valet_mode_active` | Valet mode engaged |
 | `vehicle.is_locked` | Doors locked |
 | `vehicle.front_left_door_is_open` … `back_right_door_is_open` | Individual doors |
 | `vehicle.trunk_is_open` / `hood_is_open` | Trunk / frunk |
@@ -691,6 +697,11 @@ enroll.py"** once you're within `otpWarnDays` of `otpLifetimeDays` (both
 configurable; the 30-day default is an estimate — tune it to what you observe).
 The `otpExpiring` notification check fires the same warning to other modules.
 
+`hyundai_kia_connect_api` ≥ 4.25.3 auto-recovers a Kia USA session that the
+server expires (error 1003 / 1005) without a fresh OTP, so re-enrollment is
+needed much less often than it used to be — `npm install` keeps the library
+current.
+
 ## Notes
 
 - **12V battery:** every `refresh: true` poll wakes the car. Kia's own app polls roughly
@@ -741,6 +752,19 @@ run `npm run sync` after editing `core/`.
 
 The MagicMirror front end (`MMM-KiaAccess.js`), `node_helper.js` and the Python
 bridge (`kia_bridge.py`) stay at the repo root as MagicMirror requires.
+
+### Tracking `hyundai_kia_connect_api`
+
+The whole data layer is [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api).
+`npm install` (mode A) and a HACS redownload (mode B/C) both pull the current
+release, so:
+
+- **new `Vehicle` attributes** appear automatically — the bridge dumps every one,
+  `include: []` shows them on the mirror, and mode B/C carries them in the
+  summary sensor.
+- **new HA sensors / buttons / services** need a one-line addition to
+  `core/entities.json` or `core/commands.json` (then `npm run sync`).
+- unsupported commands for a given car/region just return a clear error.
 
 ## Home Assistant — reference
 

@@ -24,6 +24,54 @@ unlock:
         config_entry:
           integration: kia_access
 
+flash_lights:
+  name: "Flash hazards"
+  description: "Flash hazards — Kia Access"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
+find_car:
+  name: "Flash and honk"
+  description: "Flash and honk — Kia Access"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
+open_charge_port:
+  name: "Open charge port"
+  description: "Open charge port — Kia Access"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
+close_charge_port:
+  name: "Close charge port"
+  description: "Close charge port — Kia Access"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
 start_climate:
   name: "Start climate"
   description: "Start climate — Kia Access"

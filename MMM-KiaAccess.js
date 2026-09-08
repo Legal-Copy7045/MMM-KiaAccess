@@ -71,6 +71,9 @@ Module.register("MMM-KiaAccess", {
       "vehicle.ev_driving_range": "distanceKm",
       "vehicle.total_driving_range": "distanceKm",
       "vehicle.odometer": "distanceKm",
+      "vehicle.next_service_distance": "distanceKm",
+      "vehicle.ev_battery_precondition_enabled": "boolean",
+      "vehicle.valet_mode_active": "boolean",
       "vehicle.ev_battery_is_charging": "boolean",
       "vehicle.ev_battery_is_plugged_in": "boolean",
       "vehicle.is_locked": "boolean",
@@ -377,113 +380,16 @@ Module.register("MMM-KiaAccess", {
       );
   },
 
-  // read canonical vehicle.* values straight from the flat map, independent of
-  // the include/exclude list, so the diagram is always complete
+  // canonical vehicle state for the diagram + conditions — delegated to the
+  // shared core/state.js (loaded via getScripts) so MM, the HA card and the
+  // contract tests all run the identical logic
   visualState() {
-    if (this.stateBuilder) {
-      return this.stateBuilder.buildState(this.flatMap || {}, {
-        history: this.history || [],
-        otpLifetimeDays: this.config.otpLifetimeDays,
-        otpWarnDays: this.config.otpWarnDays
-      });
-    }
-    // fallback (core/state.js failed to load) — inline copy
-    const f = this.flatMap || {};
-    const bool = (k) => {
-      const v = f["vehicle." + k];
-      if (v === true || v === "true" || v === 1 || v === "1") return true;
-      if (v === false || v === "false" || v === 0 || v === "0") return false;
-      return null;
-    };
-    const num = (k) => {
-      const raw = f["vehicle." + k];
-      if (raw == null || raw === "") return null; // Number(null) is 0 — guard it
-      const v = Number(raw);
-      return isFinite(v) ? v : null;
-    };
-    const anyTrue = (...ks) => {
-      const vals = ks.map(bool);
-      if (vals.some((v) => v === true)) return true;
-      if (vals.every((v) => v === false)) return false;
-      return null;
-    };
-    const hs = f["vehicle.headlamp_status"];
-    let headlights = anyTrue(
-      "headlamp_left_low",
-      "headlamp_right_low",
-      "headlamp_left_high",
-      "headlamp_right_high"
-    );
-    if (headlights == null && typeof hs === "string") {
-      const t = hs.trim().toLowerCase();
-      headlights = t && t !== "off" && t !== "none" && t !== "0" ? true : false;
-    }
-
-    return {
-      batteryPct: num("ev_battery_percentage"),
-      rangeKm: num("ev_driving_range"),
-      chargeKw: num("ev_charging_power"),
-      charging: bool("ev_battery_is_charging"),
-      plugged: bool("ev_battery_is_plugged_in"),
-      v2l: bool("ev_v2l_status"),
-      v2x: bool("ev_v2x_status"),
-      locked: bool("is_locked"),
-      carOn: anyTrue(
-        "engine_is_running",
-        "accessory_on",
-        "ign3",
-        "remote_ignition"
-      ),
-      headlights: headlights,
-      doorFL: bool("front_left_door_is_open"),
-      doorFR: bool("front_right_door_is_open"),
-      doorRL: bool("back_left_door_is_open"),
-      doorRR: bool("back_right_door_is_open"),
-      winFL: bool("front_left_window_is_open"),
-      winFR: bool("front_right_window_is_open"),
-      winRL: bool("back_left_window_is_open"),
-      winRR: bool("back_right_window_is_open"),
-      hood: bool("hood_is_open"),
-      trunk: bool("trunk_is_open"),
-      sunroof: bool("sunroof_is_open"),
-      defrost: bool("defrost_is_on"),
-      rearHeat: bool("back_window_heater_is_on"),
-      mirrorHeat: bool("side_mirror_heater_is_on"),
-      steerHeat: bool("steering_wheel_heater_is_on"),
-      climate: (() => {
-        if (bool("air_control_is_on") !== true) return null;
-        const set = num("air_temperature");
-        const out = num("outside_temperature");
-        if (set != null && out != null) {
-          if (set - out >= 1) return "heat";
-          if (out - set >= 1) return "cool";
-        }
-        return "on";
-      })(),
-      tyreAny: bool("tire_pressure_all_warning_is_on"),
-      tyreFL: bool("tire_pressure_front_left_warning_is_on"),
-      tyreFR: bool("tire_pressure_front_right_warning_is_on"),
-      tyreRL: bool("tire_pressure_rear_left_warning_is_on"),
-      tyreRR: bool("tire_pressure_rear_right_warning_is_on"),
-      // extra fields used by conditions.js (not drawn)
-      car12vPct: num("car_battery_percentage"),
-      chargeLimitPct: (() => {
-        const ac = num("ev_charge_limits_ac");
-        const dc = num("ev_charge_limits_dc");
-        const vals = [ac, dc].filter((v) => v != null && v > 0);
-        return vals.length ? Math.max(...vals) : null;
-      })(),
-      capacityKwh: num("ev_battery_capacity"),
+    if (!this.stateBuilder) return {}; // core/state.js failed to load
+    return this.stateBuilder.buildState(this.flatMap || {}, {
       history: this.history || [],
-      tokenAgeDays: (() => {
-        const t = f["_meta.tokenEnrolledAt"];
-        if (!t) return null;
-        const ms = Date.now() - new Date(t).getTime();
-        return isFinite(ms) && ms >= 0 ? ms / 864e5 : null;
-      })(),
       otpLifetimeDays: this.config.otpLifetimeDays,
       otpWarnDays: this.config.otpWarnDays
-    };
+    });
   },
 
   // edge-triggered vehicle-state notifications
