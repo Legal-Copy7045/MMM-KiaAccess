@@ -13,6 +13,7 @@ const Log = require("logger");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { flatten } = require("./flatten.js");
 
 /** Prefer the bundled venv (built by setup_python.js) unless the user set pythonBin. */
 function resolvePython(configured) {
@@ -28,6 +29,7 @@ function resolvePython(configured) {
 module.exports = NodeHelper.create({
   start() {
     this.inFlight = {};
+    this.mqttClients = {};
     Log.info("[MMM-KiaAccess] node_helper started");
   },
 
@@ -120,6 +122,7 @@ module.exports = NodeHelper.create({
         Log.warn("[MMM-KiaAccess] " + payload._meta.warning);
       }
       this.sendSocketNotification("KIA_DATA", { identifier: id, config, payload });
+      this.publishMqtt(config, payload);
     });
 
     child.stdin.write(JSON.stringify(job));
@@ -129,6 +132,61 @@ module.exports = NodeHelper.create({
   fail(id, config, message) {
     Log.error("[MMM-KiaAccess] fetch failed: " + message);
     this.sendSocketNotification("KIA_ERROR", { identifier: id, config, error: message });
+  },
+
+  // ---- optional MQTT state publisher ----
+  mqttClient(m) {
+    const key = m.url + "|" + (m.username || "") + "|" + (m.topicPrefix || "");
+    if (this.mqttClients[key]) return this.mqttClients[key];
+
+    let mqtt;
+    try {
+      mqtt = require("mqtt");
+    } catch (e) {
+      Log.warn(
+        "[MMM-KiaAccess] mqtt config set but the 'mqtt' package isn't installed " +
+          "(cd into the module folder and run: npm install mqtt)"
+      );
+      this.mqttClients[key] = null; // don't retry the require every fetch
+      return null;
+    }
+
+    const prefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
+    const client = mqtt.connect(m.url, {
+      username: m.username || undefined,
+      password: m.password || undefined,
+      reconnectPeriod: 30000,
+      will: { topic: prefix + "/status", payload: "offline", retain: true, qos: 0 }
+    });
+    client.on("connect", () => {
+      Log.info("[MMM-KiaAccess] mqtt connected to " + m.url);
+      client.publish(prefix + "/status", "online", { retain: true });
+    });
+    client.on("error", (err) => Log.error("[MMM-KiaAccess] mqtt: " + err.message));
+    this.mqttClients[key] = client;
+    return client;
+  },
+
+  publishMqtt(config, payload) {
+    const m = config && config.mqtt;
+    if (!m || m.enabled === false || !m.url) return;
+    const client = this.mqttClient(m);
+    if (!client) return;
+
+    const prefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
+    const retain = m.retain !== false;
+    const flat = flatten(payload.vehicle || {});
+
+    Object.keys(flat).forEach((k) => {
+      const v = flat[k];
+      if (v === undefined) return;
+      const topic = prefix + "/" + k.replace(/\./g, "/");
+      client.publish(topic, v === null ? "" : String(v), { retain });
+    });
+    client.publish(prefix + "/_meta/fetched_at", String(payload._meta.fetchedAt || ""), { retain });
+    if (m.publishJson !== false) {
+      client.publish(prefix + "/state", JSON.stringify(payload.vehicle || {}), { retain });
+    }
   }
 });
 

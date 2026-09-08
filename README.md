@@ -209,6 +209,8 @@ Common EV9 (US) paths:
 | `visuals.width` | `210` | px width of the car SVG |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
+| `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
+| `mqtt.enabled` | `false` | publish full state to retained MQTT topics — see [MQTT](#mqtt-state-publishing) |
 | `showHeaderCount` | `true` | append attribute count to the header |
 | `showUpdatedFooter` | `true` | show "updated HH:MM:SS" footer |
 | `maxWidth` | `"420px"` | CSS max-width |
@@ -295,6 +297,78 @@ Distance/temp/speed honour `units`.
 
 `*` matches within one path segment, `**` across segments, `?` one char. A plain string
 with no wildcard matches that exact path **or** anything beneath it.
+
+## Notifications (state changes)
+
+Set `notifications.enabled: true` to emit a notification whenever a monitored
+condition changes — **edge-triggered**, so it fires once when the state flips,
+not on every refresh.
+
+```js
+notifications: {
+  enabled: true,
+  alertModule: true,          // also pop MagicMirror's built-in `alert` module
+  alertSeconds: 15,
+  notifyOnStartup: "critical", // false | "critical" | true — what fires on the
+                               //   first data after a restart
+  quietWhileDriving: true,     // suppress open-part / unlocked while the car is on
+  checks: {
+    evBatteryLow:  { belowPct: 20, clearPct: 25 },   // hysteresis: alert at ≤20,
+    battery12vLow: { belowPct: 55, clearPct: 60 },    //   clear only at ≥25
+    windowOpen: false,                                // disable a check entirely
+    chargeInterrupted: { minGapPct: 3 }
+  }
+}
+```
+
+Every check can be turned off (`checkName: false`) or tuned (`level`, thresholds).
+Built-in checks: `evBatteryLow`, `battery12vLow`, `unlocked`, `doorOpen`,
+`windowOpen`, `hoodOpen`, `liftgateOpen`, `sunroofOpen`, `tyrePressure`,
+`chargeComplete`, `chargeInterrupted`. Levels are `info` / `warning` / `critical`;
+`alertModule` only pops for `warning` and `critical`.
+
+**For other modules** — a semantic notification is broadcast each time:
+
+```js
+this.sendNotification("KIA_ACCESS_STATE_CHANGED", {
+  reason: "door_open",              // stable slug
+  level: "warning",
+  active: true,                     // true = entered, false = cleared
+  title: "Kia EV9",
+  message: "Front-left door is open",
+  value: { corners: ["FL"] },
+  vin: "…",
+  at: "2026-09-08T18:20:00.000Z"
+});
+```
+
+`chargeComplete` / `chargeInterrupted` are one-shot (only `active: true` fires).
+Everything else fires on both edges.
+
+## MQTT (state publishing)
+
+Optional — publishes the **full flattened vehicle state** to retained topics
+after every fetch, for Home Assistant / dashboards / Node-RED. Needs the `mqtt`
+package (an `optionalDependency`, installed by `npm install`; if it's missing the
+module just logs a warning):
+
+```js
+mqtt: {
+  enabled: true,
+  url: "mqtt://192.168.1.8:1883",
+  username: "mqttuser",
+  password: "…",
+  topicPrefix: "kia/ev9",
+  retain: true,
+  publishJson: true              // also <prefix>/state as one JSON blob
+}
+```
+
+Topics: `kia/ev9/ev_battery_percentage`, `kia/ev9/is_locked`,
+`kia/ev9/tire_pressure_front_left`, … plus `kia/ev9/state` (JSON),
+`kia/ev9/_meta/fetched_at`, and `kia/ev9/status` (`online` / `offline` via LWT).
+This is current-state only — derive your own change triggers downstream, or use
+the `KIA_ACCESS_STATE_CHANGED` notification above.
 
 ## Notes
 
