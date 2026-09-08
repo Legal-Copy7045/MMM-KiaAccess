@@ -12,9 +12,9 @@ h2{font-weight:600;font-size:13px;color:#9aa0a6;letter-spacing:.06em;text-transf
 .card svg{display:block;margin:0 auto;max-width:100%;height:auto}
 .t{font-size:12.5px;color:#e8eaed;margin-top:8px;text-align:center}
 </style></head><body>
-<h1>MMM-KiaAccess — car diagram states</h1>
-<p class="sub">Every state the top-down diagram can present. Front of the car is up.
-Animations (pulses, charge flow, heater shimmer) play live here; car-states.png is a snapshot.</p>
+<h1>MMM-KiaAccess — car diagram states &amp; widgets</h1>
+<p class="sub">Every state the top-down diagram can present, plus the optional widgets.
+Front of the car is up. Animations play live here; car-states.png is a snapshot.</p>
 <div id="out"></div>
 <script>/* Optional graphical widgets for MMM-KiaAccess.
  *
@@ -638,14 +638,25 @@ Animations (pulses, charge flow, heater shimmer) play live here; car-states.png 
 const V = KiaAccessVisuals;
 const groups = [["Lock (body outline colour)",[["Locked",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Unlocked",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false}],["Lock unknown",{"locked":null,"batteryPct":78,"carOn":false,"headlights":false}]]],["Battery level (centre cell)",[["High charge",{"locked":true,"batteryPct":82,"carOn":false,"headlights":false}],["Mid charge",{"locked":true,"batteryPct":35,"carOn":false,"headlights":false}],["Low charge",{"locked":true,"batteryPct":8,"carOn":false,"headlights":false}],["No battery data",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false}]]],["Charging / plug (rear-right port)",[["Unplugged",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Plugged, not charging",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"plugged":true}],["Charging",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"charging":true}],["Exporting (V2L / V2X)",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"v2l":true}]]],["Doors, frunk, liftgate",[["A door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorFL":true}],["A rear door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorRR":true}],["Frunk open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"hood":true}],["Liftgate open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"trunk":true}]]],["Windows & sunroof",[["A window open (door shut)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"winFL":true}],["Sunroof shut",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Sunroof open",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"sunroof":true}]]],["Lights",[["Headlights off",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Headlights on",{"locked":true,"batteryPct":78,"carOn":false,"headlights":true}],["Car off (taillights outline)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Ignition / accessory on",{"locked":true,"batteryPct":78,"carOn":true,"headlights":false}]]],["Tyres",[["One tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreFL":true}],["All-tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreAny":true}]]],["Heaters",[["Defrost (front + rear)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"defrost":true}],["Rear-window heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"rearHeat":true}],["Side-mirror heaters",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"mirrorHeat":true}],["Steering-wheel heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"steerHeat":true}]]],["Air conditioning",[["Heating",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"heat"}],["Cooling",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"cool"}],["On (direction unknown)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"on"}]]],["Combined example",[["Cold morning, many states",{"locked":false,"batteryPct":11,"carOn":true,"headlights":true,"charging":true,"doorRR":true,"hood":true,"sunroof":true,"tyreFR":true,"climate":"heat","defrost":true,"rearHeat":true,"mirrorHeat":true,"steerHeat":true}]]]];
 const out = document.getElementById("out");
+function section(title){ const h=document.createElement("h2"); h.textContent=title; out.appendChild(h);
+  const g=document.createElement("div"); g.className="grid"; out.appendChild(g); return g; }
+function card(g, name, html){ const c=document.createElement("div"); c.className="card";
+  c.innerHTML = html + '<div class="t">' + name + '</div>'; g.appendChild(c); }
+
 for (const [title, cards] of groups) {
-  const h = document.createElement("h2"); h.textContent = title; out.appendChild(h);
-  const g = document.createElement("div"); g.className = "grid";
-  for (const [name, state] of cards) {
-    const c = document.createElement("div"); c.className = "card";
-    c.innerHTML = V.carDiagram(state, { width: 200 }) + '<div class="t">' + name + '</div>';
-    g.appendChild(c);
-  }
-  out.appendChild(g);
+  const g = section(title);
+  for (const [name, state] of cards) card(g, name, V.carDiagram(state, { width: 200 }));
 }
+
+// ---- optional widgets ----
+const now = Date.now();
+const hist = Array.from({ length: 30 }, (_, i) => ({
+  t: now - (29 - i) * 864e5, v: 92 - i * 1.4 + (i % 4) * 3
+}));
+let g = section("Optional widgets");
+card(g, "SoC / 12V sparkline", V.sparkline(hist, { width: 200, height: 44 }));
+card(g, "Charge progress (64% → 80%)", V.chargeBar(64, 80, { width: 200 }));
+card(g, "Range ring", V.rangeRing(64, { centreText: "201 mi" }));
+card(g, "Range ring — charging", V.rangeRing(48, { charging: true, centreText: "150 mi" }));
+card(g, "Range ring — low", V.rangeRing(9, { centreText: "28 mi" }));
 </script></body></html>

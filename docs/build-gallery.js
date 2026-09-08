@@ -92,25 +92,36 @@ h2{font-weight:600;font-size:13px;color:#9aa0a6;letter-spacing:.06em;text-transf
 .card svg{display:block;margin:0 auto;max-width:100%;height:auto}
 .t{font-size:12.5px;color:#e8eaed;margin-top:8px;text-align:center}
 </style></head><body>
-<h1>MMM-KiaAccess — car diagram states</h1>
-<p class="sub">Every state the top-down diagram can present. Front of the car is up.
-Animations (pulses, charge flow, heater shimmer) play live here; car-states.png is a snapshot.</p>
+<h1>MMM-KiaAccess — car diagram states &amp; widgets</h1>
+<p class="sub">Every state the top-down diagram can present, plus the optional widgets.
+Front of the car is up. Animations play live here; car-states.png is a snapshot.</p>
 <div id="out"></div>
 <script>${visuals}</script>
 <script>
 const V = KiaAccessVisuals;
 const groups = ${groupsJson};
 const out = document.getElementById("out");
+function section(title){ const h=document.createElement("h2"); h.textContent=title; out.appendChild(h);
+  const g=document.createElement("div"); g.className="grid"; out.appendChild(g); return g; }
+function card(g, name, html){ const c=document.createElement("div"); c.className="card";
+  c.innerHTML = html + '<div class="t">' + name + '</div>'; g.appendChild(c); }
+
 for (const [title, cards] of groups) {
-  const h = document.createElement("h2"); h.textContent = title; out.appendChild(h);
-  const g = document.createElement("div"); g.className = "grid";
-  for (const [name, state] of cards) {
-    const c = document.createElement("div"); c.className = "card";
-    c.innerHTML = V.carDiagram(state, { width: 200 }) + '<div class="t">' + name + '</div>';
-    g.appendChild(c);
-  }
-  out.appendChild(g);
+  const g = section(title);
+  for (const [name, state] of cards) card(g, name, V.carDiagram(state, { width: 200 }));
 }
+
+// ---- optional widgets ----
+const now = Date.now();
+const hist = Array.from({ length: 30 }, (_, i) => ({
+  t: now - (29 - i) * 864e5, v: 92 - i * 1.4 + (i % 4) * 3
+}));
+let g = section("Optional widgets");
+card(g, "SoC / 12V sparkline", V.sparkline(hist, { width: 200, height: 44 }));
+card(g, "Charge progress (64% → 80%)", V.chargeBar(64, 80, { width: 200 }));
+card(g, "Range ring", V.rangeRing(64, { centreText: "201 mi" }));
+card(g, "Range ring — charging", V.rangeRing(48, { charging: true, centreText: "150 mi" }));
+card(g, "Range ring — low", V.rangeRing(9, { centreText: "28 mi" }));
 </script></body></html>
 `;
 

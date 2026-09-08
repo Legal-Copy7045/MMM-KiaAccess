@@ -218,7 +218,8 @@ Common EV9 (US) paths:
 | `visuals.compact` | `false` | one-line summary (`78% · 312 mi · 🔒`) instead of the diagram + table |
 | `visuals.chargeProgress` | `true` | progress bar + "full at HH:MM" while plugged in |
 | `visuals.rangeRing` | `false` | radial SoC / range gauge under the car |
-| `visuals.socHistory` | `false` | battery-% sparkline (`visuals.socHistoryDays`, default 14) |
+| `visuals.socHistory` | `false` | EV-battery-% sparkline (`visuals.socHistoryDays`, default 14) |
+| `visuals.v12History` | `false` | 12V-battery-% sparkline (`visuals.v12HistoryDays`, default 14) — spot vampire drain |
 | `visuals.tripStats` | `false` | distance / consumption / regen from `month_trip_info` |
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map` — see [Location](#location--map) |
 | `visuals.chargeCost` | `{ enabled:false }` | estimated cost to the charge target (`pricePerKwh`, `currency`) |
@@ -294,7 +295,9 @@ automatically so nothing is duplicated. The diagram always reads the real
 
 #### Every state, visually
 
-![Car diagram states](docs/car-states.png)
+Every diagram state and every optional widget:
+
+![Car diagram states and widgets](docs/car-states.png)
 
 Open [`docs/car-states.html`](docs/car-states.html) for the same gallery with the
 animations playing. Regenerate it from the current `visuals.js` with
@@ -308,8 +311,9 @@ Each is off by default and stacks under the car:
 - **`chargeProgress`** — while plugged in, a bar (current + target) and either
   "Full (80%) at 06:40" or "Plugged in, not charging".
 - **`rangeRing`** — a radial gauge: SoC on the ring, range in the centre.
-- **`socHistory`** — a battery-% sparkline over the last `socHistoryDays`, from the
-  history the helper keeps on disk.
+- **`socHistory`** / **`v12History`** — battery-% sparklines (EV and 12V) over the
+  last N days, from the history the helper keeps on disk. `v12History` is the one
+  to watch for a slow parasitic drain.
 - **`tripStats`** — this month's distance / average consumption / regen.
 - **`chargeCost`** — `{ enabled: true, pricePerKwh: 0.14, currency: "$" }` →
   "Est. cost to 80%: $6.40" (needs `ev_battery_capacity`).
