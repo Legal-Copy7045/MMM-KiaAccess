@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Kia Access",
+        "description": "Sign in with your Kia Access / Kia Connect account.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "pin": "PIN",
+          "region": "Region",
+          "brand": "Brand",
+          "vin": "VIN (optional, leave blank for the first vehicle)",
+          "geocode": "Reverse-geocode the parked location"
+        }
+      },
+      "otp": {
+        "title": "One-time code",
+        "description": "Enter the one-time code Kia just sent to {dest}.",
+        "data": { "code": "Code" }
+      }
+    },
+    "error": {
+      "auth": "Could not sign in — check the email, password, PIN and region.",
+      "otp": "That code was not accepted. Try again."
+    },
+    "abort": {
+      "already_configured": "This Kia account is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Kia Access options",
+        "data": {
+          "scan_interval": "Poll interval (minutes)",
+          "force_refresh_timeout": "Live wake-up timeout (seconds, 0 = cached only)"
+        }
+      }
+    }
+  }
+}

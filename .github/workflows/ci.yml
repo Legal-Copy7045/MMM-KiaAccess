@@ -25,6 +25,8 @@ jobs:
           done
       - name: Unit tests
         run: npm test
+      - name: HA integration in sync with core/
+        run: node scripts/sync-core.js --check
       - name: Gallery is not stale
         run: |
           node docs/build-gallery.js
@@ -45,6 +47,20 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Byte-compile
-        run: python -m py_compile kia_bridge.py enroll.py kia_client.py
+        run: |
+          python -m py_compile kia_bridge.py enroll.py kia_client.py
+          python -m py_compile custom_components/kia_access/*.py
       - name: Spec sanity
         run: python test/spec_check.py
+
+  hass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate config flow / manifest against Home Assistant
+        run: |
+          pip install --quiet homeassistant
+          python test/ha_import_check.py

@@ -1,0 +1,30 @@
+{
+  "$comment": "Canonical catalogue of vehicle entities shared by every surface. The MM MQTT discovery, the Home Assistant integration, and the docs all generate from this. `key` matches the flat state topic the node_helper publishes (<prefix>/<key>) and the hyundai_kia_connect_api Vehicle attribute. For binary_sensor, payload_on defaults to \"true\"/\"false\" unless `invert` is set (HA lock semantics: on = unlocked).",
+  "version": 1,
+  "entities": [
+    { "key": "ev_battery_percentage", "domain": "sensor", "name": "EV battery", "device_class": "battery", "unit": "%", "state_class": "measurement" },
+    { "key": "ev_battery_soh_percentage", "domain": "sensor", "name": "EV battery health", "unit": "%", "icon": "mdi:heart-pulse" },
+    { "key": "car_battery_percentage", "domain": "sensor", "name": "12V battery", "device_class": "battery", "unit": "%", "state_class": "measurement" },
+    { "key": "ev_driving_range", "domain": "sensor", "name": "EV range", "device_class": "distance", "unit": "km" },
+    { "key": "total_driving_range", "domain": "sensor", "name": "Total range", "device_class": "distance", "unit": "km" },
+    { "key": "ev_charging_power", "domain": "sensor", "name": "Charge power", "device_class": "power", "unit": "kW" },
+    { "key": "ev_estimated_current_charge_duration", "domain": "sensor", "name": "Time to full", "device_class": "duration", "unit": "min" },
+    { "key": "odometer", "domain": "sensor", "name": "Odometer", "device_class": "distance", "unit": "km", "state_class": "total_increasing" },
+    { "key": "outside_temperature", "domain": "sensor", "name": "Outside temperature", "device_class": "temperature", "unit": "°C" },
+    { "key": "last_updated_at", "domain": "sensor", "name": "Car last reported", "device_class": "timestamp" },
+
+    { "key": "ev_battery_is_charging", "domain": "binary_sensor", "name": "Charging", "device_class": "battery_charging" },
+    { "key": "ev_battery_is_plugged_in", "domain": "binary_sensor", "name": "Plugged in", "device_class": "plug" },
+    { "key": "is_locked", "domain": "binary_sensor", "name": "Locked", "device_class": "lock", "invert": true },
+    { "key": "front_left_door_is_open", "domain": "binary_sensor", "name": "Front-left door", "device_class": "door" },
+    { "key": "front_right_door_is_open", "domain": "binary_sensor", "name": "Front-right door", "device_class": "door" },
+    { "key": "back_left_door_is_open", "domain": "binary_sensor", "name": "Rear-left door", "device_class": "door" },
+    { "key": "back_right_door_is_open", "domain": "binary_sensor", "name": "Rear-right door", "device_class": "door" },
+    { "key": "hood_is_open", "domain": "binary_sensor", "name": "Frunk", "device_class": "door" },
+    { "key": "trunk_is_open", "domain": "binary_sensor", "name": "Liftgate", "device_class": "door" },
+    { "key": "sunroof_is_open", "domain": "binary_sensor", "name": "Sunroof", "device_class": "window" },
+    { "key": "tire_pressure_all_warning_is_on", "domain": "binary_sensor", "name": "Tyre pressure warning", "device_class": "problem" },
+    { "key": "defrost_is_on", "domain": "binary_sensor", "name": "Defrost", "device_class": "running" },
+    { "key": "air_control_is_on", "domain": "binary_sensor", "name": "Climate", "device_class": "running" }
+  ]
+}

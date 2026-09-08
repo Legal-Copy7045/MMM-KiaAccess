@@ -28,5 +28,15 @@ ent = json.load(open(os.path.join(ROOT, "core/entities.json"), encoding="utf-8")
 for e in ent:
     assert e["domain"] in ("sensor", "binary_sensor"), f"bad domain {e['domain']!r}"
 
+# the HA integration must carry byte-identical copies (scripts/sync-core.js)
+for name in ("entities.json", "commands.json", "kia_client.py"):
+    src = open(os.path.join(ROOT, "core", name) if name.endswith("json")
+               else os.path.join(ROOT, name), encoding="utf-8").read()
+    dst_path = os.path.join(ROOT, "custom_components", "kia_access", name)
+    assert os.path.exists(dst_path), f"missing synced {name} — run node scripts/sync-core.js"
+    assert open(dst_path, encoding="utf-8").read() == src, (
+        f"{name} out of sync — run node scripts/sync-core.js"
+    )
+
 print("spec_check: all specs valid")
 sys.exit(0)

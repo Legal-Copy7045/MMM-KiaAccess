@@ -515,6 +515,32 @@ Home Assistant integration and Lovelace card:
 The MagicMirror front end (`MMM-KiaAccess.js`), `node_helper.js` and the Python
 bridge (`kia_bridge.py`) stay at the repo root as MagicMirror requires.
 
+`custom_components/kia_access/` is the Home Assistant integration (see below).
+`scripts/sync-core.js` copies `core/entities.json`, `core/commands.json` and
+`kia_client.py` into it and generates its `services.yaml`, so a feature defined
+in `core/` lands on every surface. CI fails if the copies drift.
+
+## Home Assistant
+
+The same account/data, plus **control** (lock, unlock, climate, charging), as a
+native integration. Install `custom_components/kia_access/` via HACS (add this
+repo as a custom repository, type *Integration*) or copy the folder into your HA
+`config/custom_components/`, restart, then **Settings → Devices & Services → Add
+Integration → Kia Access**. It handles the one-time OTP in the setup dialog.
+
+You get a device per vehicle with:
+
+- sensors / binary sensors generated from `core/entities.json` (battery, range,
+  charge power, doors, lock, plug, climate, tyre warning, …)
+- buttons for `lock`, `unlock`, `start/stop climate`, `start/stop charge`
+- services `kia_access.lock` … `kia_access.set_charge_limits` (and
+  `kia_access.start_climate` with `set_temp` / `duration` / `defrost`)
+
+Poll interval and live-wake-up timeout are in the integration's **Configure**
+dialog. Running both this and the MagicMirror module against one account? Point
+MM at HA instead of Kia (planned `source: "homeassistant"`) to avoid double
+polling.
+
 ## Credits
 
 - [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
