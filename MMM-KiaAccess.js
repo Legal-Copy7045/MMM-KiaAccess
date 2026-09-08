@@ -56,7 +56,9 @@ Module.register("MMM-KiaAccess", {
     nullText: "—",
     include: [], // e.g. ["vehicle.ev_battery_percentage", "vehicle.*_door_is_open", "vehicle.odometer"]
     exclude: ["vehicle.data.*", "vehicle.VIN"], // raw API dump + VIN hidden by default
-    hideWhenFalsy: [], // paths/globs: drop the row when its value is false / 0 / null / "" / "—"
+    hideWhenFalsy: [], // paths/globs whose row is dropped when the value is
+                       //   false / 0 / null / "" / "—"; use "*" (or [ "*" ]) to
+                       //   drop EVERY empty row (tidy while the car hasn't synced)
     order: [], // paths / globs listed here are shown first, in this order
     combine: {}, // { "vehicle.geocode": ["vehicle.location_last_updated_at"] } — fold
                  //   the listed keys onto the primary row ("address · 5 min ago")
@@ -378,26 +380,31 @@ Module.register("MMM-KiaAccess", {
   },
 
   // `combine: { "vehicle.geocode": ["vehicle.location_last_updated_at"] }` folds
-  // the listed keys onto the primary row ("address · 5 min ago") and drops them
-  // as separate rows.
+  // the listed keys onto the primary row ("address · 5 min ago"). The folded
+  // keys never render as their own rows — with or without a value — so the
+  // layout doesn't shuffle as data comes and goes. If the primary itself has
+  // no value and nothing folded in, the whole row is dropped.
   applyCombine(entries) {
     const combine = this.config.combine || {};
     const keys = Object.keys(combine);
     if (!keys.length) return entries;
+    const nul = this.config.nullText;
     const byKey = {};
     entries.forEach((e) => { byKey[e.key] = e; });
     const drop = new Set();
     keys.forEach((primary) => {
+      const secondary = combine[primary] || [];
+      secondary.forEach((k) => drop.add(k)); // always fold away, value or not
       const host = byKey[primary];
       if (!host) return;
-      const parts = (combine[primary] || [])
+      const parts = secondary
         .map((k) => byKey[k])
         .filter(Boolean)
         .map((e) => this.utils.formatValue(e, this.config))
-        .filter((v) => v && v !== this.config.nullText);
-      if (!parts.length) return;
-      host.combinedSuffix = parts.join(" · ");
-      (combine[primary] || []).forEach((k) => drop.add(k));
+        .filter((v) => v && v !== nul);
+      if (parts.length) host.combinedSuffix = parts.join(" · ");
+      const hostVal = this.utils.formatValue(host, this.config);
+      if (!host.combinedSuffix && (!hostVal || hostVal === nul)) drop.add(primary);
     });
     return entries.filter((e) => !drop.has(e.key));
   },
@@ -407,7 +414,10 @@ Module.register("MMM-KiaAccess", {
     const keys = vis.batteryDetail || [];
     const f = this.flatMap || {};
     const labels = this.config.labels || {};
-    const hide = this.config.hideWhenFalsy || [];
+    const hideCfg = this.config.hideWhenFalsy || [];
+    const hideAllEmpty = hideCfg === true || hideCfg === "*" ||
+      (Array.isArray(hideCfg) && hideCfg.indexOf("*") !== -1);
+    const hide = Array.isArray(hideCfg) ? hideCfg : [];
     return keys
       .filter((k) => Object.prototype.hasOwnProperty.call(f, k))
       .map((k) => ({
@@ -417,7 +427,8 @@ Module.register("MMM-KiaAccess", {
       }))
       .filter(
         (e) =>
-          !this.utils.matchesAny(e.key, hide) || !this.utils.isEmptyValue(e.rawValue)
+          !this.utils.isEmptyValue(e.rawValue) ||
+          (!hideAllEmpty && !this.utils.matchesAny(e.key, hide))
       );
   },
 

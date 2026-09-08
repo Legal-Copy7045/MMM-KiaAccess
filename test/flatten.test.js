@@ -42,6 +42,13 @@ entries = U.selectEntries(cond, {
   hideWhenFalsy: ["a.charging", "a.plugged", "a.power", "a.rate", "a.note"]
 });
 assert.deepStrictEqual(entries.map((e) => e.key).sort(), ["a.plugged", "a.rate"]);
+
+// hideWhenFalsy: "*" drops every empty row without naming each key
+entries = U.selectEntries(cond, { hideWhenFalsy: "*" });
+assert.deepStrictEqual(entries.map((e) => e.key).sort(), ["a.plugged", "a.rate"]);
+entries = U.selectEntries(cond, { hideWhenFalsy: ["*"] });
+assert.deepStrictEqual(entries.map((e) => e.key).sort(), ["a.plugged", "a.rate"]);
+
 assert.strictEqual(U.isEmptyValue(0), true);
 assert.strictEqual(U.isEmptyValue("false"), true);
 assert.strictEqual(U.isEmptyValue(3.3), false);
