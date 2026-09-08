@@ -21,6 +21,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { flatten } = require("./core/flatten.js");
 const haDiscovery = require("./core/ha-discovery.js");
+const haSource = require("./ha_source.js");
 
 const CACHE_DIR = path.join(__dirname, "cache");
 
@@ -120,6 +121,21 @@ module.exports = NodeHelper.create({
     s.reqTimes.push(now);
     this.inFlight[id] = true;
 
+    // ---- alternative source: pull from a Home Assistant instance ----
+    if (String(config.source || "kia").toLowerCase() === "homeassistant") {
+      haSource
+        .fetchFromHA(config.homeassistant || {})
+        .then((payload) => {
+          this.inFlight[id] = false;
+          this.onPayload(id, config, payload);
+        })
+        .catch((err) => {
+          this.inFlight[id] = false;
+          this.fail(id, config, "Home Assistant source: " + err.message);
+        });
+      return;
+    }
+
     const pythonBin = resolvePython(config.pythonBin);
     const script = path.join(__dirname, "kia_bridge.py");
     const job = {
@@ -174,30 +190,38 @@ module.exports = NodeHelper.create({
           result.meta || {}
         )
       };
-      if (payload._meta.warning) Log.warn("[MMM-KiaAccess] " + payload._meta.warning);
-
-      // ---- record history ----
-      const minGap = (Number(config.historyMinIntervalMinutes) || 30) * 60e3;
-      const last = s.history[s.history.length - 1];
-      const sample = {
-        t: Date.now(),
-        ev: numOrNull(vehicle.ev_battery_percentage),
-        v12: numOrNull(vehicle.car_battery_percentage)
-      };
-      if (!last || sample.t - last.t >= minGap) s.history.push(sample);
-      else s.history[s.history.length - 1] = sample; // refresh the latest slot
-      this.pruneHistory(s, Number(config.historyDays) || 60);
-
-      s.failStreak = 0;
-      s.lastGood = payload;
-      this.persist(id);
-
-      this.emitData(id, config, payload);
-      this.publishMqtt(config, payload);
+      this.onPayload(id, config, payload);
     });
 
     child.stdin.write(JSON.stringify(job));
     child.stdin.end();
+  },
+
+  /** common success path: record history, cache, emit, publish. */
+  onPayload(id, config, payload) {
+    const s = this.st(id);
+    const vehicle = payload.vehicle || {};
+    payload._meta = Object.assign({ fetchedAt: new Date().toISOString(), failStreak: 0 }, payload._meta || {});
+    if (payload._meta.warning) Log.warn("[MMM-KiaAccess] " + payload._meta.warning);
+
+    // ---- record history ----
+    const minGap = (Number(config.historyMinIntervalMinutes) || 30) * 60e3;
+    const last = s.history[s.history.length - 1];
+    const sample = {
+      t: Date.now(),
+      ev: numOrNull(vehicle.ev_battery_percentage),
+      v12: numOrNull(vehicle.car_battery_percentage)
+    };
+    if (!last || sample.t - last.t >= minGap) s.history.push(sample);
+    else s.history[s.history.length - 1] = sample; // refresh the latest slot
+    this.pruneHistory(s, Number(config.historyDays) || 60);
+
+    s.failStreak = 0;
+    s.lastGood = payload;
+    this.persist(id);
+
+    this.emitData(id, config, payload);
+    this.publishMqtt(config, payload);
   },
 
   fail(id, config, message) {

@@ -20,6 +20,15 @@ Module.register("MMM-KiaAccess", {
     region: "USA", // "USA" | "CA" | "EU" | "AU" | "CN" | "IN" | "NZ" | "BR"
     vin: "", // optional; first vehicle on the account is used when blank
 
+    // ---- data source ----
+    source: "kia", // "kia" = poll Kia directly (default)
+                   // "homeassistant" = read from the Kia Access HA integration instead
+    homeassistant: {
+      url: "", // e.g. "http://homeassistant.local:8123"
+      token: "", // a HA long-lived access token
+      entity: "" // optional; the "…_status" summary sensor, auto-detected when blank
+    },
+
     // ---- runtime ----
     pythonBin: "python3", // command used to run kia_bridge.py
     fetchTimeout: 90, // seconds before the bridge process is killed
@@ -199,6 +208,7 @@ Module.register("MMM-KiaAccess", {
     this.config.visuals.location = merge(this.defaults.visuals.location, this.config.visuals.location);
     this.config.visuals.chargeCost = merge(this.defaults.visuals.chargeCost, this.config.visuals.chargeCost);
     this.config.icons = merge(this.defaults.icons, this.config.icons);
+    this.config.homeassistant = merge(this.defaults.homeassistant, this.config.homeassistant);
     this.config.notifications = merge(this.defaults.notifications, this.config.notifications);
     this.config.mqtt = merge(this.defaults.mqtt, this.config.mqtt);
     this.config.mqtt.homeAssistant = merge(
@@ -243,6 +253,8 @@ Module.register("MMM-KiaAccess", {
       brand: c.brand,
       region: c.region,
       vin: c.vin,
+      source: c.source,
+      homeassistant: c.homeassistant,
       refresh: c.refresh,
       geocode: c.geocode || (c.visuals && c.visuals.location && c.visuals.location.enabled),
       pythonBin: c.pythonBin,

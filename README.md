@@ -537,9 +537,33 @@ You get a device per vehicle with:
   `kia_access.start_climate` with `set_temp` / `duration` / `defrost`)
 
 Poll interval and live-wake-up timeout are in the integration's **Configure**
-dialog. Running both this and the MagicMirror module against one account? Point
-MM at HA instead of Kia (planned `source: "homeassistant"`) to avoid double
-polling.
+dialog.
+
+### MagicMirror reading from Home Assistant
+
+Running both this and the MagicMirror module against one account doubles the
+polling of the car. Instead, let HA do the polling and point the module at it —
+no Python bridge, no OTP on the mirror:
+
+```js
+{
+  module: "MMM-KiaAccess",
+  position: "top_left",
+  config: {
+    source: "homeassistant",
+    homeassistant: {
+      url: "http://homeassistant.local:8123",
+      token: "<a HA long-lived access token>"
+      // entity: "sensor.kia_ev9_status"   // optional, auto-detected
+    },
+    // no username/password/pin needed in this mode
+    visuals: { enabled: true }
+  }
+}
+```
+
+It reads the integration's diagnostic summary sensor, so the diagram, table,
+notifications and MQTT re-publishing all work exactly as in direct mode.
 
 ### Lovelace card
 
