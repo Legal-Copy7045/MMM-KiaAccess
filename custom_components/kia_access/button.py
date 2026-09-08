@@ -1,8 +1,9 @@
 """Kia Access buttons, generated from commands.json.
 
-Only the no-argument commands (lock, unlock, start/stop climate, start/stop
-charge) get a button. Parameterised commands (set_charge_limits,
-start_climate with options) are available as services.
+Only the no-argument commands (lock, unlock, stop climate, start/stop charge,
+flash hazards, flash + honk, open/close charge port) get a button. The
+parameterised commands (start_climate, set_charge_limits, send_to_car) are
+services only — the Lovelace card gives start_climate a proper panel.
 """
 from __future__ import annotations
 

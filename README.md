@@ -836,7 +836,10 @@ Install and setup are **mode B** above. Some details:
 - **How the card gets its data.** The integration adds one diagnostic sensor,
   `sensor.<vehicle>_status`, whose attributes carry the whole flat vehicle
   payload (`kia_access_raw: true`). The card — and the module in mode C — read
-  only that one entity, so neither costs any extra polling of Kia.
+  only that one entity, so neither costs any extra polling of Kia. Those
+  attributes include the VIN and the parked coordinates, so the sensor declares
+  `_unrecorded_attributes` — the blob is available live but is **not** written to
+  the recorder / history / logbook.
 - **Control.** Buttons cover the no-argument commands; `set_charge_limits`,
   `send_to_car` and the parameterised `start_climate` are services only —
   though the card's **Climate panel** drives `start_climate` / `stop_climate`

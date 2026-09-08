@@ -198,17 +198,24 @@
 
   // `unit` is "C" or "F"
   function climateHtml(clim, unit) {
-    var tempTxt = unit === "C"
-      ? Math.round(fToC(clim.tempF)) + " °C"
-      : Math.round(clim.tempF) + " °F";
+    var tempTxt, atTMin, atTMax;
+    if (unit === "C") {
+      var tC = Math.round(fToC(clim.tempF));
+      tempTxt = tC + " °C";
+      atTMin = tC <= Math.ceil(fToC(TEMP_F_MIN));
+      atTMax = tC >= Math.floor(fToC(TEMP_F_MAX));
+    } else {
+      tempTxt = Math.round(clim.tempF) + " °F";
+      atTMin = clim.tempF <= TEMP_F_MIN;
+      atTMax = clim.tempF >= TEMP_F_MAX;
+    }
     var cb = function (id, lbl, on) {
       return "<label><input type='checkbox' data-clim='" + id + "'" +
         (on ? " checked" : "") + ">" + esc(lbl) + "</label>";
     };
     return "<div class='ka-group'><div class='ka-group-label'>Climate</div>" +
       "<div class='ka-clim'>" +
-      stepRow("Temperature", "temp", tempTxt,
-        clim.tempF <= TEMP_F_MIN, clim.tempF >= TEMP_F_MAX) +
+      stepRow("Temperature", "temp", tempTxt, atTMin, atTMax) +
       stepRow("Run for", "dur", clim.duration + " min",
         clim.duration <= DUR_MIN, clim.duration >= DUR_MAX) +
       "<div class='ka-toggles'>" +
@@ -236,6 +243,10 @@
 
     static getStubConfig() { return { entity: "" }; }
 
+    disconnectedCallback() {
+      clearTimeout(this._flashT);
+    }
+
     set hass(hass) {
       this._hass = hass;
       // HA sets `hass` on every state change anywhere — only re-render when the
@@ -248,8 +259,17 @@
       this._render();
     }
 
+    // guard against a double-tap firing the same command twice
+    _tooSoon(key) {
+      var now = Date.now();
+      this._lastCmd = this._lastCmd || {};
+      if (now - (this._lastCmd[key] || 0) < 1500) return true;
+      this._lastCmd[key] = now;
+      return false;
+    }
+
     _callCommand(key, needsConfirm) {
-      if (!this._hass) return;
+      if (!this._hass || this._tooSoon(key)) return;
       var spec = CMD_BY_KEY[key] || {};
       if (needsConfirm &&
           !window.confirm((spec.name || key) + " — send this to the car?")) {
@@ -298,9 +318,14 @@
     _climStep(id, dir) {
       var c = this._clim();
       if (id === "temp") {
-        // step by 1 °F, or ~1 °C worth (nearest °F) when the card shows °C
-        var d = this._tempUnit() === "C" ? 2 * dir : dir;
-        c.tempF = clamp(c.tempF + d, TEMP_F_MIN, TEMP_F_MAX);
+        if (this._tempUnit() === "C") {
+          // step a whole °C: round the current point to °C, move, convert back
+          var next = clamp(Math.round(fToC(c.tempF)) + dir,
+            Math.ceil(fToC(TEMP_F_MIN)), Math.floor(fToC(TEMP_F_MAX)));
+          c.tempF = clamp(Math.round(cToF(next)), TEMP_F_MIN, TEMP_F_MAX);
+        } else {
+          c.tempF = clamp(c.tempF + dir, TEMP_F_MIN, TEMP_F_MAX);
+        }
       } else if (id === "dur") {
         c.duration = clamp(c.duration + dir, DUR_MIN, DUR_MAX);
       }
@@ -320,7 +345,7 @@
     }
 
     _startClimate() {
-      if (!this._hass) return;
+      if (!this._hass || this._tooSoon("start_climate")) return;
       var c = this._clim();
       var data = {
         set_temp: c.tempF,
@@ -338,7 +363,7 @@
     }
 
     _stopClimate() {
-      if (!this._hass) return;
+      if (!this._hass || this._tooSoon("stop_climate")) return;
       var data = {};
       if (this._entryId) data.entry_id = this._entryId;
       this._hass.callService("kia_access", "stop_climate", data);
@@ -394,10 +419,10 @@
         } catch (e) { /* ignore */ }
       }
       state.flashing = this._flashing === true;
-      // the API reports temperatures in °C; follow the HA unit system for display
-      var tUnit = (hass.config && hass.config.unit_system &&
-        hass.config.unit_system.temperature === "°F") ? "F" : "C";
-      var diagram = V.carDiagram(state, { width: 230, battery: true, tempUnit: tUnit });
+      // the API reports temperatures in °C; the diagram and the climate panel
+      // share one unit choice (card config, else the HA unit system)
+      var diagram = V.carDiagram(state,
+        { width: 230, battery: true, tempUnit: this._tempUnit() });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";
       var updated = st.state && st.state !== "unknown" && st.state !== "unavailable"
