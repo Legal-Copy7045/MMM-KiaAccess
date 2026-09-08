@@ -1,8 +1,8 @@
 /* Sets up Python for kia_bridge.py.
  *
- *   1. Find the newest usable python3 (>= 3.10) — system, pyenv, or a
+ *   1. Find the newest usable python3 (>= 3.12) — system, pyenv, or a
  *      previously-downloaded standalone build.
- *   2. If none is >= 3.10, download a self-contained CPython 3.12 from
+ *   2. If none is >= 3.12, download a self-contained CPython 3.12 from
  *      astral-sh/python-build-standalone (no compiler needed) into
  *      ./python-standalone/.
  *   3. Build ./venv from it and install requirements.txt.
@@ -25,7 +25,7 @@ const ROOT = __dirname;
 const VENV = path.join(ROOT, "venv");
 const STANDALONE = path.join(ROOT, "python-standalone");
 const IS_WIN = process.platform === "win32";
-const MIN = [3, 10];
+const MIN = [3, 12]; // hyundai_kia_connect_api now requires python_requires >= 3.12
 const PBS_RELEASE = process.env.MMM_KIA_PBS_RELEASE || "20260901";
 const PBS_PY = "3.12.14";
 
@@ -175,7 +175,7 @@ async function fetchStandalone() {
 
   if (!best || !ge(best, { maj: MIN[0], min: MIN[1] })) {
     console.log(
-      "[MMM-KiaAccess] Could not obtain Python >= 3.10. Options:\n" +
+      "[MMM-KiaAccess] Could not obtain Python >= 3.12. Options:\n" +
         "  - install python3.12 (pyenv, or your distro), then re-run `npm install`\n" +
         "  - set MMM_KIA_PYTHON=/path/to/python3 and re-run\n" +
         "  - see the README 'Python version' section"
