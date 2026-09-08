@@ -40,6 +40,7 @@ module.exports = NodeHelper.create({
   start() {
     this.inFlight = {};
     this.mqttClients = {};
+    this.haLive = {}; // id -> HaLiveClient (source: "homeassistant", mode: "push")
     this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -108,9 +109,48 @@ module.exports = NodeHelper.create({
     // ---- alternative source: pull from a Home Assistant instance ----
     // (local read — not subject to the Kia request/hour cap)
     if (String(config.source || "kia").toLowerCase() === "homeassistant") {
+      const haCfg = config.homeassistant || {};
+      const mode = String(haCfg.mode || "push").toLowerCase();
+
+      // push: a persistent WebSocket pushes changes as they happen. Each periodic
+      // KIA_FETCH just checks the socket is alive and does a REST read only if
+      // it isn't (startup, reconnect gap, or WS unsupported on this Node).
+      if (mode !== "poll" && haSource.HaLiveClient.supported) {
+        if (!this.haLive[id]) {
+          this.haLive[id] = new haSource.HaLiveClient(haCfg, {
+            onPayload: (p) => this.onPayload(id, config, p),
+            onStatus: (msg, o) => {
+              if (o && o.fatal) this.fail(id, config, "Home Assistant push: " + msg);
+              else Log.info("[MMM-KiaAccess] " + msg);
+            }
+          });
+          this.haLive[id].start();
+        }
+        // socket is live: the WS pushes changes on its own. Re-send the current
+        // state so the frontend's watchdog stays happy between real updates.
+        if (this.haLive[id].healthy && s.lastGood) {
+          this.emitData(id, config, JSON.parse(JSON.stringify(s.lastGood)));
+          return;
+        }
+
+        this.inFlight[id] = true;
+        haSource
+          .fetchFromHA(haCfg)
+          .then((payload) => {
+            this.inFlight[id] = false;
+            this.onPayload(id, config, payload);
+          })
+          .catch((err) => {
+            this.inFlight[id] = false;
+            this.fail(id, config, "Home Assistant source: " + err.message);
+          });
+        return;
+      }
+
+      // poll mode (or Node without global WebSocket)
       this.inFlight[id] = true;
       haSource
-        .fetchFromHA(config.homeassistant || {})
+        .fetchFromHA(haCfg)
         .then((payload) => {
           this.inFlight[id] = false;
           this.onPayload(id, config, payload);

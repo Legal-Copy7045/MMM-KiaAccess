@@ -26,7 +26,9 @@ Module.register("MMM-KiaAccess", {
     homeassistant: {
       url: "", // e.g. "http://homeassistant.local:8123"
       token: "", // a HA long-lived access token
-      entity: "" // optional; the "…_status" summary sensor, auto-detected when blank
+      entity: "", // optional; the "…_status" summary sensor, auto-detected when blank
+      mode: "push" // "push" = live WebSocket, instant updates (needs Node >= 22)
+                   // "poll" = REST every updateInterval (default 30s in this mode)
     },
 
     // ---- runtime ----
@@ -223,10 +225,11 @@ Module.register("MMM-KiaAccess", {
       if (!ha.url || !ha.token) {
         configErr = "Set homeassistant.url and homeassistant.token in config.js";
       }
-      // reading from HA is a cheap local call — poll much more often than the
-      // 30-min Kia default (unless the user picked their own interval)
+      // in push mode the WebSocket is real-time and updateInterval is only a
+      // slow liveness/fallback poll; in poll mode it's the actual refresh rate
+      const haMode = String((ha.mode || "push")).toLowerCase();
       if (this.config.updateInterval === this.defaults.updateInterval) {
-        this.config.updateInterval = 30 * 1000;
+        this.config.updateInterval = haMode === "poll" ? 30 * 1000 : 5 * 60 * 1000;
       }
       if (this.config.retryInterval === this.defaults.retryInterval) {
         this.config.retryInterval = 30 * 1000;
