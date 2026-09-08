@@ -20,12 +20,19 @@ jobs:
       - name: Syntax check
         run: |
           for f in MMM-KiaAccess.js node_helper.js flatten.js visuals.js conditions.js ha_discovery.js setup_python.js docs/build-gallery.js; do
-            echo "node --check $f"; node --check "$f"
+            echo "node --check $f"
+            node --check "$f"
           done
       - name: Unit tests
-        run: node test/flatten.test.js && node test/conditions.test.js && node test/ha_discovery.test.js
-      - name: Gallery regenerates
-        run: node docs/build-gallery.js && git diff --exit-code docs/car-states.html || (echo "docs/car-states.html is stale — run: node docs/build-gallery.js" && exit 1)
+        run: npm test
+      - name: Gallery is not stale
+        run: |
+          node docs/build-gallery.js
+          if ! git diff --quiet docs/car-states.html; then
+            echo "docs/car-states.html is out of date — run: node docs/build-gallery.js"
+            git --no-pager diff docs/car-states.html | head -40
+            exit 1
+          fi
 
   python:
     runs-on: ubuntu-latest
