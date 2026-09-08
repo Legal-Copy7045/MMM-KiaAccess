@@ -5,41 +5,37 @@
  * entity points at the per-key state topic the node_helper already publishes
  * (`<prefix>/<key>`), with `<prefix>/status` as the availability topic.
  *
- * Pure module (no deps) so it can be unit-tested.
+ * The entity list is generated from core/entities.json — the single catalogue
+ * shared with the native HA integration and the docs.
+ *
+ * Pure module (no runtime deps) so it can be unit-tested.
  */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.KiaHaDiscovery = factory();
-})(typeof self !== "undefined" ? self : this, function () {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory(require("./entities.json"));
+  } else {
+    root.KiaHaDiscovery = factory(root.KiaAccessEntities || { entities: [] });
+  }
+})(typeof self !== "undefined" ? self : this, function (CATALOGUE) {
   "use strict";
 
-  // component, key (matches the flat state topic), and HA config extras
-  var SENSORS = [
-    ["sensor", "ev_battery_percentage", { name: "EV battery", device_class: "battery", unit_of_measurement: "%", state_class: "measurement" }],
-    ["sensor", "ev_battery_soh_percentage", { name: "EV battery health", unit_of_measurement: "%", icon: "mdi:heart-pulse" }],
-    ["sensor", "car_battery_percentage", { name: "12V battery", device_class: "battery", unit_of_measurement: "%", state_class: "measurement" }],
-    ["sensor", "ev_driving_range", { name: "EV range", device_class: "distance", unit_of_measurement: "km" }],
-    ["sensor", "total_driving_range", { name: "Total range", device_class: "distance", unit_of_measurement: "km" }],
-    ["sensor", "ev_charging_power", { name: "Charge power", device_class: "power", unit_of_measurement: "kW" }],
-    ["sensor", "ev_estimated_current_charge_duration", { name: "Time to full", device_class: "duration", unit_of_measurement: "min" }],
-    ["sensor", "odometer", { name: "Odometer", device_class: "distance", unit_of_measurement: "km", state_class: "total_increasing" }],
-    ["sensor", "outside_temperature", { name: "Outside temperature", device_class: "temperature", unit_of_measurement: "°C" }],
-    ["sensor", "last_updated_at", { name: "Car last reported", device_class: "timestamp" }],
-
-    ["binary_sensor", "ev_battery_is_charging", { name: "Charging", device_class: "battery_charging", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "ev_battery_is_plugged_in", { name: "Plugged in", device_class: "plug", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "is_locked", { name: "Locked", device_class: "lock", payload_on: "false", payload_off: "true" }], // HA lock: on = unlocked
-    ["binary_sensor", "front_left_door_is_open", { name: "Front-left door", device_class: "door", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "front_right_door_is_open", { name: "Front-right door", device_class: "door", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "back_left_door_is_open", { name: "Rear-left door", device_class: "door", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "back_right_door_is_open", { name: "Rear-right door", device_class: "door", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "hood_is_open", { name: "Frunk", device_class: "door", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "trunk_is_open", { name: "Liftgate", device_class: "door", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "sunroof_is_open", { name: "Sunroof", device_class: "window", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "tire_pressure_all_warning_is_on", { name: "Tyre pressure warning", device_class: "problem", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "defrost_is_on", { name: "Defrost", device_class: "running", payload_on: "true", payload_off: "false" }],
-    ["binary_sensor", "air_control_is_on", { name: "Climate", device_class: "running", payload_on: "true", payload_off: "false" }]
-  ];
+  // Flatten the catalogue into the [component, key, extra] rows this module
+  // has always worked with, so downstream expectations (and SENSORS.length)
+  // are unchanged.
+  var SENSORS = (CATALOGUE.entities || []).map(function (e) {
+    var extra = { name: e.name || e.key };
+    if (e.domain === "binary_sensor") {
+      extra.device_class = e.device_class;
+      extra.payload_on = e.invert ? "false" : "true";
+      extra.payload_off = e.invert ? "true" : "false";
+    } else {
+      if (e.device_class) extra.device_class = e.device_class;
+      if (e.unit) extra.unit_of_measurement = e.unit;
+      if (e.state_class) extra.state_class = e.state_class;
+      if (e.icon) extra.icon = e.icon;
+    }
+    return [e.domain, e.key, extra];
+  });
 
   function slug(s) {
     return String(s).toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
