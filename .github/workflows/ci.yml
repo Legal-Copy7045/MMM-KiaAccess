@@ -59,6 +59,9 @@ jobs:
       - name: sessions engine
         run: python test/sessions_test.py
 
+      - name: range parity
+        run: python test/range_test.py
+
   hass:
     runs-on: ubuntu-latest
     steps:

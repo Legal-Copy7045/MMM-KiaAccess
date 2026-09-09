@@ -47,7 +47,9 @@
           "scan_interval": "Poll interval (minutes)",
           "force_refresh_timeout": "Live wake-up timeout (seconds, 0 = cached only)",
           "price_per_kwh": "Price per kWh (your all-in marginal rate, 0 = no cost tracking)",
-          "capacity_kwh": "Usable battery capacity kWh (0 = auto)"
+          "capacity_kwh": "Usable battery capacity kWh (0 = auto)",
+          "range_factor": "Range reach factor (haircut on the car's range estimate)",
+          "range_reserve_pct": "Range reach reserve % (arrive with this much charge left)"
         }
       }
     }

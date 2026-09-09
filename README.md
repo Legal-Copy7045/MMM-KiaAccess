@@ -148,8 +148,9 @@ Lovelace card. No MagicMirror required.
      settings folded into the next climate start
    - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
      car), `open` / `close charge port`, `start` / `stop charge`
-   - **sensors** — fuel level & range, charge current, per-seat status, and a
-     `Remote action` diagnostic showing the command in flight
+   - **sensors** — fuel level & range, charge current, per-seat status, a
+     `Remote action` diagnostic, and **`Range reach`** (derated drive distance
+     now; the `pois` attribute flags every `zone.*` one-way / round-trip)
    - **services**: the no-arg buttons above, plus `kia_access.start_climate`
      (`set_temp` — **°F, 62–82** for the USA region — `duration`, `climate`,
      `defrost`, `heating`, `steering_wheel`, `front_left_seat` …
@@ -499,7 +500,7 @@ depends on its brand, region and powertrain):
 | `visuals.socHistory` | `false` | EV-battery-% sparkline (`visuals.socHistoryDays`, default 14) |
 | `visuals.v12History` | `false` | 12V-battery-% sparkline (`visuals.v12HistoryDays`, default 14) — spot vampire drain |
 | `visuals.tripStats` | `false` | distance / consumption / regen from `month_trip_info` |
-| `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map` — see [Location](#location--map) |
+| `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map`, and a `reach:true` "how far can I drive" readout (`reachFactor` / `reachReservePct` / `reachRoundTrip` / `pois`) — see [Location](#location--map) |
 | `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180) |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
@@ -651,6 +652,31 @@ visuals: {
 endpoint is rate-limited and sometimes down — for a reliable map, point
 `mapUrlTemplate` at your own provider (Geoapify / Mapbox / Google static maps).
 Enabling `location` turns `geocode` on automatically so the address resolves.
+
+**How far can I drive** — set `location.reach: true` to add a readout: the
+derated distance the car can cover now (`ev_driving_range × reachFactor` after a
+`reachReservePct` reserve), one-way and round-trip, plus which saved places are
+in reach:
+
+```js
+location: {
+  enabled: true, reach: true,
+  reachFactor: 0.92,       // trim the car's own estimate
+  reachReservePct: 10,     // arrive with 10% left
+  reachRoundTrip: false,   // true -> lead with the "…and get back" distance
+  reachPois: 4,
+  pois: [                  // homeLat/homeLon adds an implicit "Home"
+    { name: "Work", lat: 40.4406, lon: -79.9959 },
+    { name: "Cabin", lat: 39.87, lon: -79.49 }
+  ]
+}
+```
+
+Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
+(state = one-way distance; `pois` attribute lists every `zone.*` with
+`one_way_reachable` / `round_trip_reachable`). `Range reach factor` and
+`… reserve %` are in the **Configure** dialog. *(A map overlay with the actual
+road-network isochrone is coming next.)*
 
 Row icons come from a built-in map (battery → battery, range → road, lock → lock,
 charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:

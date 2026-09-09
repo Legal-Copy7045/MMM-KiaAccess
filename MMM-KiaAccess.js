@@ -130,7 +130,14 @@ Module.register("MMM-KiaAccess", {
         // {lat} {lon} {zoom} {w} {h} are substituted. Default is keyless OSM;
         // for reliability use your own provider (Geoapify / Mapbox / …).
         mapUrlTemplate:
-          "https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom={zoom}&size={w}x{h}&markers={lat},{lon},red-pushpin"
+          "https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom={zoom}&size={w}x{h}&markers={lat},{lon},red-pushpin",
+        // "how far can I drive" readout (needs GPS + ev_driving_range)
+        reach: false,
+        reachFactor: 0.92, //   haircut on the car's range estimate
+        reachReservePct: 10, // arrive with this much charge left
+        reachRoundTrip: false, // true = show the "…and get back" distance instead
+        reachPois: 4, // how many nearby saved places to list
+        pois: [] // [{ name, lat, lon }] — homeLat/homeLon adds an implicit "Home"
       },
       chargeCost: {
         enabled: false, // the "est. cost to the target" line while charging
@@ -227,7 +234,8 @@ Module.register("MMM-KiaAccess", {
       this.file("core/visuals.js"),
       this.file("core/conditions.js"),
       this.file("core/state.js"),
-      this.file("core/sessions.js")
+      this.file("core/sessions.js"),
+      this.file("core/range.js")
     ];
   },
 
@@ -860,6 +868,46 @@ Module.register("MMM-KiaAccess", {
         .join("");
       el.appendChild(t);
     }
+
+    // "how far can I drive" + which saved places are in reach
+    if (cfg.reach && typeof KiaAccessRange !== "undefined") {
+      const st = this.visualState();
+      const pois = (cfg.pois || []).slice();
+      if (cfg.homeLat != null && cfg.homeLon != null &&
+          !pois.some((p) => /^home$/i.test((p && p.name) || "")))
+        pois.unshift({ name: "Home", lat: Number(cfg.homeLat), lon: Number(cfg.homeLon) });
+      const sum = KiaAccessRange.summary(lat, lon, st.rangeKm, pois, {
+        factor: cfg.reachFactor,
+        reservePct: cfg.reachReservePct,
+        roundTrip: cfg.reachRoundTrip === true
+      });
+      if (sum.reachKm != null) {
+        const rb = document.createElement("div");
+        rb.className = "kiaaccess-batt-detail kiaaccess-reach";
+        const alt = sum.roundTrip ? sum.oneWayKm : sum.roundTripKm;
+        const head =
+          (sum.roundTrip ? "There & back: " : "One-way reach: ") +
+          (this.fmtDist(sum.reachKm) || "?") +
+          (alt != null ? "  (" + (sum.roundTrip ? "one-way " : "round trip ") +
+            (this.fmtDist(alt) || "?") + ")" : "");
+        let html =
+          '<div><span class="kiaaccess-bd-value">' + this.escape(head) + "</span></div>";
+        sum.pois.slice(0, Number(cfg.reachPois) || 4).forEach((p) => {
+          const d = this.fmtDist(p.km) || "";
+          const tail = p.reachable
+            ? d
+            : d + " · " + (this.fmtDist(-p.marginKm) || "") + " short";
+          html +=
+            '<div class="kiaaccess-reach-poi ' + (p.reachable ? "ok" : "no") +
+            '"><span class="kiaaccess-bd-label">' +
+            (p.reachable ? "✓ " : "✗ ") + this.escape(p.name || "?") +
+            '</span><span class="kiaaccess-bd-value">' + this.escape(tail) + "</span></div>";
+        });
+        rb.innerHTML = html;
+        el.appendChild(rb);
+      }
+    }
+
     if (cfg.map) {
       const url = String(cfg.mapUrlTemplate || "")
         .replace(/{lat}/g, lat)
