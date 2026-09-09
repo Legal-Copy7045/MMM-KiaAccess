@@ -19,7 +19,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Syntax check
         run: |
-          for f in MMM-KiaAccess.js node_helper.js webhook.js core/flatten.js core/visuals.js core/conditions.js core/state.js core/ha-discovery.js core/sessions.js core/range.js core/isoline.js ha_source.js setup_python.js docs/build-gallery.js scripts/sync-core.js card/kia-access-card.src.js custom_components/kia_access/frontend/kia-access-card.js; do
+          for f in MMM-KiaAccess.js node_helper.js webhook.js core/flatten.js core/visuals.js core/conditions.js core/state.js core/ha-discovery.js core/sessions.js core/range.js core/isoline.js ha_source.js setup_python.js docs/build-gallery.js scripts/sync-core.js card/kia-access-card.src.js card/kia-range-map-card.src.js custom_components/kia_access/frontend/kia-access-card.js; do
             echo "node --check $f"
             node --check "$f"
           done
