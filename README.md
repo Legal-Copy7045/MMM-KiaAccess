@@ -678,8 +678,10 @@ Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 `… reserve %` are in the **Configure** dialog.
 
 **Reachable-area map.** With a free [Geoapify](https://www.geoapify.com/) API key
-you get an image of the actual **road-network isochrone** — where you could
-drive, following roads — shaded on a map with your saved places pinned:
+you get a map of how far you can drive, shaded, with your saved places pinned. It
+draws a **straight-line reachable-radius circle** for the usual case, and
+**upgrades to the actual road-network isochrone** once your remaining range drops
+under ~60 mi (Geoapify's free-tier isoline distance limit).
 
 ```js
 location: {
@@ -698,7 +700,8 @@ location: {
 
 `node_helper` fetches the isoline (cached ~6 h; a parked car makes no calls) and
 builds the image; the module shows the one-way or round-trip shape per
-`reachRoundTrip`. Past ~500 km it falls back to a plain circle.
+`reachRoundTrip`. Over ~100 km / 60 mi it's a straight-line circle; under that,
+the real road-network isochrone.
 
 On **Home Assistant** the `custom:kia-access-card` does it client-side — add
 `range_map` to the card:

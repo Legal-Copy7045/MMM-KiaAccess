@@ -955,9 +955,9 @@ Module.register("MMM-KiaAccess", {
 
     // road-network reachable-area image (built by node_helper via Geoapify)
     if ((cfg.rangeMap || {}).enabled && this.rangeMap) {
-      const url = cfg.reachRoundTrip === true
-        ? this.rangeMap.roundTripUrl
-        : this.rangeMap.oneWayUrl;
+      const rt = cfg.reachRoundTrip === true;
+      const url = rt ? this.rangeMap.roundTripUrl : this.rangeMap.oneWayUrl;
+      const approx = rt ? this.rangeMap.roundTripApprox : this.rangeMap.oneWayApprox;
       if (url) {
         const img = document.createElement("img");
         img.className = "kiaaccess-map kiaaccess-rangemap";
@@ -967,6 +967,13 @@ Module.register("MMM-KiaAccess", {
         img.style.width = (cfg.rangeMap.width || 340) + "px";
         img.onerror = () => img.remove();
         el.appendChild(img);
+        if (approx) {
+          const c = document.createElement("div");
+          c.className = "kiaaccess-bd-label xsmall";
+          c.style.textAlign = "center";
+          c.textContent = "straight-line radius (road isochrone under 60 mi range)";
+          el.appendChild(c);
+        }
       }
     }
 
