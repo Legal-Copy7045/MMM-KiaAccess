@@ -9,10 +9,12 @@ from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from . import kia_client
+from . import sessions as charge_sessions
 from .conditions import evaluate as evaluate_conditions
 from .const import (
     CONF_BRAND,
@@ -50,6 +52,70 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._announced: dict = {}
         self._first_alert_run = True
         self._home_unplugged_since: float | None = None
+        self._sessions: list[dict] = []
+        self._open_session: dict | None = None
+        self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
+
+    async def async_load_sessions(self) -> None:
+        data = await self._sessions_store.async_load() or {}
+        self._sessions = data.get("sessions") or []
+        self._open_session = data.get("open") or None
+
+    async def _update_sessions(self) -> None:
+        v = self.vehicle
+
+        def _num(x):
+            try:
+                return None if x is None or x == "" else float(x)
+            except (TypeError, ValueError):
+                return None
+
+        opts = self.entry.options
+        res = charge_sessions.update(
+            self._open_session,
+            {
+                "t": time.time() * 1000,
+                "charging": v.get("ev_battery_is_charging"),
+                "plugged": v.get("ev_battery_is_plugged_in"),
+                "batteryPct": _num(v.get("ev_battery_percentage")),
+                "chargeKw": _num(v.get("ev_charging_power")),
+            },
+            {
+                "pricePerKwh": opts.get("price_per_kwh") or 0,
+                "capacityKwh": opts.get("capacity_kwh") or _num(v.get("ev_battery_capacity")),
+            },
+        )
+        changed = res["open"] != self._open_session
+        self._open_session = res["open"]
+        if res["closed"]:
+            self._sessions.append(res["closed"])
+            keep_after = (time.time() * 1000) - 180 * 864e5
+            self._sessions = [
+                s for s in self._sessions if s and s.get("endedAt", 0) >= keep_after
+            ][-300:]
+            changed = True
+            _LOGGER.info(
+                "Kia Access charge session logged: %s kWh%s",
+                res["closed"].get("kwh"),
+                f" / {res['closed'].get('cost')}" if res["closed"].get("cost") else "",
+            )
+        if changed:
+            await self._sessions_store.async_save(
+                {"sessions": self._sessions, "open": self._open_session}
+            )
+
+    @property
+    def charge_log(self) -> dict:
+        """Data for the last-charge sensor."""
+        recent = sorted(
+            self._sessions, key=lambda s: s.get("endedAt", 0), reverse=True
+        )
+        return {
+            "last": recent[0] if recent else None,
+            "recent": recent[:20],
+            "month": charge_sessions.summary(self._sessions, 30),
+            "last_3_months": charge_sessions.summary(self._sessions, 90),
+        }
 
     def _job(self, **extra) -> dict:
         d = self.entry.data
@@ -94,6 +160,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 data={**self.entry.data, CONF_TOKEN: new_token},
             )
         self.vehicle = (result.get("vehicles") or [{}])[0]
+        await self._update_sessions()
         self._emit_alerts()
         return self.vehicle
 

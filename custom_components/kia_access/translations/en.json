@@ -17,12 +17,17 @@
       "otp": {
         "title": "One-time code",
         "description": "Enter the one-time code Kia just sent to {dest}.",
-        "data": { "code": "Code" }
+        "data": {
+          "code": "Code"
+        }
       },
       "reauth_confirm": {
         "title": "Kia Access — sign in again",
         "description": "The token for {username} expired. Re-enter the password (and PIN); you may be asked for a new one-time code.",
-        "data": { "password": "Password", "pin": "PIN" }
+        "data": {
+          "password": "Password",
+          "pin": "PIN"
+        }
       }
     },
     "error": {
@@ -40,7 +45,9 @@
         "title": "Kia Access options",
         "data": {
           "scan_interval": "Poll interval (minutes)",
-          "force_refresh_timeout": "Live wake-up timeout (seconds, 0 = cached only)"
+          "force_refresh_timeout": "Live wake-up timeout (seconds, 0 = cached only)",
+          "price_per_kwh": "Price per kWh (your all-in marginal rate, 0 = no cost tracking)",
+          "capacity_kwh": "Usable battery capacity kWh (0 = auto)"
         }
       }
     }

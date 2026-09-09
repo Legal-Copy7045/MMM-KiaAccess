@@ -209,6 +209,14 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                             "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=180)),
+                    vol.Optional(
+                        "price_per_kwh",
+                        default=opts.get("price_per_kwh", 0.0),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+                    vol.Optional(
+                        "capacity_kwh",
+                        default=opts.get("capacity_kwh", 0.0),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0, max=300)),
                 }
             ),
         )

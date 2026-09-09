@@ -22,6 +22,7 @@ const crypto = require("crypto");
 const { flatten } = require("./core/flatten.js");
 const haDiscovery = require("./core/ha-discovery.js");
 const haSource = require("./ha_source.js");
+const sessions = require("./core/sessions.js");
 
 const CACHE_DIR = path.join(__dirname, "cache");
 
@@ -64,12 +65,17 @@ module.exports = NodeHelper.create({
 
   st(id) {
     if (this.state[id]) return this.state[id];
-    var s = { failStreak: 0, reqTimes: [], lastGood: null, history: [] };
+    var s = {
+      failStreak: 0, reqTimes: [], lastGood: null, history: [],
+      sessions: [], openSession: null
+    };
     try {
       var disk = JSON.parse(fs.readFileSync(this.cacheFile(id), "utf8"));
       if (disk && typeof disk === "object") {
         s.lastGood = disk.lastGood || null;
         s.history = Array.isArray(disk.history) ? disk.history : [];
+        s.sessions = Array.isArray(disk.sessions) ? disk.sessions : [];
+        s.openSession = disk.openSession || null;
       }
     } catch (e) {
       /* no cache yet */
@@ -84,7 +90,10 @@ module.exports = NodeHelper.create({
     try {
       fs.writeFileSync(
         this.cacheFile(id),
-        JSON.stringify({ lastGood: s.lastGood, history: s.history })
+        JSON.stringify({
+          lastGood: s.lastGood, history: s.history,
+          sessions: s.sessions, openSession: s.openSession
+        })
       );
     } catch (e) {
       Log.warn("[MMM-KiaAccess] could not write cache: " + e.message);
@@ -272,11 +281,35 @@ module.exports = NodeHelper.create({
     this.pruneHistory(s, Number(config.historyDays) || 60);
     if (s.history.length !== beforePrune) histChanged = true;
 
+    // ---- charge-session log ----
+    const cl = config.chargeLog || {};
+    const sess = sessions.update(s.openSession, {
+      t: sample.t,
+      charging: truthy(vehicle.ev_battery_is_charging),
+      plugged: truthy(vehicle.ev_battery_is_plugged_in),
+      batteryPct: numOrNull(vehicle.ev_battery_percentage),
+      chargeKw: numOrNull(vehicle.ev_charging_power)
+    }, {
+      pricePerKwh: cl.pricePerKwh,
+      capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity)
+    });
+    let sessChanged = JSON.stringify(sess.open) !== JSON.stringify(s.openSession);
+    s.openSession = sess.open;
+    if (sess.closed) {
+      s.sessions.push(sess.closed);
+      const keepAfter = Date.now() - (Number(cl.retentionDays) || 180) * 864e5;
+      s.sessions = s.sessions.filter((x) => x && x.endedAt >= keepAfter).slice(-300);
+      sessChanged = true;
+      Log.info("[MMM-KiaAccess] charge session logged: " +
+        sess.closed.kwh + " kWh" +
+        (sess.closed.cost != null ? " / " + sess.closed.cost : ""));
+    }
+
     s.failStreak = 0;
     s.lastGood = payload;
     // only touch the disk cache when something changed — avoids an SD-card
     // write every poll when nothing moved
-    if (dataChanged || histChanged) this.persist(id);
+    if (dataChanged || histChanged || sessChanged) this.persist(id);
 
     this.emitData(id, config, payload);
     this.publishMqtt(config, payload);
@@ -316,6 +349,8 @@ module.exports = NodeHelper.create({
   emitData(id, config, payload) {
     const s = this.st(id);
     payload.history = s.history.slice();
+    payload.sessions = s.sessions.slice(-60);
+    payload.openSession = s.openSession || null;
     // note: `config` (credentials / token) is deliberately NOT echoed back
     this.sendSocketNotification("KIA_DATA", { identifier: id, payload });
   },
@@ -396,6 +431,13 @@ function numOrNull(v) {
   if (v == null || v === "") return null;
   const n = Number(v);
   return isFinite(n) ? n : null;
+}
+
+// true / false / null (unknown) — matches core/state.js bool()
+function truthy(v) {
+  if (v === true || v === "true" || v === 1 || v === "1") return true;
+  if (v === false || v === "false" || v === 0 || v === "0") return false;
+  return null;
 }
 
 function lastJsonLine(text) {
