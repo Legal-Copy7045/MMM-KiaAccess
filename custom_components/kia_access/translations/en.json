@@ -43,13 +43,19 @@
     "step": {
       "init": {
         "title": "Kia Access options",
+        "description": "By default every update reads Kia's server-side cache, which is gentle on the car's 12V battery. Turn on 'Poll the car directly' only if you need up-to-the-minute data — it wakes the vehicle on every poll and can flatten the 12V battery if the car is parked for long periods.",
         "data": {
           "scan_interval": "Poll interval (minutes)",
-          "force_refresh_timeout": "Live wake-up timeout (seconds, 0 = cached only)",
+          "poll_car_directly": "Poll the car directly (wakes the vehicle — drains the 12V battery)",
+          "force_refresh_timeout": "Live wake-up wait (seconds) — only used when polling directly",
           "price_per_kwh": "Price per kWh (your all-in marginal rate, 0 = no cost tracking)",
           "capacity_kwh": "Usable battery capacity kWh (0 = auto)",
           "range_factor": "Range reach factor (haircut on the car's range estimate)",
           "range_reserve_pct": "Range reach reserve % (arrive with this much charge left)"
+        },
+        "data_description": {
+          "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
+          "force_refresh_timeout": "How long to wait for the car to answer before falling back to the cached copy for that poll."
         }
       }
     }

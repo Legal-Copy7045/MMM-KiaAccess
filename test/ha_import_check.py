@@ -67,6 +67,17 @@ assert cf.KiaAccessConfigFlow.async_get_options_flow(_fake_entry) is not None
 assert cf.KiaAccessOptionsFlow(_fake_entry)._entry is _fake_entry
 assert callable(cf._number)
 
+# "Poll the car directly" master switch: default off (server cache), and the
+# old seconds-based option is honoured for pre-toggle installs
+co = importlib.import_module(f"{pkg}.coordinator")
+_pcd = co.KiaAccessCoordinator._poll_car_directly
+_mk = lambda opts: type("C", (), {"entry": type("E", (), {"options": opts})()})()
+assert _pcd(_mk({})) is False, "default must be server-cache (no car wake-up)"
+assert _pcd(_mk({"poll_car_directly": True})) is True
+assert _pcd(_mk({"poll_car_directly": False})) is False
+assert _pcd(_mk({"force_refresh_timeout": 45})) is True, "legacy: >0 -> poll"
+assert _pcd(_mk({"force_refresh_timeout": 0})) is False
+
 init = importlib.import_module(pkg)
 assert hasattr(init, "_register_frontend")
 assert os.path.exists(

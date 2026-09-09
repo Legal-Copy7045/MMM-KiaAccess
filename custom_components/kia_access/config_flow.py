@@ -222,11 +222,20 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         default=opts.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES),
                     ): _number(5, 1440, 1),
                     vol.Optional(
+                        "poll_car_directly",
+                        # infer from the old seconds-based option the first time this
+                        # form is opened, then persist the choice explicitly
+                        default=opts.get(
+                            "poll_car_directly",
+                            float(opts.get("force_refresh_timeout", 0) or 0) > 0,
+                        ),
+                    ): bool,
+                    vol.Optional(
                         "force_refresh_timeout",
                         default=opts.get(
                             "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
                         ),
-                    ): _number(0, 180, 1),
+                    ): _number(10, 180, 1),
                     vol.Optional(
                         "price_per_kwh",
                         default=float(opts.get("price_per_kwh") or 0),
