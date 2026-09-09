@@ -61,7 +61,7 @@
    the diagram; defaults to 1 so unscaled setups are unchanged. */
 .kiaaccess-batt-detail {
   margin-top: 5px;
-  font-size: calc(16px * var(--kia-scale, 1));
+  font-size: calc(14px * var(--kia-scale, 1));
   line-height: 1.5;
   text-align: center;
 }

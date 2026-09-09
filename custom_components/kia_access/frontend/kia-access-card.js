@@ -542,7 +542,7 @@ g.KiaAccessCommands={
       '" rx="2.5" fill="#111214" stroke="' + COL.outline + '" stroke-width="1.5"/>' +
       '<rect x="' + (x + 1.6) + '" y="' + (y + 1.6) + '" width="' + (frac * (w - 3.2)) + '" height="' + (h - 3.2) +
       '" rx="1.4" fill="' + col + '" opacity="0.9"/>' +
-      '<text x="' + (x + w / 2) + '" y="' + (y + h / 2 + 3) + '" text-anchor="middle" font-size="7.5" ' +
+      '<text x="' + (x + w / 2) + '" y="' + (y + h / 2 + 3.2) + '" text-anchor="middle" font-size="8.5" ' +
       'font-weight="700" fill="' + COL.text + '" style="paint-order:stroke;stroke:#000;stroke-width:2.2px">' +
       Math.round(pct) + "%</text>" +
       "</g>"
@@ -637,28 +637,28 @@ g.KiaAccessCommands={
           '<animate attributeName="opacity" values="0.75;0" dur="1.5s" repeatCount="indefinite"/></circle>'
         : "";
 
-    // live charge readout — only while actually charging: kW drawn + current (A).
-    // Sits under the wall box (centre x214; nudged 3px left so a 3-digit DC "kW"
-    // stays inside the right viewBox edge at x 232), clear of the car body.
+    // live charge readout — only while actually charging: kW drawn + current (A),
+    // centred under the wall box (its centre is x214). No space before the unit,
+    // and a 3-digit "kW" drops a point of font size, so the widest value still
+    // clears the right viewBox edge (x 232) while staying centred.
     var chargeInfo = "";
     if (s.charging === true) {
-      // no space before the unit — keeps the bigger text inside the viewBox
-      // edge at the centred position under the wall box
       var kwNum = Number(s.chargeKw);
+      var kwBig = kwNum >= 100;
       var kw = isFinite(kwNum) && kwNum > 0
-        ? (kwNum >= 100 ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + "kW"
+        ? (kwBig ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + "kW"
         : null;
       var aNum = Number(s.chargeAmps);
       var amps = isFinite(aNum) && aNum > 0 ? Math.round(aNum) + "A" : null;
       var rows = [];
-      if (kw) rows.push([kw, COL.ok]);
-      if (amps) rows.push([amps, COL.text]);
+      if (kw) rows.push([kw, COL.ok, kwBig ? 10 : 11]);
+      if (amps) rows.push([amps, COL.text, 11]);
       if (rows.length) {
         chargeInfo =
-          '<g transform="translate(211 289)" text-anchor="middle" ' +
+          '<g transform="translate(214 289)" text-anchor="middle" ' +
           'style="paint-order:stroke;stroke:#000;stroke-width:3px">' +
           rows.map(function (r, i) {
-            return '<text x="0" y="' + (i * 12.5) + '" font-size="11" ' +
+            return '<text x="0" y="' + (i * 12.5) + '" font-size="' + r[2] + '" ' +
               'font-weight="700" fill="' + r[1] + '">' + esc(r[0]) + "</text>";
           }).join("") +
           "</g>";

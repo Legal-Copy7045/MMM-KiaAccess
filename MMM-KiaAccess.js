@@ -647,9 +647,13 @@ Module.register("MMM-KiaAccess", {
     const cap = document.createElement("div");
     cap.className = "kiaaccess-batt-detail";
     let msg = s.charging === true ? "Charging" : "Plugged in, not charging";
-    if (s.charging === true && isFinite(mins) && mins > 0) {
+    if (s.charging === true && isFinite(mins) && mins >= 1) {
+      const t = Math.round(mins);
+      const h = Math.floor(t / 60);
+      const hm = h ? (t % 60 ? h + "h " + (t % 60) + "m" : h + "h") : t % 60 + "m";
       const done = new Date(Date.now() + mins * 60000);
-      msg = "Full" + (target ? " (" + target + "%)" : "") + " at " +
+      const to = target && target < 100 ? target + "%" : "full";
+      msg = hm + " → " + to + " at " +
         done.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
     cap.innerHTML = '<div><span class="kiaaccess-bd-value">' + this.escape(msg) + "</span></div>";
