@@ -623,6 +623,9 @@ promote it to a persistent critical.
 | `windowOpen` / `sunroofOpen` | info | *(info = no `alert` popup)* |
 | `chargeComplete` | info | charging finished at target (one-shot) |
 | `chargeInterrupted` | warning | charging stopped early (one-shot) |
+| `chargingStarted` | info | charging just began — a "it plugged in OK" nudge (one-shot) |
+| `serviceDue` | warning | `next_service_distance` ≤ `belowKm` (800 ≈ 500 mi) |
+| `notPluggedInHome` | warning | car is home + unplugged for `graceMin` (20). Needs a home point — MM: `visuals.location.homeLat/homeLon`; HA: `zone.home`. Optional `afterHour` / `beforeHour` to only nag in an evening window |
 | `otpExpiring` | warning | OTP within `otpWarnDays` of expiry (mode A) |
 
 `info`-level checks broadcast the `KIA_ACCESS_STATE_CHANGED` notification but
@@ -643,8 +646,8 @@ this.sendNotification("KIA_ACCESS_STATE_CHANGED", {
 });
 ```
 
-`chargeComplete` / `chargeInterrupted` are one-shot (only `active: true` fires).
-Everything else fires on both edges.
+`chargeComplete` / `chargeInterrupted` / `chargingStarted` are one-shot (only
+`active: true` fires). Everything else fires on both edges (entered / cleared).
 
 ## MQTT (state publishing)
 

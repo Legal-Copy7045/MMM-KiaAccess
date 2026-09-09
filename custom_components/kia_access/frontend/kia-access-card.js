@@ -217,8 +217,13 @@ g.KiaAccessCommands={
       car12vPct: num("car_battery_percentage"),
       chargeLimitPct: chargeLimitPct,
       capacityKwh: num("ev_battery_capacity"),
+      serviceKm: num("next_service_distance"), // distance to the next service
+      odometerKm: num("odometer"),
+      locationLat: num("location_latitude"),
+      locationLon: num("location_longitude"),
       faults: faults, // [] = no fault lamps; names of any that are on
       history: opts.history || [],
+      units: opts.units || "imperial", // "imperial" | "metric" — for messages
       tokenAgeDays: tokenAgeDays,
       otpLifetimeDays: opts.otpLifetimeDays,
       otpWarnDays: opts.otpWarnDays
@@ -1025,7 +1030,14 @@ g.KiaAccessCommands={
     sunroofOpen: { enabled: true, level: "info" },
     tyrePressure: { enabled: true, level: "critical" },
     chargeComplete: { enabled: true, level: "info", targetPct: null },
-    chargeInterrupted: { enabled: true, level: "warning", targetPct: null, minGapPct: 3 }
+    chargeInterrupted: { enabled: true, level: "warning", targetPct: null, minGapPct: 3 },
+    chargingStarted: { enabled: true, level: "info" },
+    serviceDue: { enabled: true, level: "warning", belowKm: 800 }, // ~500 mi
+    // needs s.atHome from the caller (MM: visuals.location.homeLat/Lon;
+    // HA: zone.home). afterHour/beforeHour null = any time.
+    notPluggedInHome: {
+      enabled: true, level: "warning", graceMin: 20, afterHour: null, beforeHour: null
+    }
   };
 
   var DEFAULTS = {
@@ -1229,6 +1241,54 @@ g.KiaAccessCommands={
       emit("charge_interrupted", cI.level, interrupted ? true : false,
         "Charging stopped early" + (soc != null ? " — " + Math.round(soc) + "%" : ""),
         { pct: soc, target: targetI }, true);
+    }
+
+    // ---- charging started (one-shot: reassurance it plugged in OK) ----
+    var cCS = checkCfg(cfg, "chargingStarted");
+    if (cCS.enabled) {
+      var startedNow = prev._charging !== true && s.charging === true;
+      var kw = num(s.chargeKw);
+      emit("charging_started", cCS.level, startedNow ? true : false,
+        "Charging started" + (kw ? " — " + (Math.round(kw * 10) / 10) + " kW" : ""),
+        { kw: kw, pct: soc }, true);
+    }
+
+    // ---- next service due ----
+    var cSV = checkCfg(cfg, "serviceDue");
+    if (cSV.enabled) {
+      var svKm = num(s.serviceKm);
+      var belowKm = num(cSV.belowKm) != null ? num(cSV.belowKm) : 800;
+      var dueActive = svKm == null ? null : svKm <= belowKm;
+      var dist = svKm == null
+        ? null
+        : s.units === "metric"
+        ? Math.round(svKm) + " km"
+        : Math.round(svKm * 0.621371) + " mi";
+      emit("service_due", cSV.level, dueActive,
+        dueActive !== true ? "Service not due"
+          : svKm <= 0 ? "Service overdue"
+          : "Service due — " + dist + " to go",
+        { km: svKm, remaining: dist });
+    }
+
+    // ---- home but not plugged in ----
+    // needs s.atHome (bool) + s.homeUnpluggedMin (minutes home+unplugged) from
+    // the caller; inert when s.atHome isn't provided.
+    var cHP = checkCfg(cfg, "notPluggedInHome");
+    if (cHP.enabled && !driving) {
+      var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
+      var homeMin = num(s.homeUnpluggedMin);
+      var hr = new Date().getHours();
+      var inWindow =
+        (cHP.afterHour == null || hr >= num(cHP.afterHour)) &&
+        (cHP.beforeHour == null || hr < num(cHP.beforeHour));
+      var hpActive;
+      if (s.plugged === true || s.atHome !== true) hpActive = false;
+      else if (homeMin != null && homeMin >= grace && inWindow) hpActive = true;
+      else hpActive = prev.not_plugged_home === true; // home+unplugged, pre-grace: hold
+      emit("not_plugged_home", cHP.level, hpActive,
+        "Home and not plugged in",
+        { minutesHome: homeMin });
     }
 
     return { conditions: out, meta: { charging: triState(s.charging) } };

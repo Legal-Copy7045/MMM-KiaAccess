@@ -120,8 +120,9 @@ Module.register("MMM-KiaAccess", {
       tripStats: false, // distance / consumption / regen from month_trip_info
       location: {
         enabled: false,
-        homeLat: null, // set both to show "N mi from home"
-        homeLon: null,
+        homeLat: null, // set both to show "N mi from home" AND drive the
+        homeLon: null, //   notPluggedInHome alert (no `enabled` needed for that)
+        homeRadiusKm: 0.2, // within this of home = "at home"
         map: false, // show a static map image
         mapZoom: 14,
         mapWidth: 210,
@@ -170,6 +171,9 @@ Module.register("MMM-KiaAccess", {
         // otpExpiring:    { warnDays: 7 },
         // windowOpen: false,
         // chargeInterrupted: { minGapPct: 3 },
+        // chargingStarted: false,       // "Charging started — 7.4 kW" (info)
+        // serviceDue:      { belowKm: 800 },   // ~500 mi to the next service
+        // notPluggedInHome:{ graceMin: 20, afterHour: 16 }, // needs visuals.location.homeLat/Lon
       }
     },
 
@@ -480,6 +484,7 @@ Module.register("MMM-KiaAccess", {
     }
     this._stateCache = this.stateBuilder.buildState(this.flatMap || {}, {
       history: this.history || [],
+      units: this.config.units,
       otpLifetimeDays: this.config.otpLifetimeDays,
       otpWarnDays: this.config.otpWarnDays
     });
@@ -487,12 +492,34 @@ Module.register("MMM-KiaAccess", {
     return this._stateCache;
   },
 
+  // is the car within homeRadiusKm of the configured home point?
+  atHome(st) {
+    const loc = (this.config.visuals && this.config.visuals.location) || {};
+    if (loc.homeLat == null || loc.homeLon == null ||
+        st.locationLat == null || st.locationLon == null) {
+      return undefined; // no home configured / no fix — check stays inert
+    }
+    const km = this.haversineKm(
+      st.locationLat, st.locationLon, Number(loc.homeLat), Number(loc.homeLon)
+    );
+    return km <= (Number(loc.homeRadiusKm) || 0.2);
+  },
+
   // edge-triggered vehicle-state notifications
   processConditions() {
     if (!this.conditions || !this.flatMap) return;
     const cfg = this.config.notifications || {};
 
-    const res = this.conditions.evaluate(this.visualState(), cfg, this.prevCond);
+    // clone the (memoised) state so the home context doesn't pollute the cache
+    const st = Object.assign({}, this.visualState());
+    st.atHome = this.atHome(st);
+    const homeUnplugged = st.atHome === true && st.plugged !== true;
+    if (homeUnplugged && !this._homeUnpluggedSince) this._homeUnpluggedSince = Date.now();
+    if (!homeUnplugged) this._homeUnpluggedSince = null;
+    st.homeUnpluggedMin = this._homeUnpluggedSince
+      ? (Date.now() - this._homeUnpluggedSince) / 60000 : null;
+
+    const res = this.conditions.evaluate(st, cfg, this.prevCond);
 
     // any active critical condition -> the diagram shows a warning triangle
     // (independent of whether the `alert` notifications are enabled)

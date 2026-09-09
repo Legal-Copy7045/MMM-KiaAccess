@@ -140,8 +140,13 @@
       car12vPct: num("car_battery_percentage"),
       chargeLimitPct: chargeLimitPct,
       capacityKwh: num("ev_battery_capacity"),
+      serviceKm: num("next_service_distance"), // distance to the next service
+      odometerKm: num("odometer"),
+      locationLat: num("location_latitude"),
+      locationLon: num("location_longitude"),
       faults: faults, // [] = no fault lamps; names of any that are on
       history: opts.history || [],
+      units: opts.units || "imperial", // "imperial" | "metric" — for messages
       tokenAgeDays: tokenAgeDays,
       otpLifetimeDays: opts.otpLifetimeDays,
       otpWarnDays: opts.otpWarnDays
