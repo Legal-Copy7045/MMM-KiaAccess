@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import MATCH_ALL, EntityCategory
+from homeassistant.const import MATCH_ALL, EntityCategory, UnitOfLength
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -45,6 +45,7 @@ async def async_setup_entry(
     entities.append(KiaAccessLastChargeSensor(coordinator))
     entities.append(KiaAccessChargeSessionSensor(coordinator))
     entities.append(KiaAccessActionSensor(coordinator))
+    entities.append(KiaAccessRangeReachSensor(coordinator))
     entities += [
         KiaAccessSeatSensor(coordinator, key, name) for key, name in _SEATS.items()
     ]
@@ -124,6 +125,59 @@ class KiaAccessActionSensor(KiaAccessEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return dict(self.coordinator.last_action or {})
+
+
+class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
+    """How far the car can actually drive now (range, derated) + which zones
+    are in reach. State = one-way distance; `pois` attribute has the details.
+    """
+
+    _attr_icon = "mdi:map-marker-radius"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "range_reach")
+        self._attr_name = "Range reach"
+
+    def _reach(self) -> dict | None:
+        return self.coordinator.range_reach
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._reach() is not None
+
+    @property
+    def native_value(self):
+        r = self._reach()
+        return round(r["oneWayKm"], 1) if r and r.get("oneWayKm") is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        r = self._reach() or {}
+        return {
+            "one_way_km": r.get("oneWayKm"),
+            "round_trip_km": r.get("roundTripKm"),
+            "reserve_pct": self.coordinator.entry.options.get("range_reserve_pct", 10),
+            "factor": self.coordinator.entry.options.get("range_factor", 0.92),
+            "in_reach": [p["name"] for p in r.get("pois", []) if p["reachable"]],
+            "pois": [
+                {
+                    "name": p["name"],
+                    "km": round(p["km"], 1),
+                    "reachable": p["reachable"],
+                    "one_way_reachable": r.get("oneWayKm") is not None
+                    and p["km"] <= r["oneWayKm"],
+                    "round_trip_reachable": r.get("roundTripKm") is not None
+                    and p["km"] <= r["roundTripKm"],
+                    "margin_km": round(p["marginKm"], 1)
+                    if p["marginKm"] is not None
+                    else None,
+                }
+                for p in r.get("pois", [])
+            ],
+        }
 
 
 class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):

@@ -23,10 +23,10 @@ assert manifest["config_flow"] is True
 assert manifest["version"], "manifest needs a version"
 assert any(r.startswith("hyundai_kia_connect_api") for r in manifest["requirements"])
 
-for mod in ("const", "conditions", "vehicle_state", "coordinator", "config_flow",
-            "entity", "sensor", "binary_sensor", "button", "device_tracker",
-            "lock", "climate", "number", "switch", "select", "diagnostics",
-            "__init__"):
+for mod in ("const", "conditions", "vehicle_state", "range", "coordinator",
+            "config_flow", "entity", "sensor", "binary_sensor", "button",
+            "device_tracker", "lock", "climate", "number", "switch", "select",
+            "diagnostics", "__init__"):
     importlib.import_module(f"{pkg}.{mod}" if mod != "__init__" else pkg)
     print("imported", mod)
 
@@ -50,6 +50,11 @@ assert "front_left_seat" in _sc["options"] and "rear_right_seat" in _sc["options
 # diagnostics entry point
 diag = importlib.import_module(f"{pkg}.diagnostics")
 assert hasattr(diag, "async_get_config_entry_diagnostics")
+
+# range engine parity surface
+rng = importlib.import_module(f"{pkg}.range")
+assert rng.reach(300, {"reservePct": 10, "factor": 0.92}) is not None
+assert rng.summary(40.7, -79.7, 300, [{"name": "H", "lat": 40.7, "lon": -79.7}])["pois"][0]["reachable"]
 
 cf = importlib.import_module(f"{pkg}.config_flow")
 assert hasattr(cf, "KiaAccessConfigFlow")

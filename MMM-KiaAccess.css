@@ -101,6 +101,18 @@
   gap: 4px;
 }
 
+.kiaaccess-reach {
+  margin-top: 7px;
+}
+.kiaaccess-reach-poi.ok .kiaaccess-bd-label {
+  opacity: 1;
+  color: #6dbb6d;
+}
+.kiaaccess-reach-poi.no .kiaaccess-bd-label {
+  opacity: 1;
+  color: #e79a9a;
+}
+
 .kiaaccess-map {
   border-radius: 6px;
   margin-top: 4px;

@@ -235,6 +235,14 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         "capacity_kwh",
                         default=float(opts.get("capacity_kwh") or 0),
                     ): _number(0, 300, 0.1),
+                    vol.Optional(
+                        "range_factor",
+                        default=float(opts.get("range_factor") or 0.92),
+                    ): _number(0.5, 1, 0.01),
+                    vol.Optional(
+                        "range_reserve_pct",
+                        default=float(opts.get("range_reserve_pct") or 10),
+                    ): _number(0, 50, 1),
                 }
             ),
         )

@@ -15,6 +15,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from . import kia_client
+from . import range as drive_range
 from . import sessions as charge_sessions
 from .conditions import evaluate as evaluate_conditions
 from .const import (
@@ -155,6 +156,50 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             await self._sessions_store.async_save(
                 {"sessions": self._sessions, "open": self._open_session}
             )
+
+    def _zone_pois(self) -> list[dict]:
+        """Every zone.* as {name, lat, lon} for the range-reach readout."""
+        out = []
+        for st in self.hass.states.async_all("zone"):
+            lat = st.attributes.get("latitude")
+            lon = st.attributes.get("longitude")
+            if lat is None or lon is None:
+                continue
+            out.append(
+                {
+                    "name": st.attributes.get("friendly_name")
+                    or st.entity_id.split(".", 1)[-1].replace("_", " ").title(),
+                    "lat": lat,
+                    "lon": lon,
+                }
+            )
+        return out
+
+    @property
+    def range_reach(self) -> dict | None:
+        """How far the car can drive now + which zones are in reach."""
+
+        def _n(x):
+            try:
+                return None if x in (None, "") else float(x)
+            except (TypeError, ValueError):
+                return None
+
+        lat = _n(self.vehicle.get("location_latitude"))
+        lon = _n(self.vehicle.get("location_longitude"))
+        rng = _n(self.vehicle.get("ev_driving_range")) or _n(
+            self.vehicle.get("total_driving_range")
+        )
+        if lat is None or lon is None or not rng:
+            return None
+        opts = self.entry.options
+        o = {
+            "factor": opts.get("range_factor") or drive_range.DEFAULTS["factor"],
+            "reservePct": opts.get("range_reserve_pct")
+            if opts.get("range_reserve_pct") is not None
+            else drive_range.DEFAULTS["reservePct"],
+        }
+        return drive_range.summary(lat, lon, rng, self._zone_pois(), o)
 
     @property
     def charge_log(self) -> dict:
