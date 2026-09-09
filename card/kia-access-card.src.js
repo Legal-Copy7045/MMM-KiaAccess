@@ -393,9 +393,19 @@
           });
           return best || RNG.circleRing(inp.lat, inp.lon, km);
         }
-        var markers = [{ lat: inp.lat, lon: inp.lon, color: "#4ea1ff" }].concat(
-          zonePois(hass).slice(0, 6).map(function (p) {
-            return { lat: p.lat, lon: p.lon, color: "#e53935", text: p.name };
+        // only pin zones that are roughly reachable — a zone on another
+        // continent shouldn't drag the map out
+        var far = Math.max(inp.oneWay, inp.round || 0) * 1.6;
+        var near = zonePois(hass)
+          .map(function (p) {
+            return { p: p, km: RNG.haversineKm(inp.lat, inp.lon, p.lat, p.lon) };
+          })
+          .filter(function (z) { return z.km <= far; })
+          .sort(function (a, b) { return a.km - b.km; })
+          .slice(0, 6);
+        var markers = [{ lat: inp.lat, lon: inp.lon, color: "#4ea1ff", always: true }].concat(
+          near.map(function (z) {
+            return { lat: z.p.lat, lon: z.p.lon, color: "#e53935", text: z.p.name };
           })
         );
         function smap(ring) {
@@ -432,7 +442,8 @@
       var rm = this._rm;
       var url = rm && (mode === "round" ? rm.roundUrl : rm.oneWayUrl);
       var approx = rm && (mode === "round" ? rm.roundApprox : rm.oneWayApprox);
-      var poi = RNG.poiStatus(inp.lat, inp.lon, zonePois(hass), dist);
+      var poi = RNG.poiStatus(inp.lat, inp.lon, zonePois(hass), dist)
+        .filter(function (p) { return p.km <= dist * 2.5; });
       var caps = poi.slice(0, 3).map(function (p) {
         return "<b class='" + (p.reachable ? "ok" : "no") + "'>" +
           (p.reachable ? "✓ " : "✗ ") + esc(p.name) + "</b> " + kmToDisp(p.km, metric);
