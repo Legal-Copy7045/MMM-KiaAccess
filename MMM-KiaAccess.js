@@ -184,12 +184,14 @@ Module.register("MMM-KiaAccess", {
       alertModule: true, // also emit SHOW_ALERT for the built-in `alert` module (warning + critical)
       alertSeconds: 15, // warning-level SHOW_ALERT auto-dismiss timer (seconds)
       criticalAlertSeconds: 0, // critical-level alerts: 0 = stay on screen until the condition clears
-      // How a still-active critical condition is kept visible:
-      //   persistentBanner: a slim bar at the top of THIS module (non-blocking) — default
-      //   criticalPopup:    also throw the centre-screen `alert` modal that dims the
-      //                     whole mirror until the condition clears (off by default —
-      //                     it's the big blocking box). When off, a critical still
-      //                     gets one brief corner growl as it fires.
+      // How active issues are kept visible:
+      //   persistentBanner: the status bar under the header listing every active
+      //                     issue (amber = warning, red = do-not-drive) — default.
+      //                     Non-blocking; stays until each condition clears.
+      //   criticalPopup:    also throw the centre-screen `alert` modal that dims
+      //                     the whole mirror until a critical clears (off by
+      //                     default — it's the big blocking box). Either way a
+      //                     new issue still gets one brief corner growl as it fires.
       persistentBanner: true,
       criticalPopup: false,
       notifyOnStartup: "critical", // false | "critical" | true — which levels fire on the first data after (re)start
@@ -1208,16 +1210,30 @@ Module.register("MMM-KiaAccess", {
       wrapper.appendChild(n);
     }
 
-    // persistent, non-blocking banner for any still-active critical condition
-    // (e.g. "Home and not plugged in"). Stays until the condition clears.
+    // persistent, non-blocking status bar under the header — lists every
+    // currently-active issue and stays until each one clears. Amber font for
+    // warnings ("door open", "not plugged in"), red for the do-not-drive set
+    // ("flat tyre", "12V critical", faults). Transparent background.
     const ncfg = this.config.notifications || {};
-    const crit = (this.diagramAlerts || []).filter((a) => a.level === "critical");
-    if (ncfg.persistentBanner !== false && crit.length) {
+    const issues = this.diagramAlerts || [];
+    if (ncfg.persistentBanner !== false && issues.length) {
+      const anyCrit = issues.some((a) => a.level === "critical");
       const bar = document.createElement("div");
-      bar.className = "kiaaccess-alertbanner";
+      bar.className =
+        "kiaaccess-alertbanner " + (anyCrit ? "is-critical" : "is-warning");
+      const parts = issues.map(
+        (a) =>
+          '<span class="' +
+          (a.level === "critical" ? "kiaaccess-alert-crit" : "kiaaccess-alert-warn") +
+          '">' +
+          this.escape(a.label) +
+          "</span>"
+      );
       bar.innerHTML =
-        '<i class="fa-solid fa-triangle-exclamation"></i> ' +
-        crit.map((a) => this.escape(a.label)).join(" · ");
+        '<i class="fa-solid fa-triangle-exclamation"></i>' +
+        '<span class="kiaaccess-alert-list">' +
+        parts.join('<span class="kiaaccess-alert-sep"> &middot; </span>') +
+        "</span>";
       wrapper.appendChild(bar);
     }
 

@@ -44,12 +44,14 @@
     battery12vDrain: { enabled: true, level: "warning", dropPct: 8, overHours: 12 },
     vehicleFault: { enabled: true, level: "critical" },
     otpExpiring: { enabled: true, level: "warning" }, // lifetimeDays / warnDays fall back to config
+    // "amber" issues — worth knowing, safe to drive: locking, open panels, charging
     unlocked: { enabled: true, level: "warning" },
     doorOpen: { enabled: true, level: "warning" },
-    windowOpen: { enabled: true, level: "info" },
+    windowOpen: { enabled: true, level: "warning" },
     hoodOpen: { enabled: true, level: "warning" },
     liftgateOpen: { enabled: true, level: "warning" },
-    sunroofOpen: { enabled: true, level: "info" },
+    sunroofOpen: { enabled: true, level: "warning" },
+    // "red" issues — the do-not-drive set
     tyrePressure: { enabled: true, level: "critical" },
     chargeComplete: { enabled: true, level: "info", targetPct: null },
     chargeInterrupted: { enabled: true, level: "warning", targetPct: null, minGapPct: 3 },
