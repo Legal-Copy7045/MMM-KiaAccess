@@ -675,8 +675,45 @@ location: {
 Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 (state = one-way distance; `pois` attribute lists every `zone.*` with
 `one_way_reachable` / `round_trip_reachable`). `Range reach factor` and
-`… reserve %` are in the **Configure** dialog. *(A map overlay with the actual
-road-network isochrone is coming next.)*
+`… reserve %` are in the **Configure** dialog.
+
+**Reachable-area map.** With a free [Geoapify](https://www.geoapify.com/) API key
+you get an image of the actual **road-network isochrone** — where you could
+drive, following roads — shaded on a map with your saved places pinned:
+
+```js
+location: {
+  enabled: true,
+  homeLat: 40.71374, homeLon: -79.75464,
+  reach: true, pois: [{ name: "Work", lat: 40.4406, lon: -79.9959 }],
+  rangeMap: {
+    enabled: true,
+    apiKey: "YOUR_GEOAPIFY_KEY",
+    style: "osm-bright-grey",   // any Geoapify map style
+    width: 340, height: 220,
+    mode: "drive"               // drive | bicycle | walk
+  }
+}
+```
+
+`node_helper` fetches the isoline (cached ~6 h; a parked car makes no calls) and
+builds the image; the module shows the one-way or round-trip shape per
+`reachRoundTrip`. Past ~500 km it falls back to a plain circle.
+
+On **Home Assistant** the `custom:kia-access-card` does it client-side — add
+`range_map` to the card:
+
+```yaml
+type: custom:kia-access-card
+range_map:
+  api_key: YOUR_GEOAPIFY_KEY
+  style: osm-bright-grey
+  height: 300
+  mode: drive
+```
+
+The card has a **How far / & back** toggle; POI pins come from your `zone.*`.
+Cached in the browser; ~2 Geoapify calls per real move.
 
 Row icons come from a built-in map (battery → battery, range → road, lock → lock,
 charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:

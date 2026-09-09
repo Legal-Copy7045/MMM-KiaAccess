@@ -41,6 +41,10 @@ flowchart TB
         hasrc --> mmc
     end
 
+    geo(["Geoapify — optional<br/>range-map isochrone"])
+    card -.->|"reachable area"| geo
+    nh -.->|"reachable area"| geo
+
     kc <--> coord
     kc <--> bridge
     status -.->|"HA local API · long-lived token<br/>(no extra Kia polling)"| hasrc

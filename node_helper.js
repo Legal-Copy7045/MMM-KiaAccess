@@ -23,6 +23,8 @@ const { flatten } = require("./core/flatten.js");
 const haDiscovery = require("./core/ha-discovery.js");
 const haSource = require("./ha_source.js");
 const sessions = require("./core/sessions.js");
+const drange = require("./core/range.js");
+const isoline = require("./core/isoline.js");
 const webhook = require("./webhook.js");
 
 const CACHE_DIR = path.join(__dirname, "cache");
@@ -101,7 +103,7 @@ module.exports = NodeHelper.create({
     if (this.state[id]) return this.state[id];
     var s = {
       failStreak: 0, reqTimes: [], lastGood: null, history: [],
-      sessions: [], openSession: null
+      sessions: [], openSession: null, rangeMap: null
     };
     try {
       var disk = JSON.parse(fs.readFileSync(this.cacheFile(id), "utf8"));
@@ -110,6 +112,7 @@ module.exports = NodeHelper.create({
         s.history = Array.isArray(disk.history) ? disk.history : [];
         s.sessions = Array.isArray(disk.sessions) ? disk.sessions : [];
         s.openSession = disk.openSession || null;
+        s.rangeMap = disk.rangeMap || null;
       }
     } catch (e) {
       /* no cache yet */
@@ -126,7 +129,8 @@ module.exports = NodeHelper.create({
         this.cacheFile(id),
         JSON.stringify({
           lastGood: s.lastGood, history: s.history,
-          sessions: s.sessions, openSession: s.openSession
+          sessions: s.sessions, openSession: s.openSession,
+          rangeMap: s.rangeMap
         })
       );
     } catch (e) {
@@ -347,6 +351,82 @@ module.exports = NodeHelper.create({
 
     this.emitData(id, config, payload);
     this.publishMqtt(config, payload);
+    this.maybeRangeMap(id, config, payload);
+  },
+
+  // ---- optional road-network reachable-area image (Geoapify) ----
+  // Fetches the isoline in the background, caches the built static-map URLs in
+  // the disk cache, and pushes them to the frontend when ready.
+  async maybeRangeMap(id, config, payload) {
+    const rm = config && config.rangeMap;
+    if (!rm || !rm.apiKey || typeof fetch !== "function") return;
+    const s = this.st(id);
+    const v = payload.vehicle || {};
+    const lat = numOrNull(v.location_latitude);
+    const lon = numOrNull(v.location_longitude);
+    const rangeKm = numOrNull(v.ev_driving_range) || numOrNull(v.total_driving_range);
+    if (lat == null || lon == null || !rangeKm) return;
+
+    const ropts = { factor: rm.factor, reservePct: rm.reservePct };
+    const oneWay = drange.reach(rangeKm, Object.assign({}, ropts, { roundTrip: false }));
+    const round = drange.reach(rangeKm, Object.assign({}, ropts, { roundTrip: true }));
+    if (!oneWay) return;
+
+    const key = isoline.cacheKey(lat, lon, [oneWay, round]);
+    if (s.rangeMap && s.rangeMap.key === key &&
+        Date.now() - (s.rangeMap.at || 0) < 6 * 3600e3) return;
+    if (this._rmInFlight === key) return;
+    this._rmInFlight = key;
+
+    try {
+      const need = [oneWay, round].filter((k) => k && !isoline.pastMax(k));
+      let parsed = [];
+      if (need.length) {
+        const ctl = new AbortController();
+        const to = setTimeout(() => ctl.abort(), 15000);
+        const res = await fetch(
+          isoline.isoUrl({ apiKey: rm.apiKey, lat, lon, rangesKm: need, mode: rm.mode }),
+          { signal: ctl.signal }
+        );
+        clearTimeout(to);
+        if (!res.ok) throw new Error("isoline HTTP " + res.status);
+        parsed = isoline.parseIso(await res.json());
+      }
+      const pick = (km) => {
+        if (!km) return null;
+        if (isoline.pastMax(km)) return drange.circleRing(lat, lon, km);
+        let best = null, bd = Infinity;
+        parsed.forEach((p) => {
+          const d = Math.abs((p.rangeKm || 0) - km);
+          if (d < bd) { bd = d; best = p.ring; }
+        });
+        return best || drange.circleRing(lat, lon, km);
+      };
+
+      const markers = [{ lat, lon, color: "#4ea1ff" }].concat(
+        (rm.pois || []).slice(0, 6).map((p) => ({
+          lat: Number(p.lat), lon: Number(p.lon), color: "#e53935", text: p.name
+        }))
+      );
+      const smap = (ring) => ring && isoline.staticMapUrl({
+        apiKey: rm.apiKey, width: rm.width, height: rm.height, style: rm.style,
+        simplifyDeg: rm.simplifyDeg,
+        rings: [{ ring: ring, color: "#4caf50" }], markers: markers
+      });
+
+      s.rangeMap = {
+        key: key, at: Date.now(),
+        oneWayKm: Math.round(oneWay), roundTripKm: round ? Math.round(round) : null,
+        oneWayUrl: smap(pick(oneWay)),
+        roundTripUrl: smap(pick(round))
+      };
+      this.persist(id);
+      this.sendSocketNotification("KIA_RANGE_MAP", { identifier: id, rangeMap: s.rangeMap });
+    } catch (e) {
+      Log.warn("[MMM-KiaAccess] range map: " + e.message);
+    } finally {
+      this._rmInFlight = null;
+    }
   },
 
   fail(id, config, message) {
@@ -385,6 +465,7 @@ module.exports = NodeHelper.create({
     payload.history = s.history.slice();
     payload.sessions = s.sessions.slice(-60);
     payload.openSession = s.openSession || null;
+    payload.rangeMap = s.rangeMap || null;
     // note: `config` (credentials / token) is deliberately NOT echoed back
     this.sendSocketNotification("KIA_DATA", { identifier: id, payload });
   },
