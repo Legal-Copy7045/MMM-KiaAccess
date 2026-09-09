@@ -539,46 +539,42 @@ g.KiaAccessCommands={
     return out;
   }
 
-  // how many text rows the warning badge draws (reasons capped at 3, + "+N more")
+  // reasons shown under the badge (capped at 3, + a "+N more" line)
   function alertRows(alerts) {
     if (!alerts || !alerts.length) return 0;
     return Math.min(alerts.length, 3) + (alerts.length > 3 ? 1 : 0);
   }
-  // extra viewBox height the badge needs below the car body
+  // extra viewBox width the badge needs on the right for the centred reason text
   function alertExtra(alerts) {
-    var rows = alertRows(alerts);
-    return rows ? 30 + rows * 19 + 6 : 0;
+    return alertRows(alerts) ? 34 : 0;
   }
 
-  // warning badge — centred below the car: a triangle (red if anything is
-  // critical, else amber) with the reason(s) it is on listed under it, sized to
-  // match the outside-temp reading. `bodyBottom` is the y the car ends at.
-  function alertBadge(alerts, bodyBottom) {
+  // warning badge — the triangle back in the front-right margin (translate
+  // 192 70, as it always was), red if anything is critical else amber, with the
+  // reason(s) it is on **centred directly under it** and sized to match the
+  // outside-temp reading. The viewBox widens on the right so the text fits.
+  function alertBadge(alerts) {
     var hasCrit = alerts.some(function (a) { return a.level === "critical"; });
     var triCol = hasCrit ? COL.bad : COL.warn;
     var shown = alerts.slice(0, 3);
-    var cx = 100;
-    var triY = bodyBottom + 6;
-    var textY = triY + 34;
+    var TCX = 22;      // triangle centre, local to the translate(192 70) group
     var lines = shown.map(function (a, i) {
-      return '<text x="' + cx + '" y="' + (textY + i * 19) + '" font-size="16" font-weight="700" fill="' +
+      return '<text x="' + TCX + '" y="' + (52 + i * 18) + '" font-size="16" font-weight="700" fill="' +
         (a.level === "critical" ? COL.bad : COL.warn) + '">' + esc(a.label) + "</text>";
     });
     if (alerts.length > shown.length) {
-      lines.push('<text x="' + cx + '" y="' + (textY + shown.length * 19) +
+      lines.push('<text x="' + TCX + '" y="' + (52 + shown.length * 18) +
         '" font-size="15" fill="' + COL.dim + '">+' + (alerts.length - shown.length) + " more</text>");
     }
     return (
-      '<g class="kiaaccess-critical" text-anchor="middle" ' +
+      '<g transform="translate(192 70)" class="kiaaccess-critical" text-anchor="middle" ' +
       'style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' +
-      '<g transform="translate(' + (cx - 13) + ' ' + triY + ')">' +
-      '<path d="M 13 0 Q 14 -2.5 15 0 L 26 20 Q 27.5 23 24 23 L 2 23 Q -1.5 23 0 20 Z" ' +
-      'fill="' + triCol + '" stroke="#000" stroke-width="1.2" stroke-linejoin="round" opacity="0.95">' +
+      '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
+      'fill="' + triCol + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
       pulse("opacity", "0.5", "1", 1.05) +
       "</path>" +
-      '<rect x="11.7" y="6.5" width="2.6" height="9" rx="1.3" fill="#fff"/>' +
-      '<circle cx="13" cy="19" r="1.7" fill="#fff"/>' +
-      "</g>" +
+      '<rect x="20.5" y="11" width="3" height="12" rx="1.5" fill="#fff"/>' +
+      '<circle cx="22" cy="29" r="2" fill="#fff"/>' +
       lines.join("") +
       "</g>"
     );
@@ -668,9 +664,10 @@ g.KiaAccessCommands={
    *   airTempC (climate set-point °C), outsideTempC (°C);
    *   tyreFL/FR/RL/RR, tyreAny;
    *   alerts (array of {level:"warning"|"critical", label}) -> warning triangle
-   *     centred below the car with the reason(s) listed under it (red if any
-   *     critical, else amber); the viewBox grows downward to fit. `critical:true`
-   *     still works as a shorthand for one unlabelled critical alert;
+   *     in the front-right margin with the reason(s) centred under it (red if any
+   *     critical, else amber); the viewBox widens on the right so the text fits
+   *     and `width` scales to keep the car the same size. `critical:true` still
+   *     works as a shorthand for one unlabelled critical alert;
    *   flashing (bool) -> pulses head + tail lights amber (find-the-car / hazards)
    * @param {object} o { width, battery:false to omit the centre battery,
    *   tempUnit:"C"|"F" for the two on-diagram temperatures }
@@ -678,16 +675,16 @@ g.KiaAccessCommands={
   function carDiagram(s, o) {
     s = s || {};
     o = o || {};
-    // Fixed canvas, centred on the car body (its centre is x100, so the
-    // viewBox spans -32..232). Charger strip lives at x 200..228; when
-    // unplugged the left/right margins are equal so the car sits dead centre.
-    // The car body ends at y 304; the warning badge extends the canvas below it.
-    var CAR_BOTTOM = 304;
+    // Canvas centred on the car body (centre x100, viewBox -32..232). Charger
+    // strip lives at x 200..228. When a warning badge is showing, the viewBox
+    // gains width on the right for the centred reason text under the triangle —
+    // and `width` scales with it so the car itself stays the same size.
     var alertsIn = Array.isArray(s.alerts)
       ? s.alerts
       : (s.critical === true ? [{ level: "critical", label: "" }] : []);
-    var VB = "-32 0 264 " + (330 + alertExtra(alertsIn));
-    var w = o.width || 190;
+    var vbW = 264 + alertExtra(alertsIn);
+    var VB = "-32 0 " + vbW + " 330";
+    var w = Math.round((o.width || 190) * vbW / 264);
 
     var tyre = function (which) {
       return s["tyre" + which] === true || s.tyreAny === true;
@@ -905,8 +902,8 @@ g.KiaAccessCommands={
       (o.battery === false
         ? ""
         : verticalBattery(s.batteryPct, s.charging) + battery12v(s.car12vPct)) +
-      // warning triangle + reason(s), centred below the car
-      (alertsIn.length ? alertBadge(alertsIn, CAR_BOTTOM) : "") +
+      // warning triangle (front-right margin) + reason(s) centred under it
+      (alertsIn.length ? alertBadge(alertsIn) : "") +
       // outside temperature — always, in the top-left margin
       outsideText +
       "</svg>"
@@ -1443,7 +1440,7 @@ g.KiaAccessCommands={
   var STYLE =
     ".ka-wrap{padding:12px 16px 14px}" +
     ".ka-top{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}" +
-    ".ka-diagram svg{max-width:230px;height:auto}" +
+    ".ka-diagram svg{max-width:264px;height:auto}" +  /* room for the warning badge's wider viewBox */
     ".ka-side{flex:1 1 160px;min-width:150px}" +
     ".ka-name{font-size:1.1em;font-weight:500}" +
     ".ka-sub{color:var(--secondary-text-color);font-size:.85em}" +

@@ -36,7 +36,7 @@
   var STYLE =
     ".ka-wrap{padding:12px 16px 14px}" +
     ".ka-top{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}" +
-    ".ka-diagram svg{max-width:230px;height:auto}" +
+    ".ka-diagram svg{max-width:264px;height:auto}" +  /* room for the warning badge's wider viewBox */
     ".ka-side{flex:1 1 160px;min-width:150px}" +
     ".ka-name{font-size:1.1em;font-weight:500}" +
     ".ka-sub{color:var(--secondary-text-color);font-size:.85em}" +
