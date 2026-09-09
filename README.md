@@ -93,6 +93,13 @@ three options diverge:
 
 The [Mermaid source](docs/data-flow.mmd) is the editable original.
 
+**Getting the data elsewhere** — with Home Assistant (A / C) you have entities,
+the `kia_access_alert` event bus and the `sensor.<vehicle>_status` payload, so
+anything HA integrates with is already covered. A MagicMirror-only mirror (B)
+can push out over **[MQTT](#mqtt-state-publishing)** (full state, retained
+topics + HA discovery) or a **[webhook](#webhook-http-post-per-event)** (an HTTP
+`POST` per state-change event, for Discord / Slack / IFTTT / a cloud function).
+
 ---
 
 ## Install
@@ -480,6 +487,7 @@ depends on its brand, region and powertrain):
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
+| `notifications.webhook` | `{ enabled:false }` | HTTP `POST` per event to `url` (`method` / `headers` / `events` / `levels` / `includeState` / `timeoutMs`) — see [Webhook](#webhook-http-post-per-event) |
 | `notifications.alertSeconds` | `15` | seconds a **warning** `alert` stays before auto-dismissing |
 | `notifications.criticalAlertSeconds` | `0` | **critical** `alert`: `0` = centre popup that stays until the condition clears; `>0` = corner growl that auto-dismisses after N s |
 | `mqtt.enabled` | `false` | publish full state to retained MQTT topics — see [MQTT](#mqtt-state-publishing) |
@@ -725,6 +733,47 @@ this.sendNotification("KIA_ACCESS_STATE_CHANGED", {
 
 `chargeComplete` / `chargeInterrupted` / `chargingStarted` are one-shot (only
 `active: true` fires). Everything else fires on both edges (entered / cleared).
+
+### Webhook (HTTP POST per event)
+
+`notifications.webhook` sends the **same events** to an HTTP endpoint — one
+`POST` with a JSON body per fired event. This reaches services an MQTT broker
+can't: Discord / Slack incoming webhooks, IFTTT / Zapier, a serverless function,
+a cloud logger, a phone-notification service. `node_helper` does the request
+(off the render process), retries once after 3 s on a network error, and logs a
+non-2xx.
+
+```js
+notifications: {
+  enabled: true,          // required; set alertModule: false for webhook-only
+  webhook: {
+    enabled: true,
+    url: "https://example.com/hooks/kia",
+    method: "POST",                       // default
+    headers: { Authorization: "Bearer …" },
+    events: "all",                        // or ["door_open", "chargeComplete", …]
+    levels: "all",                        // or ["warning", "critical"]
+    includeState: false,                  // add the full flat vehicle state
+    timeoutMs: 8000
+  }
+}
+```
+
+Body (same shape as `KIA_ACCESS_STATE_CHANGED`, plus `source`):
+
+```json
+{
+  "source": "MMM-KiaAccess",
+  "reason": "door_open", "level": "warning", "active": true,
+  "title": "Kia EV9", "message": "Front-left door is open",
+  "value": { "corners": ["FL"] }, "vin": "…",
+  "at": "2026-09-08T18:20:00.000Z"
+}
+```
+
+Works in **mode B and mode C**. Home Assistant users don't need it — trigger an
+automation on the `kia_access_alert` event and use `rest_command` / a `notify`
+service.
 
 ## MQTT (state publishing)
 

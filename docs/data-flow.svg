@@ -86,7 +86,7 @@
   <text class="lbl" x="283" y="576" text-anchor="middle">Lovelace card · custom:kia-access-card</text>
 
   <!-- ===== Option B ===== -->
-  <rect class="opt" x="576" y="342" width="460" height="250" rx="9"/>
+  <rect class="opt" x="576" y="342" width="468" height="256" rx="9"/>
   <text class="opthead" x="592" y="364">Option B · MagicMirror only</text>
 
   <rect class="box" x="720" y="376" width="200" height="40" rx="7"/>
@@ -99,15 +99,19 @@
   <text class="sub" x="820" y="471" text-anchor="middle">token.json · on-disk cache/</text>
 
   <path class="edge" d="M820 480 V512" marker-end="url(#arr)"/>
-  <path class="edge" d="M880 458 H972 V512" marker-end="url(#arr)"/>
-  <rect class="box pill" x="930" y="512" width="90" height="40" rx="12"/>
-  <text class="lbl" x="975" y="530" text-anchor="middle">MQTT</text>
-  <text class="sub" x="975" y="544" text-anchor="middle">optional</text>
+  <path class="edge" d="M900 456 H948 V490" marker-end="url(#arr)"/>
+  <path class="edge" d="M900 466 H968 V532" marker-end="url(#arr)"/>
+  <rect class="box pill" x="926" y="490" width="100" height="32" rx="12"/>
+  <text class="lbl" x="976" y="510" text-anchor="middle">MQTT</text>
+  <rect class="box pill" x="926" y="532" width="100" height="32" rx="12"/>
+  <text class="lbl" x="976" y="552" text-anchor="middle">webhook</text>
+  <text class="elabel" x="920" y="485" text-anchor="start">full state, every poll</text>
+  <text class="elabel" x="920" y="580" text-anchor="start">HTTP POST per event</text>
 
-  <rect class="box" x="692" y="512" width="220" height="56" rx="7"/>
-  <text class="lbl" x="802" y="531" text-anchor="middle">MMM-KiaAccess.js</text>
-  <text class="sub" x="802" y="546" text-anchor="middle">table · animated car diagram</text>
-  <text class="sub" x="802" y="559" text-anchor="middle">edge-triggered notifications</text>
+  <rect class="box" x="666" y="512" width="230" height="58" rx="7"/>
+  <text class="lbl" x="781" y="532" text-anchor="middle">MMM-KiaAccess.js</text>
+  <text class="sub" x="781" y="547" text-anchor="middle">table · animated car diagram</text>
+  <text class="sub" x="781" y="560" text-anchor="middle">edge-triggered alerts + webhook events</text>
 
   <!-- ===== Option C ===== -->
   <rect class="opt" x="24" y="612" width="1012" height="150" rx="9"/>

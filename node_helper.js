@@ -23,6 +23,7 @@ const { flatten } = require("./core/flatten.js");
 const haDiscovery = require("./core/ha-discovery.js");
 const haSource = require("./ha_source.js");
 const sessions = require("./core/sessions.js");
+const webhook = require("./webhook.js");
 
 const CACHE_DIR = path.join(__dirname, "cache");
 
@@ -53,6 +54,39 @@ module.exports = NodeHelper.create({
 
   socketNotificationReceived(notification, payload) {
     if (notification === "KIA_FETCH") this.handleFetch(payload);
+    else if (notification === "KIA_WEBHOOK") this.handleWebhook(payload);
+  },
+
+  // ---- optional outbound webhook: one HTTP POST per edge-triggered event ----
+  // The frontend forwards every fired event; we apply the events/levels filter
+  // and POST. One retry after 3 s on a network error; a non-2xx is logged only.
+  handleWebhook(msg) {
+    const hook = (msg && msg.webhook) || {};
+    if (!hook.enabled || !hook.url) return;
+    const opts = {
+      method: hook.method || "POST",
+      headers: hook.headers || {},
+      timeoutMs: Number(hook.timeoutMs) || 8000
+    };
+    (msg.events || []).forEach((ev) => {
+      if (!webhook.wants(hook, ev)) return;
+      const body = Object.assign({ source: "MMM-KiaAccess" }, ev);
+      if (msg.state) body.state = msg.state;
+      const send = () => webhook.post(hook.url, body, opts);
+      send()
+        .then((code) => {
+          if (code < 200 || code >= 300)
+            Log.warn(`[MMM-KiaAccess] webhook ${hook.url} -> HTTP ${code}`);
+        })
+        .catch((err) => {
+          Log.warn(`[MMM-KiaAccess] webhook ${hook.url} failed (${err.message}); retrying once`);
+          setTimeout(() => {
+            send().catch((e) =>
+              Log.error(`[MMM-KiaAccess] webhook retry failed: ${e.message}`)
+            );
+          }, 3000);
+        });
+    });
   },
 
   identifierFor(config) {
