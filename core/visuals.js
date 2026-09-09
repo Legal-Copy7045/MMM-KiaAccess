@@ -238,24 +238,34 @@
   // short labels for the on-diagram warning badge (kept terse — the right
   // margin is narrow). Falls back to a spaced-out slug for anything unmapped.
   var ALERT_LABELS = {
-    tyrePressure: "Tyre",
-    vehicleFault: "Fault",
-    evBatteryLow: "EV low",
-    evBatteryCritical: "EV crit",
-    battery12vLow: "12V low",
-    battery12vCritical: "12V crit",
-    battery12vDrain: "12V drain",
+    tyre_pressure: "Tyre pressure",
+    vehicle_fault: "Vehicle fault",
+    ev_battery_low: "EV battery low",
+    ev_battery_critical: "EV battery critical",
+    battery_12v_low: "12V battery low",
+    battery_12v_critical: "12V battery critical",
+    battery_12v_drain: "12V battery draining",
     unlocked: "Unlocked",
-    doorOpen: "Door",
-    hoodOpen: "Frunk",
-    liftgateOpen: "Boot",
-    windowOpen: "Window",
-    sunroofOpen: "Sunroof",
-    serviceDue: "Service",
-    notPluggedInHome: "Unplugged",
-    otpExpiring: "OTP exp.",
-    chargeInterrupted: "Charge?"
+    door_open: "Door open",
+    hood_open: "Frunk open",
+    liftgate_open: "Boot open",
+    window_open: "Window open",
+    sunroof_open: "Sunroof open",
+    service_due: "Service due",
+    not_plugged_home: "Not plugged in",
+    otp_expiring: "OTP expiring",
+    charge_interrupted: "Charge interrupted"
   };
+
+  // "door_open" / "evBatteryLow" -> "Door open" / "Ev battery low"
+  function humaniseReason(reason) {
+    return String(reason || "")
+      .replace(/[_-]+/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^./, function (m) { return m.toUpperCase(); });
+  }
 
   /** conditions.evaluate() result -> [{level, label}] for the warning badge:
    *  active warning/critical only, de-duplicated by label, critical first. */
@@ -268,11 +278,7 @@
     conds.forEach(function (c) {
       if (!c || c.active !== true) return;
       if (c.level !== "warning" && c.level !== "critical") return;
-      var label =
-        ALERT_LABELS[c.reason] ||
-        String(c.reason || "").replace(/([A-Z])/g, " $1").replace(/^./, function (m) {
-          return m.toUpperCase();
-        }).trim();
+      var label = ALERT_LABELS[c.reason] || humaniseReason(c.reason);
       var key = label.toLowerCase();
       if (seen[key]) {
         if (rankOf(c.level) < rankOf(seen[key].level)) seen[key].level = c.level;
@@ -290,9 +296,19 @@
     if (!alerts || !alerts.length) return 0;
     return Math.min(alerts.length, 3) + (alerts.length > 3 ? 1 : 0);
   }
-  // extra viewBox width the badge needs on the right for the centred reason text
+  // extra viewBox width the badge needs on the right for the centred reason
+  // text. The triangle sits at absolute x~214 and the reason lines are
+  // centre-anchored under it, so a long label ("12V battery critical") needs
+  // more right margin than a short one ("Door open").
   function alertExtra(alerts) {
-    return alertRows(alerts) ? 34 : 0;
+    if (!alertRows(alerts)) return 0;
+    var longest = 0;
+    (alerts || []).slice(0, 3).forEach(function (a) {
+      var n = String(a && a.label || "").length;
+      if (n > longest) longest = n;
+    });
+    var halfWidth = longest * 4.3;              // ~8.6px per char at font-16 bold
+    return Math.max(34, Math.ceil(halfWidth - 42));
   }
 
   // warning badge — the triangle back in the front-right margin (translate
