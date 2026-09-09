@@ -137,7 +137,18 @@ Module.register("MMM-KiaAccess", {
         reachReservePct: 10, // arrive with this much charge left
         reachRoundTrip: false, // true = show the "…and get back" distance instead
         reachPois: 4, // how many nearby saved places to list
-        pois: [] // [{ name, lat, lon }] — homeLat/homeLon adds an implicit "Home"
+        pois: [], // [{ name, lat, lon }] — homeLat/homeLon adds an implicit "Home"
+        // road-network reachable-area image (needs a Geoapify API key)
+        rangeMap: {
+          enabled: false,
+          apiKey: "",
+          provider: "geoapify",
+          mode: "drive", // drive | truck | bicycle | walk
+          style: "osm-bright-grey",
+          width: 340,
+          height: 220,
+          simplifyDeg: 0.01
+        }
       },
       chargeCost: {
         enabled: false, // the "est. cost to the target" line while charging
@@ -258,12 +269,17 @@ Module.register("MMM-KiaAccess", {
     this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
     this.firstConditionRun = true;
     this.diagramAlerts = []; // [{level,label}] under the diagram's warning triangle
+    this.rangeMap = null; // { oneWayUrl, roundTripUrl, … } from node_helper
 
     // MagicMirror merges `config` shallowly, so a user-supplied nested block
     // replaces the default wholesale — re-apply the defaults for any missing keys
     const merge = (base, over) => Object.assign({}, base, over || {});
     this.config.visuals = merge(this.defaults.visuals, this.config.visuals);
     this.config.visuals.location = merge(this.defaults.visuals.location, this.config.visuals.location);
+    this.config.visuals.location.rangeMap = merge(
+      this.defaults.visuals.location.rangeMap,
+      this.config.visuals.location.rangeMap
+    );
     this.config.visuals.chargeCost = merge(this.defaults.visuals.chargeCost, this.config.visuals.chargeCost);
     this.config.icons = merge(this.defaults.icons, this.config.icons);
     this.config.homeassistant = merge(this.defaults.homeassistant, this.config.homeassistant);
@@ -352,7 +368,32 @@ Module.register("MMM-KiaAccess", {
         capacityKwh: ((c.visuals || {}).chargeCost || {}).capacityKwh || null,
         retentionDays: ((c.visuals || {}).chargeCost || {}).logRetentionDays || 180
       },
-      mqtt: c.mqtt && c.mqtt.enabled && c.mqtt.url ? c.mqtt : null
+      mqtt: c.mqtt && c.mqtt.enabled && c.mqtt.url ? c.mqtt : null,
+      rangeMap: this.rangeMapConfig()
+    };
+  },
+
+  // config the node_helper needs to fetch + build the range-map image
+  rangeMapConfig() {
+    const loc = ((this.config.visuals || {}).location) || {};
+    const rm = loc.rangeMap || {};
+    if (!rm.enabled || !rm.apiKey) return null;
+    const pois = Array.isArray(loc.pois) ? loc.pois.slice() : [];
+    if (loc.homeLat != null && loc.homeLon != null &&
+        !pois.some((p) => /^home$/i.test((p && p.name) || "")))
+      pois.unshift({ name: "Home", lat: Number(loc.homeLat), lon: Number(loc.homeLon) });
+    return {
+      apiKey: rm.apiKey,
+      provider: rm.provider || "geoapify",
+      mode: rm.mode || "drive",
+      style: rm.style || "osm-bright-grey",
+      width: Number(rm.width) || 340,
+      height: Number(rm.height) || 220,
+      simplifyDeg: rm.simplifyDeg != null ? Number(rm.simplifyDeg) : 0.01,
+      units: this.config.units,
+      factor: loc.reachFactor,
+      reservePct: loc.reachReservePct,
+      pois: pois
     };
   },
 
@@ -367,6 +408,7 @@ Module.register("MMM-KiaAccess", {
       this.history = data.payload.history || [];
       this.sessions = data.payload.sessions || [];
       this.openSession = data.payload.openSession || null;
+      if (data.payload.rangeMap) this.rangeMap = data.payload.rangeMap;
       this.liveChargeTimer(); // start/stop the "cost this charge" refresh
       this.stale = !!m.stale;
       this.staleNote = m.note || null;
@@ -390,6 +432,9 @@ Module.register("MMM-KiaAccess", {
       Log.error("[MMM-KiaAccess] " + this.errorMessage);
       this.updateDom(this.config.animationSpeed);
       this.scheduleFetch(this.nextDelay(data.failStreak || 1, data.retryAfterMs));
+    } else if (notification === "KIA_RANGE_MAP") {
+      this.rangeMap = data.rangeMap || this.rangeMap;
+      this.updateDom(0);
     }
   },
 
@@ -905,6 +950,23 @@ Module.register("MMM-KiaAccess", {
         });
         rb.innerHTML = html;
         el.appendChild(rb);
+      }
+    }
+
+    // road-network reachable-area image (built by node_helper via Geoapify)
+    if ((cfg.rangeMap || {}).enabled && this.rangeMap) {
+      const url = cfg.reachRoundTrip === true
+        ? this.rangeMap.roundTripUrl
+        : this.rangeMap.oneWayUrl;
+      if (url) {
+        const img = document.createElement("img");
+        img.className = "kiaaccess-map kiaaccess-rangemap";
+        img.src = url;
+        img.alt = "reachable driving area";
+        img.loading = "lazy";
+        img.style.width = (cfg.rangeMap.width || 340) + "px";
+        img.onerror = () => img.remove();
+        el.appendChild(img);
       }
     }
 

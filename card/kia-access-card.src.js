@@ -15,6 +15,8 @@
   var V = self.KiaAccessVisuals;
   var S = self.KiaAccessState;
   var C = self.KiaConditions;
+  var RNG = self.KiaAccessRange;
+  var ISO = self.KiaAccessIsoline;
   var CATALOGUE = (self.KiaAccessEntities && self.KiaAccessEntities.entities) || [];
   var COMMANDS = (self.KiaAccessCommands && self.KiaAccessCommands.commands) || [];
   // one-tap buttons: the no-argument commands. start_climate / stop_climate have
@@ -76,6 +78,16 @@
     "background:var(--card-background-color);color:var(--primary-text-color)}" +
     ".ka-clim-go button.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:transparent}" +
     ".ka-clim-note{font-size:.78em;color:var(--secondary-text-color);min-height:1em}" +
+    ".ka-rangemap{margin-top:14px}" +
+    ".ka-rangemap-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}" +
+    ".ka-rangemap-h .t{font-size:.9em}" +
+    ".ka-rmseg{display:inline-flex;border:1px solid var(--divider-color);border-radius:14px;overflow:hidden}" +
+    ".ka-rmseg button{border:0;background:var(--card-background-color);color:var(--secondary-text-color);" +
+    "font:inherit;font-size:.78em;padding:4px 10px;cursor:pointer}" +
+    ".ka-rmseg button[aria-pressed=true]{background:var(--primary-color);color:var(--text-primary-color,#fff)}" +
+    ".ka-rangemap img{display:block;width:100%;border-radius:10px;background:var(--secondary-background-color)}" +
+    ".ka-rangemap .cap{font-size:.8em;color:var(--secondary-text-color);margin-top:5px}" +
+    ".ka-rangemap .cap b.no{color:var(--error-color)} .ka-rangemap .cap b.ok{color:var(--primary-color)}" +
     ".ka-table{width:100%;border-collapse:collapse;margin-top:14px;font-size:.9em}" +
     ".ka-table td{padding:2px 0;border-bottom:1px solid var(--divider-color)}" +
     ".ka-table td:last-child{text-align:right;color:var(--secondary-text-color)}" +
@@ -231,6 +243,34 @@
       "</div></div>";
   }
 
+  // ---- range-map (Geoapify isoline -> static image) ----
+  var RM_STORE = "kia-access-rangemap";
+  function loadRm() {
+    try { return JSON.parse(window.localStorage.getItem(RM_STORE) || "{}") || {}; }
+    catch (e) { return {}; }
+  }
+  function saveRm(o) {
+    try { window.localStorage.setItem(RM_STORE, JSON.stringify(o)); } catch (e) { /* */ }
+  }
+  function isMetric(hass) {
+    var u = hass && hass.config && hass.config.unit_system;
+    return !!(u && (u.length === "km" || u.length === "m"));
+  }
+  function kmToDisp(km, metric) {
+    return metric ? Math.round(km) + " km" : Math.round(km * 0.621371) + " mi";
+  }
+  function zonePois(hass) {
+    return Object.keys(hass.states)
+      .filter(function (id) { return id.indexOf("zone.") === 0; })
+      .map(function (id) {
+        var a = hass.states[id].attributes || {};
+        return (a.latitude != null && a.longitude != null)
+          ? { name: a.friendly_name || id.slice(5), lat: a.latitude, lon: a.longitude }
+          : null;
+      })
+      .filter(Boolean);
+  }
+
   class KiaAccessCard extends HTMLElement {
     setConfig(config) {
       this._config = config || {};
@@ -291,6 +331,120 @@
           this._render();
         }.bind(this), 3200);
       }
+    }
+
+    // ---- range map ----
+    _rmMode() {
+      if (!this._rmModeCache) {
+        var m = (this._config.range_map && this._config.range_map.mode) || loadRm().mode || "one";
+        this._rmModeCache = m === "round" ? "round" : "one";
+      }
+      return this._rmModeCache;
+    }
+    _setRmMode(m) {
+      this._rmModeCache = m === "round" ? "round" : "one";
+      var s = loadRm(); s.mode = this._rmModeCache; saveRm(s);
+      this._render();
+    }
+    _rangeInputs(flat) {
+      if (!RNG || !(this._config.range_map || {}).api_key) return null;
+      var lat = Number(flat["vehicle.location_latitude"]);
+      var lon = Number(flat["vehicle.location_longitude"]);
+      var rk = Number(flat["vehicle.ev_driving_range"]);
+      if (!isFinite(rk) || rk <= 0) rk = Number(flat["vehicle.total_driving_range"]);
+      if (!isFinite(lat) || !isFinite(lon) || !isFinite(rk) || rk <= 0) return null;
+      var cfg = this._config.range_map;
+      var o = { factor: cfg.factor, reservePct: cfg.reserve_pct };
+      return {
+        lat: lat, lon: lon,
+        oneWay: RNG.reach(rk, Object.assign({}, o, { roundTrip: false })),
+        round: RNG.reach(rk, Object.assign({}, o, { roundTrip: true }))
+      };
+    }
+    _fetchRangeMap(inp, hass) {
+      var self0 = this;
+      var cfg = this._config.range_map || {};
+      if (!cfg.api_key || !ISO || !RNG || !inp || typeof fetch !== "function") return;
+      var key = ISO.cacheKey(inp.lat, inp.lon, [inp.oneWay, inp.round]);
+      if (this._rm && this._rm.key === key) return;
+      var cache = loadRm();
+      if (cache.key === key && cache.at && Date.now() - cache.at < 6 * 3600e3 && cache.oneWayUrl) {
+        this._rm = cache; this._render(); return;
+      }
+      if (this._rmFetching === key) return;
+      if (this._rmFailAt && Date.now() - this._rmFailAt < 60000) return; // back off after an error
+      this._rmFetching = key;
+
+      var need = [inp.oneWay, inp.round].filter(function (k) { return k && !ISO.pastMax(k); });
+      var got = need.length
+        ? fetch(ISO.isoUrl({ apiKey: cfg.api_key, lat: inp.lat, lon: inp.lon, rangesKm: need, mode: cfg.mode || "drive" }))
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (j) { return ISO.parseIso(j); })
+        : Promise.resolve([]);
+
+      got.then(function (parsed) {
+        function pick(km) {
+          if (!km) return null;
+          if (ISO.pastMax(km)) return RNG.circleRing(inp.lat, inp.lon, km);
+          var best = null, bd = Infinity;
+          parsed.forEach(function (p) {
+            var d = Math.abs((p.rangeKm || 0) - km);
+            if (d < bd) { bd = d; best = p.ring; }
+          });
+          return best || RNG.circleRing(inp.lat, inp.lon, km);
+        }
+        var markers = [{ lat: inp.lat, lon: inp.lon, color: "#4ea1ff" }].concat(
+          zonePois(hass).slice(0, 6).map(function (p) {
+            return { lat: p.lat, lon: p.lon, color: "#e53935", text: p.name };
+          })
+        );
+        function smap(ring) {
+          return ring && ISO.staticMapUrl({
+            apiKey: cfg.api_key,
+            width: Number(cfg.width) || 600,
+            height: Number(cfg.height) || 340,
+            style: cfg.style || "osm-bright-grey",
+            simplifyDeg: cfg.simplify_deg != null ? Number(cfg.simplify_deg) : 0.01,
+            rings: [{ ring: ring, color: "#4caf50" }], markers: markers
+          });
+        }
+        var rm = {
+          key: key, at: Date.now(),
+          oneWayKm: Math.round(inp.oneWay),
+          roundKm: inp.round ? Math.round(inp.round) : null,
+          oneWayUrl: smap(pick(inp.oneWay)),
+          roundUrl: smap(pick(inp.round))
+        };
+        self0._rm = rm;
+        self0._rmFailAt = 0;
+        saveRm(Object.assign({ mode: self0._rmMode() }, rm));
+        self0._render();
+      }).catch(function () { self0._rmFailAt = Date.now(); })
+        .then(function () { self0._rmFetching = null; });
+    }
+    _rangeMapSection(inp, hass) {
+      if (!inp || !RNG) return "";
+      var metric = isMetric(hass);
+      var mode = this._rmMode();
+      var dist = mode === "round" ? inp.round : inp.oneWay;
+      var rm = this._rm;
+      var url = rm && (mode === "round" ? rm.roundUrl : rm.oneWayUrl);
+      var poi = RNG.poiStatus(inp.lat, inp.lon, zonePois(hass), dist);
+      var caps = poi.slice(0, 3).map(function (p) {
+        return "<b class='" + (p.reachable ? "ok" : "no") + "'>" +
+          (p.reachable ? "✓ " : "✗ ") + esc(p.name) + "</b> " + kmToDisp(p.km, metric);
+      }).join(" · ");
+      return "<div class='ka-rangemap'>" +
+        "<div class='ka-rangemap-h'><span class='t'>Reach <b>" + kmToDisp(dist, metric) + "</b>" +
+        (mode === "round" ? " there &amp; back" : "") + "</span>" +
+        "<span class='ka-rmseg'>" +
+        "<button type='button' data-rm='one' aria-pressed='" + (mode !== "round") + "'>How far</button>" +
+        "<button type='button' data-rm='round' aria-pressed='" + (mode === "round") + "'>&amp; back</button>" +
+        "</span></div>" +
+        (url ? "<img loading='lazy' src='" + esc(url) + "' alt='reachable driving area'>"
+             : "<div class='cap'>Building the map…</div>") +
+        (caps ? "<div class='cap'>" + caps + "</div>" : "") +
+        "</div>";
     }
 
     // "C" / "F" for the climate panel — card config wins, else the HA unit system
@@ -445,6 +599,9 @@
       var note = st.attributes.note
         ? "<div class='ka-warn'>" + esc(st.attributes.note) + "</div>" : "";
 
+      var rmInp = this._rangeInputs(flat);
+      if (rmInp) this._fetchRangeMap(rmInp, hass);
+
       root.innerHTML =
         "<ha-card><div class='ka-wrap'><div class='ka-top'>" +
         "<div class='ka-diagram'>" + diagram + "</div>" +
@@ -453,6 +610,7 @@
         "<div class='ka-sub'>" + esc(updated) + "</div>" +
         chipHtml + note +
         "</div></div>" +
+        this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit()) +
         actionsGroupsHtml() +
@@ -465,6 +623,9 @@
         b.addEventListener("click", function () {
           card._callCommand(b.getAttribute("data-cmd"), b.getAttribute("data-confirm") === "1");
         });
+      });
+      root.querySelectorAll(".ka-rmseg button").forEach(function (b) {
+        b.addEventListener("click", function () { card._setRmMode(b.getAttribute("data-rm")); });
       });
       this._wireClimate();
     }
