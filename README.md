@@ -400,7 +400,7 @@ Common EV9 (US) paths:
 | `visuals.width` | `210` | px width of the car SVG (base size) |
 | `visuals.scale` | `1` | multiplies the whole visuals block — diagram, its fonts, the sparklines / ring and the readout text. `1.3` = 130%. Clamped 0.5–3 |
 | `visuals.compact` | `false` | one-line summary (`78% · 312 mi · 🔒`) instead of the diagram + table |
-| `visuals.chargeProgress` | `true` | progress bar + "full at HH:MM" while plugged in |
+| `visuals.chargeProgress` | `true` | progress bar + `2h 45m → full at HH:MM` while plugged in |
 | `visuals.rangeRing` | `false` | radial SoC / range gauge under the car |
 | `visuals.socHistory` | `false` | EV-battery-% sparkline (`visuals.socHistoryDays`, default 14) |
 | `visuals.v12History` | `false` | 12V-battery-% sparkline (`visuals.v12HistoryDays`, default 14) — spot vampire drain |
@@ -514,7 +514,8 @@ Each is off by default and stacks under the car:
 
 - **`compact`** — replaces everything with one line: `78% · 312 mi · 🔒 · ⚡ 7.4 kW`.
 - **`chargeProgress`** — while plugged in, a bar (current + target) and either
-  "Full (80%) at 06:40" or "Plugged in, not charging".
+  `2h 45m → full at 06:40` (or `→ 80%` for a sub-100 target) or "Plugged in,
+  not charging".
 - **`rangeRing`** — a radial gauge: SoC on the ring, range in the centre.
 - **`socHistory`** / **`v12History`** — battery-% sparklines (EV and 12V) over the
   last N days, from the history the helper keeps on disk. `v12History` is the one
