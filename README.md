@@ -1,50 +1,77 @@
-# Kia Access — Home Assistant integration + MagicMirror module
+# Kia Access — one shared engine for Home Assistant **and** MagicMirror²
 
 [![CI](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml/badge.svg)](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml)
 
-Kia Connect / Bluelink vehicle data on **two surfaces built from one shared
-engine**. Built for a **Kia EV9 (Kia USA)**, works with any Hyundai/Kia/Genesis
-that [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
-supports.
+**Kia Connect / Bluelink vehicle data and controls, defined once and delivered on
+two surfaces.** One engine (`core/`) turns the
+[`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
+vehicle model into:
 
-- **Home Assistant integration** — sensors and binary sensors, **plus control**
-  (lock / unlock / climate / charging), a Lovelace card that renders a top-down
-  car diagram, `device_tracker` for the car's GPS, and `kia_access_alert` events
-  for automations. HACS-installable.
-- **MagicMirror² module** — a configurable `key → value` table plus an animated
-  top-down car diagram (doors, lock, charge, climate, tyres…). Read-only; can
-  take its data straight from the Home Assistant integration.
+- a **Home Assistant integration** (HACS) — sensors, binary sensors, buttons and
+  services (lock / unlock / climate / charging), a `device_tracker` for the car's
+  GPS, `kia_access_alert` events for automations, and a bundled **Lovelace card**
+  with a top-down car diagram + climate panel;
+- a **MagicMirror² module** — a configurable `key → value` table plus the same
+  animated car diagram, with edge-triggered notifications and optional MQTT
+  publishing. Read-only.
 
-The two work **independently**. Or run both and have the module take its data
-**from Home Assistant** instead of polling Kia itself — so the car is woken once,
-not twice.
+Every entity, command, alert rule and the diagram itself come from the **same
+shared files**, so the two surfaces always show the same data and behave the same
+way. Run either on its own — or run both and have the mirror read from Home
+Assistant, so the car is only ever woken once.
+
+## Supported vehicles
+
+Anything [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
+supports:
+
+- **Brands** — Kia (Connect / UVO), Hyundai (Bluelink), Genesis
+- **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil
+- **Powertrains** — EV, PHEV, HEV and ICE. The EV-specific sensors and diagram
+  parts (charge, plug, drive battery) simply stay empty on a car that doesn't
+  have them.
+
+Developed and tested against a **Kia EV9 on Kia USA**. Other brands, regions and
+models go through the same library but are less battle-tested —
+[open an issue](https://github.com/Legal-Copy7045/MMM-KiaAccess/issues) if
+something looks wrong.
+
+> **Region notes**
+> - **Kia USA / Canada** require a **one-time OTP** (an SMS / email code) the
+>   first time a new client logs in. Home Assistant asks for it in the config
+>   flow; the mirror has a one-time `enroll.py`.
+> - The Kia US / CA API reports **°F** and **miles** — the engine normalises
+>   everything to °C / km at the source, then the formatters render back to the
+>   units you pick.
+> - The climate set-point for **USA** is sent in **°F (62–82)**; EU and other
+>   regions use **°C (16–30)**.
 
 > **Why a Python library, not a Node one?**
 > Kia USA sits behind Cloudflare bot protection that returns **HTTP 403** to the
-> Node `bluelinky` library. `hyundai_kia_connect_api` (the library behind Home
-> Assistant's Kia/Hyundai integration) handles it and is actively maintained.
+> Node `bluelinky` library. `hyundai_kia_connect_api` — the library behind Home
+> Assistant's official Kia/Hyundai integration — handles it and is actively
+> maintained. Both surfaces call it through the shared `kia_client.py`.
 
 ---
 
 ## Which setup do you want?
 
-| | who polls Kia | needs on the mirror | car control | dashboard |
+| | polls the car | dashboard | car control | extra setup |
 |---|---|---|---|---|
-| **A · Home Assistant only** | the integration | – | **yes** | Lovelace card |
-| **B · MagicMirror only** | the module | Python venv + one-time OTP | – | the mirror |
-| **C · MagicMirror fed by HA** | the integration (only) | just a HA token | via HA | both |
+| **A · Home Assistant** | the integration | Lovelace card | ✅ | OTP in the config flow |
+| **B · MagicMirror only** | the module (Python bridge) | the mirror | – | Python venv + one-time OTP |
+| **C · MagicMirror + Home Assistant** | Home Assistant only | both | ✅ via HA | a HA token on the mirror |
 
-- Home Assistant user who wants control and a dashboard tile → **A** (add a
-  mirror later with **C**).
-- Just a mirror, no Home Assistant → **B**.
-- Both a mirror **and** Home Assistant → **C**: HA polls the car once, the mirror
-  reads that locally. No Python or OTP on the mirror.
+- **Home Assistant user** → **A**. Add a mirror later with **C**.
+- **Just a mirror**, no Home Assistant → **B**.
+- **Both** → **C**: HA polls the car once, the mirror reads it locally — no
+  Python, no OTP and no second wake-up on the mirror.
 
 ---
 
 ## Install
 
-### A · Home Assistant only
+### A · Home Assistant
 
 A native integration — sensors and binary sensors, **plus control**, plus a
 Lovelace card. No MagicMirror required.
@@ -55,9 +82,9 @@ Lovelace card. No MagicMirror required.
    (Or copy `custom_components/kia_access/` into `config/custom_components/` and
    restart.)
 2. **Add it.** **Settings → Devices & Services → + Add Integration → “Kia
-   Access”**. Enter email / password / PIN / region; enter the SMS or email
-   **OTP** when prompted. Tick *Reverse-geocode the parked location* if you want
-   a location.
+   Access”**. Enter your Kia Connect / Hyundai Bluelink email / password / PIN
+   and pick the region; enter the SMS or email **OTP** when prompted (Kia
+   USA / CA). Tick *Reverse-geocode the parked location* if you want a location.
 3. You now have one **device per vehicle**:
    - sensors + binary sensors (battery, range, charge power, doors, lock, plug,
      climate, tyre warning, next-service distance, valet mode, battery
@@ -110,7 +137,8 @@ nothing is written into the HACS-managed folder.
 
 ### B · MagicMirror only
 
-The module polls Kia directly through a small Python bridge (`kia_bridge.py`).
+The module polls the Kia / Hyundai cloud directly through a small Python bridge
+(`kia_bridge.py`).
 
 ```bash
 cd ~/MagicMirror/modules
@@ -169,7 +197,7 @@ Or set `pythonBin` in the module config to an absolute path.
 
 If venv creation fails on Debian/RPi OS: `sudo apt install python3-venv`.
 
-#### One-time OTP enrollment (mode B, Kia USA)
+#### One-time OTP enrollment (mode B, Kia USA / Canada)
 
 Kia USA requires a one-time passcode when a new client first logs in. Run the enrollment
 script **once**, on the mirror, using the module's venv Python:
@@ -258,12 +286,13 @@ from Home Assistant.
 Either way the module only re-renders / re-checks conditions / writes its disk
 cache when the data actually changed, so a fast rate costs almost nothing.
 
-## Configuration
+## MagicMirror module — configuration
 
-> Applies to the **MagicMirror module** (modes B and C). In mode C, drop
+> Everything from here to [Home Assistant — reference](#home-assistant--reference)
+> is the **MagicMirror module** (modes B and C). Home Assistant's own settings
+> live in its **Configure** dialog, not here. In mode C, drop
 > `username` / `password` / `pin` and add the `source` / `homeassistant` block
-> shown above; everything else below is the same. Home Assistant's own options
-> are in its **Configure** dialog.
+> shown above; everything else below is the same.
 
 ```js
 {
@@ -342,7 +371,8 @@ Set `include: []` and `exclude: []`, restart, and every attribute renders. Each 
 hover tooltip is its exact key path — copy the ones you want. Everything lives under
 `vehicle.` (plus `_meta.`). The full raw API response is under `vehicle.data.*`.
 
-Common EV9 (US) paths:
+Common paths (examples below are from a Kia EV9 on Kia USA; your car's set
+depends on its brand, region and powertrain):
 
 | Path | Meaning |
 |---|---|
@@ -774,11 +804,12 @@ current.
 npm test
 ```
 
-## Project layout
+## How it's built — one definition, every surface
 
-**Define a feature once.** The shared engine lives in `core/` and at the repo
-root, and every surface (MagicMirror, the HA integration, the Lovelace card) is
-generated from it:
+**Define a feature once.** This is the point of the project: the shared engine
+lives in `core/` and at the repo root, and every surface — the MagicMirror
+module, the Home Assistant integration and the Lovelace card — is generated from
+it. Add a sensor or a command in one place and it appears everywhere.
 
 | file | purpose |
 | --- | --- |
