@@ -303,34 +303,46 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
     return out;
   }
 
-  // warning badge — a triangle in the right margin (up toward the front, on the
-  // wall-charger centre-line x 214), red if any alert is critical else amber,
-  // with the reason(s) it is on listed underneath.
-  function alertBadge(alerts) {
+  // how many text rows the warning badge draws (reasons capped at 3, + "+N more")
+  function alertRows(alerts) {
+    if (!alerts || !alerts.length) return 0;
+    return Math.min(alerts.length, 3) + (alerts.length > 3 ? 1 : 0);
+  }
+  // extra viewBox height the badge needs below the car body
+  function alertExtra(alerts) {
+    var rows = alertRows(alerts);
+    return rows ? 30 + rows * 19 + 6 : 0;
+  }
+
+  // warning badge — centred below the car: a triangle (red if anything is
+  // critical, else amber) with the reason(s) it is on listed under it, sized to
+  // match the outside-temp reading. `bodyBottom` is the y the car ends at.
+  function alertBadge(alerts, bodyBottom) {
     var hasCrit = alerts.some(function (a) { return a.level === "critical"; });
     var triCol = hasCrit ? COL.bad : COL.warn;
     var shown = alerts.slice(0, 3);
-    // reasons under the triangle, sized to match the outside-temp reading (~16).
-    // Left-anchored well inside the canvas (the triangle hugs the viewBox edge,
-    // so big centred text would clip) — the black paint-order halo keeps it
-    // readable where it runs over the roof.
+    var cx = 100;
+    var triY = bodyBottom + 6;
+    var textY = triY + 34;
     var lines = shown.map(function (a, i) {
-      return '<text x="-52" y="' + (52 + i * 17) + '" font-size="16" font-weight="700" fill="' +
+      return '<text x="' + cx + '" y="' + (textY + i * 19) + '" font-size="16" font-weight="700" fill="' +
         (a.level === "critical" ? COL.bad : COL.warn) + '">' + esc(a.label) + "</text>";
     });
     if (alerts.length > shown.length) {
-      lines.push('<text x="-52" y="' + (52 + shown.length * 17) +
-        '" font-size="16" fill="' + COL.dim + '">+' + (alerts.length - shown.length) + " more</text>");
+      lines.push('<text x="' + cx + '" y="' + (textY + shown.length * 19) +
+        '" font-size="15" fill="' + COL.dim + '">+' + (alerts.length - shown.length) + " more</text>");
     }
     return (
-      '<g transform="translate(192 70)" class="kiaaccess-critical" ' +
-      'text-anchor="start" style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' +
-      '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
-      'fill="' + triCol + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
+      '<g class="kiaaccess-critical" text-anchor="middle" ' +
+      'style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' +
+      '<g transform="translate(' + (cx - 13) + ' ' + triY + ')">' +
+      '<path d="M 13 0 Q 14 -2.5 15 0 L 26 20 Q 27.5 23 24 23 L 2 23 Q -1.5 23 0 20 Z" ' +
+      'fill="' + triCol + '" stroke="#000" stroke-width="1.2" stroke-linejoin="round" opacity="0.95">' +
       pulse("opacity", "0.5", "1", 1.05) +
       "</path>" +
-      '<rect x="20.5" y="11" width="3" height="12" rx="1.5" fill="#fff"/>' +
-      '<circle cx="22" cy="29" r="2" fill="#fff"/>' +
+      '<rect x="11.7" y="6.5" width="2.6" height="9" rx="1.3" fill="#fff"/>' +
+      '<circle cx="13" cy="19" r="1.7" fill="#fff"/>' +
+      "</g>" +
       lines.join("") +
       "</g>"
     );
@@ -420,9 +432,9 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
    *   airTempC (climate set-point °C), outsideTempC (°C);
    *   tyreFL/FR/RL/RR, tyreAny;
    *   alerts (array of {level:"warning"|"critical", label}) -> warning triangle
-   *     in the front-right margin with the reason(s) listed underneath
-   *     (red if any critical, else amber). `critical:true` still works as a
-   *     shorthand for one unlabelled critical alert;
+   *     centred below the car with the reason(s) listed under it (red if any
+   *     critical, else amber); the viewBox grows downward to fit. `critical:true`
+   *     still works as a shorthand for one unlabelled critical alert;
    *   flashing (bool) -> pulses head + tail lights amber (find-the-car / hazards)
    * @param {object} o { width, battery:false to omit the centre battery,
    *   tempUnit:"C"|"F" for the two on-diagram temperatures }
@@ -433,7 +445,12 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
     // Fixed canvas, centred on the car body (its centre is x100, so the
     // viewBox spans -32..232). Charger strip lives at x 200..228; when
     // unplugged the left/right margins are equal so the car sits dead centre.
-    var VB = "-32 0 264 330";
+    // The car body ends at y 304; the warning badge extends the canvas below it.
+    var CAR_BOTTOM = 304;
+    var alertsIn = Array.isArray(s.alerts)
+      ? s.alerts
+      : (s.critical === true ? [{ level: "critical", label: "" }] : []);
+    var VB = "-32 0 264 " + (330 + alertExtra(alertsIn));
     var w = o.width || 190;
 
     var tyre = function (which) {
@@ -652,13 +669,8 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
       (o.battery === false
         ? ""
         : verticalBattery(s.batteryPct, s.charging) + battery12v(s.car12vPct)) +
-      // warning triangle + reason(s) (front-right margin)
-      (function () {
-        var alerts = Array.isArray(s.alerts)
-          ? s.alerts
-          : (s.critical === true ? [{ level: "critical", label: "" }] : []);
-        return alerts.length ? alertBadge(alerts) : "";
-      })() +
+      // warning triangle + reason(s), centred below the car
+      (alertsIn.length ? alertBadge(alertsIn, CAR_BOTTOM) : "") +
       // outside temperature — always, in the top-left margin
       outsideText +
       "</svg>"
