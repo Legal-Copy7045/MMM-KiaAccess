@@ -185,8 +185,16 @@ class HaLiveClient {
     }
     this._ws = ws;
 
+    this._openedAt = Date.now();
     ws.addEventListener("message", (ev) => this._onMessage(String(ev.data)));
-    ws.addEventListener("close", () => this._scheduleReconnect("connection closed"));
+    ws.addEventListener("close", (ev) => {
+      const held = this._openedAt ? Math.round((Date.now() - this._openedAt) / 1000) : "?";
+      const code = ev && ev.code != null ? ev.code : "?";
+      const reason = ev && ev.reason ? " " + ev.reason : "";
+      this._scheduleReconnect(
+        "connection closed — code " + code + reason + ", held " + held + "s"
+      );
+    });
     ws.addEventListener("error", () => {
       // 'close' fires straight after; let that drive the reconnect
     });
