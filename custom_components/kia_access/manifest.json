@@ -9,5 +9,5 @@
   "issue_tracker": "https://github.com/Legal-Copy7045/MMM-KiaAccess/issues",
   "loggers": ["hyundai_kia_connect_api"],
   "requirements": ["hyundai_kia_connect_api>=4.25.3"],
-  "version": "2.15.1"
+  "version": "2.16.0"
 }
