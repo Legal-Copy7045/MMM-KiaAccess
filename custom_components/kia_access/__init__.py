@@ -36,6 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = KiaAccessCoordinator(hass, entry)
     coordinator.last_options = dict(entry.options)
     await coordinator.async_load_sessions()
+    await coordinator.async_load_prefs()
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

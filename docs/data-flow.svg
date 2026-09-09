@@ -64,26 +64,27 @@
   <rect class="box" x="160" y="376" width="240" height="38" rx="7"/>
   <text class="lbl" x="280" y="399" text-anchor="middle">kia_access coordinator</text>
 
-  <path class="edge" d="M150 414 V446" marker-end="url(#arr)"/>
-  <path class="edge" d="M283 414 V506" marker-end="url(#arr)"/>
-  <path class="edge" d="M370 414 V446" marker-end="url(#arr)"/>
+  <path class="edge" d="M150 414 V444" marker-end="url(#arr)"/>
+  <path class="edge" d="M283 414 V516" marker-end="url(#arr)"/>
+  <path class="edge" d="M372 414 V444" marker-end="url(#arr)"/>
 
-  <rect class="box" x="40" y="446" width="230" height="54" rx="7"/>
-  <text class="lbl" x="155" y="465" text-anchor="middle">entities</text>
-  <text class="sub" x="155" y="480" text-anchor="middle">sensors · binary_sensors · buttons</text>
-  <text class="sub" x="155" y="493" text-anchor="middle">device_tracker · last_charge · charge_session</text>
+  <rect class="box" x="40" y="444" width="230" height="64" rx="7"/>
+  <text class="lbl" x="155" y="460" text-anchor="middle">entities</text>
+  <text class="sub" x="155" y="474" text-anchor="middle">sensor · binary_sensor · button · lock</text>
+  <text class="sub" x="155" y="486" text-anchor="middle">climate · number · switch · select</text>
+  <text class="sub" x="155" y="498" text-anchor="middle">device_tracker · last_charge · charge_session</text>
 
-  <rect class="box pill" x="300" y="446" width="224" height="54" rx="12"/>
-  <text class="lbl" x="412" y="468" text-anchor="middle">kia_access_alert</text>
-  <text class="sub" x="412" y="484" text-anchor="middle">bus events → automations</text>
+  <rect class="box pill" x="300" y="444" width="224" height="52" rx="12"/>
+  <text class="lbl" x="412" y="465" text-anchor="middle">kia_access_alert</text>
+  <text class="sub" x="412" y="481" text-anchor="middle">bus events → automations</text>
 
-  <rect class="box" x="163" y="506" width="240" height="40" rx="7"/>
-  <text class="lbl" x="283" y="526" text-anchor="middle">sensor.&lt;vehicle&gt;_status</text>
-  <text class="sub" x="283" y="539" text-anchor="middle">whole flat payload, one entity</text>
+  <rect class="box" x="163" y="516" width="240" height="40" rx="7"/>
+  <text class="lbl" x="283" y="536" text-anchor="middle">sensor.&lt;vehicle&gt;_status</text>
+  <text class="sub" x="283" y="549" text-anchor="middle">whole flat payload, one entity</text>
 
-  <path class="edge" d="M283 546 V560" marker-end="url(#arr)"/>
-  <rect class="box" x="163" y="560" width="240" height="24" rx="7"/>
-  <text class="lbl" x="283" y="576" text-anchor="middle">Lovelace card · custom:kia-access-card</text>
+  <path class="edge" d="M283 556 V568" marker-end="url(#arr)"/>
+  <rect class="box" x="163" y="568" width="240" height="22" rx="7"/>
+  <text class="lbl" x="283" y="583" text-anchor="middle">Lovelace card · custom:kia-access-card</text>
 
   <!-- ===== Option B ===== -->
   <rect class="opt" x="576" y="342" width="468" height="256" rx="9"/>
@@ -119,7 +120,7 @@
   <text class="sub" x="92" y="651">runs Option A underneath — the mirror never touches Kia; no credentials, no OTP, no Python bridge on the mirror</text>
 
   <!-- feed from A's status sensor, routed down the far left -->
-  <path class="dot" d="M163 526 H40 V690 H80" marker-end="url(#arrD)"/>
+  <path class="dot" d="M163 536 H40 V690 H80" marker-end="url(#arrD)"/>
   <text class="elabel" x="52" y="600" transform="rotate(-90 52 600)" text-anchor="middle">HA local API · long-lived token</text>
 
   <rect class="box" x="80" y="668" width="200" height="44" rx="7"/>

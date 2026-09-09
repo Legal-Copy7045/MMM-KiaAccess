@@ -7,10 +7,11 @@ two surfaces.** One engine (`core/`) turns the
 [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
 vehicle model into:
 
-- a **Home Assistant integration** (HACS) — sensors, binary sensors, buttons and
-  services (lock / unlock / climate / charging), a `device_tracker` for the car's
-  GPS, `kia_access_alert` events for automations, and a bundled **Lovelace card**
-  with a top-down car diagram + climate panel;
+- a **Home Assistant integration** (HACS) — sensors and binary sensors, **native
+  control entities** (`lock`, `climate`, `number`, `switch`, `select`) plus
+  services, a `device_tracker` for the car's GPS, `kia_access_alert` events for
+  automations, and a bundled **Lovelace card** with a top-down car diagram +
+  climate panel;
 - a **MagicMirror² module** — a configurable `key → value` table plus the same
   animated car diagram, with edge-triggered notifications and optional MQTT
   publishing. Read-only.
@@ -132,11 +133,27 @@ Lovelace card. No MagicMirror required.
      every 60 s on its own). Both need a price: **Settings → Devices &
      Services → Kia Access → Configure → Price per kWh** (and optional pack
      kWh). Sessions run plug-in → unplug and persist across restarts.
+   - **`lock.<vehicle>_doors`** — a real HA lock (HomeKit / Google / Alexa,
+     the lock card, `lock.lock` automations)
+   - **`climate.<vehicle>_climate`** — remote climate as an HVAC entity
+     (thermostat card, "set the car to 72", generic climate automations).
+     `HEAT_COOL` / `OFF`; target temperature in °F for USA & Canada, °C
+     elsewhere; current temperature from the car
+   - **numbers** — `AC charge limit` / `DC charge limit` (dashboard sliders,
+     50–100 %) and `Climate run time` (1–30 min)
+   - **switches** — `Charging` (start/stop, shown only while plugged in),
+     `Front defrost with climate`, `Rear defrost with climate`
+   - **selects** — `Steering wheel heat with climate` and per-seat
+     `… seat with climate` (Off / Heat · Cool low–high). These are *desired*
+     settings folded into the next climate start
    - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
      car), `open` / `close charge port`, `start` / `stop charge`
+   - **sensors** — fuel level & range, charge current, per-seat status, and a
+     `Remote action` diagnostic showing the command in flight
    - **services**: the no-arg buttons above, plus `kia_access.start_climate`
      (`set_temp` — **°F, 62–82** for the USA region — `duration`, `climate`,
-     `defrost`, `heating`, `steering_wheel`), `kia_access.stop_climate`,
+     `defrost`, `heating`, `steering_wheel`, `front_left_seat` …
+     `rear_right_seat`), `kia_access.stop_climate`,
      `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`) and
      `kia_access.send_to_car` (`name` + `address`, or `latitude` / `longitude`)
      — see [Send to car](#send-to-car)
@@ -979,12 +996,21 @@ Install and setup are **mode A** above. Some details:
   attributes include the VIN and the parked coordinates, so the sensor declares
   `_unrecorded_attributes` — the blob is available live but is **not** written to
   the recorder / history / logbook.
-- **Control.** Buttons cover the no-argument commands; `set_charge_limits`,
-  `send_to_car` and the parameterised `start_climate` are services only —
-  though the card's **Climate panel** drives `start_climate` / `stop_climate`
-  with a temperature + duration + toggles UI. All commands refresh the
-  coordinator afterwards. Multiple accounts: pass `entry_id` in the service
-  call.
+- **Control — native entities.** `lock.<vehicle>_doors`,
+  `climate.<vehicle>_climate` (HVAC wrapper over start/stop climate),
+  `number.<vehicle>_ac_charge_limit` / `_dc_charge_limit` /
+  `_climate_run_time`, `switch.<vehicle>_charging` /
+  `_front_defrost_with_climate` / `_rear_defrost_with_climate`, and
+  `select.<vehicle>_*_seat_with_climate` / `_steering_wheel_heat_with_climate`.
+  The duration / defrost / seat / wheel entities are **stored preferences** —
+  there's no API to set them on their own, so `climate.turn_on` and the
+  `start_climate` button/service fold whatever they're set to into one call.
+  Seat levels use `KiaUvoApiUSA` codes (Off / low·med·high heat / low·med·high
+  cool); other regions differ — use the raw `start_climate` service there.
+  Buttons still cover the no-argument commands; `set_charge_limits`,
+  `send_to_car` and the full `start_climate` (with seats) remain services too.
+  All commands refresh the coordinator afterwards. Multiple accounts: pass
+  `entry_id` in the service call.
 - **Climate temperature unit.** For the **USA** region the library sends
   `set_temp` in **Fahrenheit** (62–82; outside that it becomes "LOW" / "HIGH"),
   and `climate: true` is what actually turns the A/C on. `commands.json`

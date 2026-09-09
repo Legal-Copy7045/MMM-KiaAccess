@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from . import kia_client
@@ -23,11 +24,14 @@ from .const import (
     CONF_REGION,
     CONF_TOKEN,
     CONF_VIN,
+    DEFAULT_CLIMATE_PREFS,
     DEFAULT_FORCE_REFRESH_TIMEOUT,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
     EVENT_STATE_CHANGED,
 )
+
+_FAHRENHEIT_REGIONS = {"USA", "CA"}
 from .vehicle_state import build_state
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,11 +59,59 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
+        self._prefs_store = Store(hass, 1, f"{DOMAIN}_prefs_{entry.entry_id}")
+        self.climate_prefs: dict = dict(DEFAULT_CLIMATE_PREFS)
+        # last control command, for the "action in progress" sensor
+        self.last_action: dict = {"name": None, "status": "idle", "at": None}
 
     async def async_load_sessions(self) -> None:
         data = await self._sessions_store.async_load() or {}
         self._sessions = data.get("sessions") or []
         self._open_session = data.get("open") or None
+
+    async def async_load_prefs(self) -> None:
+        data = await self._prefs_store.async_load() or {}
+        self.climate_prefs = {**DEFAULT_CLIMATE_PREFS, **data}
+
+    async def async_set_pref(self, key: str, value) -> None:
+        self.climate_prefs[key] = value
+        await self._prefs_store.async_save(self.climate_prefs)
+        self.async_update_listeners()
+
+    @property
+    def region(self) -> str:
+        return str(self.entry.data.get(CONF_REGION, "USA")).upper()
+
+    def climate_temp_unit(self) -> str:
+        from homeassistant.const import UnitOfTemperature
+
+        return (
+            UnitOfTemperature.FAHRENHEIT
+            if self.region in _FAHRENHEIT_REGIONS
+            else UnitOfTemperature.CELSIUS
+        )
+
+    def build_climate_options(self, temp_c: float | None = None) -> dict:
+        """climate_prefs (+ an optional target °C) -> start_climate options."""
+        p = self.climate_prefs
+        if temp_c is None:
+            temp_c = p.get("last_temp_c") or DEFAULT_CLIMATE_PREFS["last_temp_c"]
+        if self.region in _FAHRENHEIT_REGIONS:
+            set_temp = round(temp_c * 9 / 5 + 32)
+        else:
+            set_temp = round(temp_c * 2) / 2
+        return {
+            "set_temp": set_temp,
+            "duration": int(p.get("duration") or 10),
+            "climate": True,
+            "defrost": bool(p.get("front_defrost")),
+            "heating": 1 if p.get("rear_defrost") else 0,
+            "steering_wheel": int(p.get("steering_wheel") or 0),
+            "front_left_seat": int(p.get("front_left_seat") or 0),
+            "front_right_seat": int(p.get("front_right_seat") or 0),
+            "rear_left_seat": int(p.get("rear_left_seat") or 0),
+            "rear_right_seat": int(p.get("rear_right_seat") or 0),
+        }
 
     async def _update_sessions(self) -> None:
         v = self.vehicle
@@ -267,5 +319,18 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
     async def async_run_command(self, command: str, options: dict | None = None) -> None:
         job = self._job(command=command, options=options or {})
-        await self.hass.async_add_executor_job(kia_client.run_command, job)
-        await self.async_request_refresh()
+        self.last_action = {
+            "name": command,
+            "status": "running",
+            "at": dt_util.utcnow().isoformat(),
+        }
+        self.async_update_listeners()
+        try:
+            await self.hass.async_add_executor_job(kia_client.run_command, job)
+            self.last_action = {**self.last_action, "status": "done"}
+        except Exception:
+            self.last_action = {**self.last_action, "status": "failed"}
+            raise
+        finally:
+            self.async_update_listeners()
+            await self.async_request_refresh()

@@ -5,7 +5,45 @@ import json
 from pathlib import Path
 
 DOMAIN = "kia_access"
-PLATFORMS = ["sensor", "binary_sensor", "button", "device_tracker"]
+PLATFORMS = [
+    "sensor",
+    "binary_sensor",
+    "button",
+    "device_tracker",
+    "lock",
+    "climate",
+    "number",
+    "switch",
+    "select",
+]
+
+# Climate preferences stored per config entry (Store key kia_access_prefs_<id>).
+# The climate entity / start_climate button build a start_climate call from these
+# plus a temperature; the number/switch/select entities edit them.
+DEFAULT_CLIMATE_PREFS: dict = {
+    "duration": 10,          # minutes the climate run lasts
+    "front_defrost": False,  # -> ClimateRequestOptions.defrost
+    "rear_defrost": False,   # -> .heating (rear window + mirrors)
+    "steering_wheel": 0,     # 0 off / 1 low / 2 high
+    "front_left_seat": 0,
+    "front_right_seat": 0,
+    "rear_left_seat": 0,
+    "rear_right_seat": 0,
+    "last_temp_c": 22.0,     # remembered target, so turn_on has something to send
+}
+
+# KiaUvoApiUSA._seat_settings level codes (0 off; 6/7/8 heat lo/md/hi;
+# 3/4/5 cool lo/md/hi). Ordered dict: label -> code.
+SEAT_LEVELS: dict = {
+    "Off": 0,
+    "Heat - low": 6,
+    "Heat - medium": 7,
+    "Heat - high": 8,
+    "Cool - low": 3,
+    "Cool - medium": 4,
+    "Cool - high": 5,
+}
+STEERING_WHEEL_LEVELS: dict = {"Off": 0, "Low": 1, "High": 2}
 
 CONF_REGION = "region"
 CONF_BRAND = "brand"
