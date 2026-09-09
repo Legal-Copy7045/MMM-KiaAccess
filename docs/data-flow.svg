@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 780" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#556"/>
+    </marker>
+    <marker id="arrO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#c2185b"/>
+    </marker>
+    <marker id="arrD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b7488"/>
+    </marker>
+  </defs>
+  <style>
+    .box{fill:#ffffff;stroke:#8a90a6;stroke-width:1.2}
+    .lbl{fill:#1f2430}
+    .sub{fill:#5b6472;font-size:10.5px}
+    .edge{stroke:#556;stroke-width:1.6;fill:none}
+    .kia{fill:#fde5ee;stroke:#c2185b}
+    .kiaEdge{stroke:#c2185b;stroke-width:1.8;fill:none}
+    .shared{fill:#e2eefb;stroke:#2b6cb0}
+    .opt{fill:#fbfbfd;stroke:#b9bfce;stroke-dasharray:5 4}
+    .opthead{fill:#333a4b;font-weight:600;font-size:13px}
+    .dot{stroke:#6b7488;stroke-width:1.6;fill:none;stroke-dasharray:2 4}
+    .elabel{fill:#3a4256;font-size:10.5px}
+    .pill{fill:#f2f4f8;stroke:#b9bfce}
+  </style>
+
+  <!-- ===== shared spine ===== -->
+  <rect class="box kia" x="380" y="18" width="200" height="42" rx="21"/>
+  <text class="lbl" x="480" y="43" text-anchor="middle">🚗  Your vehicle</text>
+
+  <path class="kiaEdge" d="M438 60 V100" marker-end="url(#arrO)" marker-start="url(#arrO)"/>
+  <path class="kiaEdge" d="M522 60 V100" marker-end="url(#arrO)" marker-start="url(#arrO)"/>
+  <text class="elabel" x="410" y="78" text-anchor="end">cellular wake-up —</text>
+  <text class="elabel" x="410" y="92" text-anchor="end">only on a live refresh</text>
+  <text class="elabel" x="550" y="78">server-cached state —</text>
+  <text class="elabel" x="550" y="92">costs the car nothing</text>
+
+  <rect class="box kia" x="350" y="100" width="260" height="44" rx="7"/>
+  <text class="lbl" x="480" y="118" text-anchor="middle">Kia / Hyundai cloud servers</text>
+  <text class="sub" x="480" y="134" text-anchor="middle">(Cloudflare-protected)</text>
+
+  <path class="edge" d="M480 144 V178" marker-end="url(#arr)" marker-start="url(#arr)"/>
+
+  <rect class="box shared" x="350" y="178" width="260" height="44" rx="7"/>
+  <text class="lbl" x="480" y="196" text-anchor="middle">hyundai_kia_connect_api</text>
+  <text class="sub" x="480" y="212" text-anchor="middle">Python library — the only Kia client</text>
+
+  <path class="edge" d="M480 222 V256" marker-end="url(#arr)" marker-start="url(#arr)"/>
+
+  <rect class="box shared" x="342" y="256" width="276" height="46" rx="7"/>
+  <text class="lbl" x="480" y="276" text-anchor="middle">kia_client.py</text>
+  <text class="sub" x="480" y="292" text-anchor="middle">shared auth · token · fetch · control</text>
+  <text class="sub" x="632" y="283" font-style="italic">every option below runs through here</text>
+
+  <!-- branch to A (left) and B (right) -->
+  <path class="edge" d="M480 302 V324 H250 V360" marker-end="url(#arr)" marker-start="url(#arr)"/>
+  <path class="edge" d="M480 324 H830 V360" marker-end="url(#arr)" marker-start="url(#arr)"/>
+
+  <!-- ===== Option A ===== -->
+  <rect class="opt" x="24" y="342" width="516" height="250" rx="9"/>
+  <text class="opthead" x="40" y="364">Option A · Home Assistant only</text>
+
+  <rect class="box" x="160" y="376" width="240" height="38" rx="7"/>
+  <text class="lbl" x="280" y="399" text-anchor="middle">kia_access coordinator</text>
+
+  <path class="edge" d="M150 414 V446" marker-end="url(#arr)"/>
+  <path class="edge" d="M283 414 V506" marker-end="url(#arr)"/>
+  <path class="edge" d="M370 414 V446" marker-end="url(#arr)"/>
+
+  <rect class="box" x="40" y="446" width="230" height="54" rx="7"/>
+  <text class="lbl" x="155" y="465" text-anchor="middle">entities</text>
+  <text class="sub" x="155" y="480" text-anchor="middle">sensors · binary_sensors · buttons</text>
+  <text class="sub" x="155" y="493" text-anchor="middle">device_tracker · last_charge · charge_session</text>
+
+  <rect class="box pill" x="300" y="446" width="224" height="54" rx="12"/>
+  <text class="lbl" x="412" y="468" text-anchor="middle">kia_access_alert</text>
+  <text class="sub" x="412" y="484" text-anchor="middle">bus events → automations</text>
+
+  <rect class="box" x="163" y="506" width="240" height="40" rx="7"/>
+  <text class="lbl" x="283" y="526" text-anchor="middle">sensor.&lt;vehicle&gt;_status</text>
+  <text class="sub" x="283" y="539" text-anchor="middle">whole flat payload, one entity</text>
+
+  <path class="edge" d="M283 546 V560" marker-end="url(#arr)"/>
+  <rect class="box" x="163" y="560" width="240" height="24" rx="7"/>
+  <text class="lbl" x="283" y="576" text-anchor="middle">Lovelace card · custom:kia-access-card</text>
+
+  <!-- ===== Option B ===== -->
+  <rect class="opt" x="576" y="342" width="460" height="250" rx="9"/>
+  <text class="opthead" x="592" y="364">Option B · MagicMirror only</text>
+
+  <rect class="box" x="720" y="376" width="200" height="40" rx="7"/>
+  <text class="lbl" x="820" y="396" text-anchor="middle">kia_bridge.py</text>
+  <text class="sub" x="820" y="409" text-anchor="middle">spawned once per poll</text>
+
+  <path class="edge" d="M820 416 V436" marker-end="url(#arr)"/>
+  <rect class="box" x="720" y="436" width="200" height="44" rx="7"/>
+  <text class="lbl" x="820" y="456" text-anchor="middle">node_helper.js</text>
+  <text class="sub" x="820" y="471" text-anchor="middle">token.json · on-disk cache/</text>
+
+  <path class="edge" d="M820 480 V512" marker-end="url(#arr)"/>
+  <path class="edge" d="M880 458 H972 V512" marker-end="url(#arr)"/>
+  <rect class="box pill" x="930" y="512" width="90" height="40" rx="12"/>
+  <text class="lbl" x="975" y="530" text-anchor="middle">MQTT</text>
+  <text class="sub" x="975" y="544" text-anchor="middle">optional</text>
+
+  <rect class="box" x="692" y="512" width="220" height="56" rx="7"/>
+  <text class="lbl" x="802" y="531" text-anchor="middle">MMM-KiaAccess.js</text>
+  <text class="sub" x="802" y="546" text-anchor="middle">table · animated car diagram</text>
+  <text class="sub" x="802" y="559" text-anchor="middle">edge-triggered notifications</text>
+
+  <!-- ===== Option C ===== -->
+  <rect class="opt" x="24" y="612" width="1012" height="150" rx="9"/>
+  <text class="opthead" x="92" y="636">Option C · MagicMirror fed by Home Assistant</text>
+  <text class="sub" x="92" y="651">runs Option A underneath — the mirror never touches Kia; no credentials, no OTP, no Python bridge on the mirror</text>
+
+  <!-- feed from A's status sensor, routed down the far left -->
+  <path class="dot" d="M163 526 H40 V690 H80" marker-end="url(#arrD)"/>
+  <text class="elabel" x="52" y="600" transform="rotate(-90 52 600)" text-anchor="middle">HA local API · long-lived token</text>
+
+  <rect class="box" x="80" y="668" width="200" height="44" rx="7"/>
+  <text class="lbl" x="180" y="688" text-anchor="middle">ha_source.js</text>
+  <text class="sub" x="180" y="703" text-anchor="middle">HA REST + WebSocket</text>
+
+  <path class="edge" d="M280 690 H384" marker-end="url(#arr)"/>
+  <rect class="box" x="384" y="668" width="250" height="44" rx="7"/>
+  <text class="lbl" x="509" y="688" text-anchor="middle">MMM-KiaAccess.js</text>
+  <text class="sub" x="509" y="703" text-anchor="middle">same table · diagram · notifications</text>
+
+  <path class="dot" d="M280 302 V318 H900 V690 H720 V690" marker-end="url(#arrD)" opacity="0"/>
+</svg>

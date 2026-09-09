@@ -82,6 +82,19 @@ something looks wrong.
 
 ---
 
+## How the data flows
+
+Every option reaches the car through the same shared client
+(`hyundai_kia_connect_api` → `kia_client.py`); each poll either wakes the car for
+live data or reads the cached copy Kia / Hyundai already hold. From there the
+three options diverge:
+
+![Data flow for options A, B and C](docs/data-flow.svg)
+
+The [Mermaid source](docs/data-flow.mmd) is the editable original.
+
+---
+
 ## Install
 
 ### A · Home Assistant

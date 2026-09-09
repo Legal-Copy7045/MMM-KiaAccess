@@ -1,0 +1,49 @@
+%% Editable source for docs/data-flow.svg — keep both in sync.
+%% GitHub renders this block natively; the committed SVG is a tidied hand-layout.
+flowchart TB
+    car(["🚗 Your vehicle"])
+    cloud[["Kia / Hyundai cloud servers<br/>(Cloudflare-protected)"]]
+    lib["hyundai_kia_connect_api<br/>Python library — the only Kia client"]
+    kc["kia_client.py<br/>shared auth · token · fetch · control"]
+
+    car <-->|"cellular wake-up —<br/>only on a live refresh"| cloud
+    cloud <-->|"server-cached state —<br/>costs the car nothing"| lib
+    lib <--> kc
+
+    subgraph A["Option A · Home Assistant only"]
+        direction TB
+        coord["kia_access coordinator"]
+        ent["entities<br/>sensors · binary_sensors · buttons<br/>device_tracker · last_charge · charge_session"]
+        evt(["kia_access_alert<br/>bus events → automations"])
+        status["sensor.&lt;vehicle&gt;_status<br/>whole flat payload, one entity"]
+        card["Lovelace card · custom:kia-access-card"]
+        coord --> ent
+        coord --> evt
+        coord --> status --> card
+    end
+
+    subgraph B["Option B · MagicMirror only"]
+        direction TB
+        bridge["kia_bridge.py<br/>spawned once per poll"]
+        nh["node_helper.js<br/>token.json · on-disk cache/"]
+        mm["MMM-KiaAccess.js<br/>table · animated car diagram<br/>edge-triggered notifications"]
+        mqtt(["MQTT — optional"])
+        bridge --> nh --> mm
+        nh --> mqtt
+    end
+
+    subgraph C["Option C · MagicMirror fed by Home Assistant<br/>(runs Option A underneath — the mirror never touches Kia)"]
+        direction TB
+        hasrc["ha_source.js<br/>HA REST + WebSocket"]
+        mmc["MMM-KiaAccess.js<br/>same table · diagram · notifications"]
+        hasrc --> mmc
+    end
+
+    kc <--> coord
+    kc <--> bridge
+    status -.->|"HA local API · long-lived token<br/>(no extra Kia polling)"| hasrc
+
+    classDef kia fill:#fde5ee,stroke:#c2185b,color:#000
+    classDef shared fill:#e2eefb,stroke:#2b6cb0,color:#000
+    class car,cloud kia
+    class lib,kc shared
