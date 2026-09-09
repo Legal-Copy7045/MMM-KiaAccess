@@ -7,7 +7,27 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+
+try:  # HA moved / renamed this over the years — it's only a type hint
+    from homeassistant.data_entry_flow import FlowResult
+except ImportError:  # pragma: no cover
+    FlowResult = dict  # type: ignore[assignment,misc]
+
+try:
+    from homeassistant.helpers.selector import (
+        NumberSelector,
+        NumberSelectorConfig,
+        NumberSelectorMode,
+    )
+
+    def _number(lo, hi, step):
+        return NumberSelector(
+            NumberSelectorConfig(min=lo, max=hi, step=step, mode=NumberSelectorMode.BOX)
+        )
+except ImportError:  # pragma: no cover — very old HA
+
+    def _number(lo, hi, step):
+        return vol.All(vol.Coerce(float), vol.Range(min=lo, max=hi))
 
 from . import kia_client
 from .const import (
@@ -185,16 +205,14 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class KiaAccessOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry) -> None:
-        # HA >= 2024.11 sets .config_entry automatically; only assign on older
-        try:
-            self.config_entry  # noqa: B018
-        except AttributeError:
-            self.config_entry = config_entry
+        # Keep our own reference. Do NOT assign self.config_entry — it's a
+        # read-only property on HA >= 2024.11 and assigning it raises.
+        self._entry = config_entry
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
-        opts = self.config_entry.options
+        opts = dict(self._entry.options)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -202,21 +220,21 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         "scan_interval",
                         default=opts.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=1440)),
+                    ): _number(5, 1440, 1),
                     vol.Optional(
                         "force_refresh_timeout",
                         default=opts.get(
                             "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=180)),
+                    ): _number(0, 180, 1),
                     vol.Optional(
                         "price_per_kwh",
-                        default=opts.get("price_per_kwh", 0.0),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+                        default=float(opts.get("price_per_kwh") or 0),
+                    ): _number(0, 10, 0.001),
                     vol.Optional(
                         "capacity_kwh",
-                        default=opts.get("capacity_kwh", 0.0),
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0, max=300)),
+                        default=float(opts.get("capacity_kwh") or 0),
+                    ): _number(0, 300, 0.1),
                 }
             ),
         )
