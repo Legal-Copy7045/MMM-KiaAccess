@@ -545,18 +545,22 @@ g.KiaAccessCommands={
   function alertBadge(alerts) {
     var hasCrit = alerts.some(function (a) { return a.level === "critical"; });
     var triCol = hasCrit ? COL.bad : COL.warn;
-    var shown = alerts.slice(0, 4);
+    var shown = alerts.slice(0, 3);
+    // reasons under the triangle, sized to match the outside-temp reading (~16).
+    // Left-anchored well inside the canvas (the triangle hugs the viewBox edge,
+    // so big centred text would clip) — the black paint-order halo keeps it
+    // readable where it runs over the roof.
     var lines = shown.map(function (a, i) {
-      return '<text x="22" y="' + (48 + i * 9) + '" font-size="7" font-weight="600" fill="' +
+      return '<text x="-52" y="' + (52 + i * 17) + '" font-size="16" font-weight="700" fill="' +
         (a.level === "critical" ? COL.bad : COL.warn) + '">' + esc(a.label) + "</text>";
     });
     if (alerts.length > shown.length) {
-      lines.push('<text x="22" y="' + (48 + shown.length * 9) +
-        '" font-size="7" fill="' + COL.dim + '">+' + (alerts.length - shown.length) + " more</text>");
+      lines.push('<text x="-52" y="' + (52 + shown.length * 17) +
+        '" font-size="16" fill="' + COL.dim + '">+' + (alerts.length - shown.length) + " more</text>");
     }
     return (
-      '<g transform="translate(192 70)" class="kiaaccess-critical" text-anchor="middle" ' +
-      'style="paint-order:stroke;stroke:#000;stroke-width:2.6px">' +
+      '<g transform="translate(192 70)" class="kiaaccess-critical" ' +
+      'text-anchor="start" style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' +
       '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
       'fill="' + triCol + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
       pulse("opacity", "0.5", "1", 1.05) +
