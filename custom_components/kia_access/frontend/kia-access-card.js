@@ -470,17 +470,81 @@ g.KiaAccessCommands={
     return heatLines(LG_X + 6, LG_X + LG_W - 6, [LG_Y + 9, LG_Y + 18, LG_Y + 27], COL.heat);
   }
 
-  // critical-issue badge — a warning triangle in the right margin, up toward
-  // the front of the car, on the same centre-line as the wall charger (x 214)
-  function criticalBadge() {
+  // short labels for the on-diagram warning badge (kept terse — the right
+  // margin is narrow). Falls back to a spaced-out slug for anything unmapped.
+  var ALERT_LABELS = {
+    tyrePressure: "Tyre",
+    vehicleFault: "Fault",
+    evBatteryLow: "EV low",
+    evBatteryCritical: "EV crit",
+    battery12vLow: "12V low",
+    battery12vCritical: "12V crit",
+    battery12vDrain: "12V drain",
+    unlocked: "Unlocked",
+    doorOpen: "Door",
+    hoodOpen: "Frunk",
+    liftgateOpen: "Boot",
+    windowOpen: "Window",
+    sunroofOpen: "Sunroof",
+    serviceDue: "Service",
+    notPluggedInHome: "Unplugged",
+    otpExpiring: "OTP exp.",
+    chargeInterrupted: "Charge?"
+  };
+
+  /** conditions.evaluate() result -> [{level, label}] for the warning badge:
+   *  active warning/critical only, de-duplicated by label, critical first. */
+  function alertLabels(conds) {
+    if (!Array.isArray(conds)) return [];
+    var rank = { critical: 1, warning: 2 };
+    var rankOf = function (lvl) { return rank[lvl] || 9; };
+    var seen = {};
+    var out = [];
+    conds.forEach(function (c) {
+      if (!c || c.active !== true) return;
+      if (c.level !== "warning" && c.level !== "critical") return;
+      var label =
+        ALERT_LABELS[c.reason] ||
+        String(c.reason || "").replace(/([A-Z])/g, " $1").replace(/^./, function (m) {
+          return m.toUpperCase();
+        }).trim();
+      var key = label.toLowerCase();
+      if (seen[key]) {
+        if (rankOf(c.level) < rankOf(seen[key].level)) seen[key].level = c.level;
+        return;
+      }
+      seen[key] = { level: c.level, label: label };
+      out.push(seen[key]);
+    });
+    out.sort(function (a, b) { return rankOf(a.level) - rankOf(b.level); });
+    return out;
+  }
+
+  // warning badge — a triangle in the right margin (up toward the front, on the
+  // wall-charger centre-line x 214), red if any alert is critical else amber,
+  // with the reason(s) it is on listed underneath.
+  function alertBadge(alerts) {
+    var hasCrit = alerts.some(function (a) { return a.level === "critical"; });
+    var triCol = hasCrit ? COL.bad : COL.warn;
+    var shown = alerts.slice(0, 4);
+    var lines = shown.map(function (a, i) {
+      return '<text x="22" y="' + (48 + i * 9) + '" font-size="7" font-weight="600" fill="' +
+        (a.level === "critical" ? COL.bad : COL.warn) + '">' + esc(a.label) + "</text>";
+    });
+    if (alerts.length > shown.length) {
+      lines.push('<text x="22" y="' + (48 + shown.length * 9) +
+        '" font-size="7" fill="' + COL.dim + '">+' + (alerts.length - shown.length) + " more</text>");
+    }
     return (
-      '<g transform="translate(192 70)" class="kiaaccess-critical">' +
+      '<g transform="translate(192 70)" class="kiaaccess-critical" text-anchor="middle" ' +
+      'style="paint-order:stroke;stroke:#000;stroke-width:2.6px">' +
       '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
-      'fill="' + COL.bad + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
+      'fill="' + triCol + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
       pulse("opacity", "0.5", "1", 1.05) +
       "</path>" +
       '<rect x="20.5" y="11" width="3" height="12" rx="1.5" fill="#fff"/>' +
       '<circle cx="22" cy="29" r="2" fill="#fff"/>' +
+      lines.join("") +
       "</g>"
     );
   }
@@ -568,7 +632,10 @@ g.KiaAccessCommands={
    *   defrost, rearHeat, mirrorHeat, steerHeat, climate ("heat"|"cool"|"on"|null),
    *   airTempC (climate set-point °C), outsideTempC (°C);
    *   tyreFL/FR/RL/RR, tyreAny;
-   *   critical (bool) -> shows a warning triangle in the front-right margin;
+   *   alerts (array of {level:"warning"|"critical", label}) -> warning triangle
+   *     in the front-right margin with the reason(s) listed underneath
+   *     (red if any critical, else amber). `critical:true` still works as a
+   *     shorthand for one unlabelled critical alert;
    *   flashing (bool) -> pulses head + tail lights amber (find-the-car / hazards)
    * @param {object} o { width, battery:false to omit the centre battery,
    *   tempUnit:"C"|"F" for the two on-diagram temperatures }
@@ -798,8 +865,13 @@ g.KiaAccessCommands={
       (o.battery === false
         ? ""
         : verticalBattery(s.batteryPct, s.charging) + battery12v(s.car12vPct)) +
-      // critical-issue warning triangle (front-right margin)
-      (s.critical === true ? criticalBadge() : "") +
+      // warning triangle + reason(s) (front-right margin)
+      (function () {
+        var alerts = Array.isArray(s.alerts)
+          ? s.alerts
+          : (s.critical === true ? [{ level: "critical", label: "" }] : []);
+        return alerts.length ? alertBadge(alerts) : "";
+      })() +
       // outside temperature — always, in the top-left margin
       outsideText +
       "</svg>"
@@ -968,6 +1040,7 @@ g.KiaAccessCommands={
     COL: COL,
     batteryGauge: batteryGauge,
     carDiagram: carDiagram,
+    alertLabels: alertLabels,
     sparkline: sparkline,
     rangeRing: rangeRing,
     chargeBar: chargeBar,
@@ -1715,6 +1788,7 @@ g.KiaAccessCommands={
           state.critical = cres.conditions.some(function (c) {
             return c.level === "critical" && c.active === true;
           });
+          state.alerts = V.alertLabels ? V.alertLabels(cres.conditions) : [];
         } catch (e) { /* ignore */ }
       }
       state.flashing = this._flashing === true;

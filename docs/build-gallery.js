@@ -51,9 +51,14 @@ const GROUPS = [
     ["One tyre warning", { tyreFL: true }],
     ["All-tyre warning", { tyreAny: true }],
   ]],
-  ["Critical issue", [
-    ["Warning triangle", { critical: true }],
-    ["Critical + charging", { critical: true, charging: true, batteryPct: 41 }],
+  ["Warning triangle", [
+    ["Critical + warnings", { alerts: [
+      { level: "critical", label: "Tyre" },
+      { level: "warning", label: "12V low" },
+      { level: "warning", label: "Door" },
+    ] }],
+    ["Warning only + charging", { alerts: [{ level: "warning", label: "Service" }],
+      charging: true, batteryPct: 41 }],
   ]],
   ["Heaters", [
     ["Defrost (front + rear)", { defrost: true }],
