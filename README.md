@@ -679,11 +679,17 @@ Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 `one_way_reachable` / `round_trip_reachable`). `Range reach factor` and
 `… reserve %` are in the **Configure** dialog.
 
-**Reachable-area map.** With a free [Geoapify](https://www.geoapify.com/) API key
-you get a map of how far you can drive, shaded, with your saved places pinned. It
-draws a **straight-line reachable-radius circle** for the usual case, and
-**upgrades to the actual road-network isochrone** once your remaining range drops
-under ~60 mi (Geoapify's free-tier isoline distance limit).
+**Reachable-area map.** A map of how far you can drive, shaded, with your saved
+places pinned. Two providers, both free:
+
+- **[Geoapify](https://www.geoapify.com/)** key (`apiKey` / `api_key`) — renders
+  the map image / tiles, and does the road-network isochrone for a reach
+  **under ~100 km / 60 mi** (its free-tier limit). Above that it's a
+  straight-line circle.
+- **[TomTom](https://developer.tomtom.com/)** key (`tomtomKey` / `tomtom_key`,
+  optional) — a proper road-network isochrone at **any distance** (its
+  Calculate Reachable Range API, up to 50 000 km). Add this and the map follows
+  roads even on a full charge.
 
 ```js
 location: {
@@ -693,32 +699,33 @@ location: {
   rangeMap: {
     enabled: true,
     apiKey: "YOUR_GEOAPIFY_KEY",
-    style: "osm-bright-grey",   // any Geoapify map style
+    tomtomKey: "YOUR_TOMTOM_KEY", // optional — road isochrone at any distance
+    style: "osm-bright-grey",     // any Geoapify map style
     width: 340, height: 220,
-    mode: "drive"               // drive | bicycle | walk
+    mode: "drive"                 // drive | bicycle | walk
   }
 }
 ```
 
-`node_helper` fetches the isoline (cached ~6 h; a parked car makes no calls) and
-builds the image; the module shows the one-way or round-trip shape per
-`reachRoundTrip`. Over ~100 km / 60 mi it's a straight-line circle; under that,
-the real road-network isochrone.
+`node_helper` fetches the polygon in the background (cached ~6 h; a parked car
+makes no calls) and builds the image; the module shows the one-way or round-trip
+shape per `reachRoundTrip`.
 
 **Home Assistant** — two cards:
 
 - **`custom:kia-range-map-card`** — an **interactive Leaflet map** (pan / zoom),
   auto-zoomed to the reachable area, with a **How far / & back** toggle and
   `zone.*` markers (only the ones near enough to matter). Tiles come from
-  Geoapify when an `api_key` is set (styled), otherwise OpenStreetMap. The
-  polygon is drawn client-side — **no API call at all** unless the reach is
-  under ~100 km, when it fetches the road-network isochrone.
+  Geoapify when an `api_key` is set (styled), otherwise OpenStreetMap.
+  With **no keys at all** it still works — a straight-line circle, drawn
+  client-side, zero calls.
 
   ```yaml
   type: custom:kia-range-map-card
   height: 420
   range_map:
-    api_key: YOUR_GEOAPIFY_KEY   # optional (nicer tiles + the ≤100 km isochrone)
+    api_key: YOUR_GEOAPIFY_KEY     # optional — styled tiles + the ≤100 km isochrone
+    tomtom_key: YOUR_TOMTOM_KEY    # optional — real road isochrone at any distance
     style: osm-bright-grey
     mode: drive
   ```

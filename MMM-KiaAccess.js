@@ -138,12 +138,15 @@ Module.register("MMM-KiaAccess", {
         reachRoundTrip: false, // true = show the "…and get back" distance instead
         reachPois: 4, // how many nearby saved places to list
         pois: [], // [{ name, lat, lon }] — homeLat/homeLon adds an implicit "Home"
-        // road-network reachable-area image (needs a Geoapify API key)
+        // road-network reachable-area image. `apiKey` (Geoapify) renders the map;
+        // `tomtomKey` (TomTom, optional) gives a real isochrone at any distance —
+        // without it, anything over ~100 km is a straight-line circle.
         rangeMap: {
           enabled: false,
           apiKey: "",
+          tomtomKey: "",
           provider: "geoapify",
-          mode: "drive", // drive | truck | bicycle | walk
+          mode: "drive", // drive | bicycle | walk
           style: "osm-bright-grey",
           width: 340,
           height: 220,
@@ -384,6 +387,7 @@ Module.register("MMM-KiaAccess", {
       pois.unshift({ name: "Home", lat: Number(loc.homeLat), lon: Number(loc.homeLon) });
     return {
       apiKey: rm.apiKey,
+      tomtomKey: rm.tomtomKey || "",
       provider: rm.provider || "geoapify",
       mode: rm.mode || "drive",
       style: rm.style || "osm-bright-grey",

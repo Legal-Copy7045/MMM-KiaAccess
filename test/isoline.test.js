@@ -13,6 +13,20 @@ assert.ok(u.includes("range=" + I.MAX_DRIVE_KM * 1000), u);
 assert.strictEqual(I.pastMax(I.MAX_DRIVE_KM + 1), true);
 assert.strictEqual(I.pastMax(I.MAX_DRIVE_KM - 1), false);
 
+// ---- TomTom: URL + boundary -> ring ----
+var tt = I.tomtomUrl({ apiKey: "TT", lat: 40.71, lon: -79.75, distanceKm: 237, mode: "drive" });
+assert.ok(tt.indexOf("calculateReachableRange/40.71%2C-79.75/json") !== -1, tt);
+assert.ok(tt.includes("distanceBudgetInMeters=237000") && tt.includes("key=TT") && tt.includes("travelMode=car"));
+var ttRing = I.parseTomtom({ reachableRange: { center: { latitude: 40.7, longitude: -79.7 }, boundary: [
+  { latitude: 41.0, longitude: -80.0 }, { latitude: 41.0, longitude: -79.4 },
+  { latitude: 40.4, longitude: -79.4 }, { latitude: 40.4, longitude: -80.0 }
+] } });
+assert.strictEqual(ttRing.length, 5, "closed ring: 4 points + repeat first");
+assert.deepStrictEqual(ttRing[0], ttRing[4]);
+assert.deepStrictEqual(ttRing[0], [-80.0, 41.0], "[lon, lat] order");
+assert.strictEqual(I.parseTomtom({ reachableRange: { boundary: [] } }), null);
+assert.strictEqual(I.parseTomtom({}), null);
+
 // ---- parseIso: FeatureCollection -> rings, smallest first ----
 const fc = {
   features: [

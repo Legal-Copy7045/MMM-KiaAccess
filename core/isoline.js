@@ -35,10 +35,38 @@
     );
   }
 
-  /** true when the reach is past what the provider will isoline — caller should
-   *  fall back to a plain circle (core/range.js circleRing). */
+  /** true when the reach is past what Geoapify's free isoline will do — the
+   *  caller should use TomTom (if a key is set) or fall back to a circle. */
   function pastMax(km) {
     return km > MAX_DRIVE_KM;
+  }
+
+  // ---- TomTom Calculate Reachable Range: real road-network isochrones at any
+  //      EV distance (distanceBudgetInMeters up to 50 000 km). One distance per
+  //      call, so ask twice for one-way + round-trip. Needs its own free key. ----
+  var TOMTOM = "https://api.tomtom.com/routing/1/calculateReachableRange/";
+
+  function tomtomUrl(o) {
+    return (
+      TOMTOM + enc(o.lat + "," + o.lon) + "/json" +
+      "?key=" + enc(o.apiKey) +
+      "&travelMode=" + enc(o.mode === "bicycle" || o.mode === "pedestrian" ? o.mode : "car") +
+      "&distanceBudgetInMeters=" + Math.round(o.distanceKm * 1000)
+    );
+  }
+
+  /** TomTom response -> ring [[lon,lat], …] (or null) */
+  function parseTomtom(json) {
+    var b = json && json.reachableRange && json.reachableRange.boundary;
+    if (!Array.isArray(b) || b.length < 4) return null;
+    var ring = b
+      .filter(function (p) { return p && isFinite(p.longitude) && isFinite(p.latitude); })
+      .map(function (p) { return [p.longitude, p.latitude]; });
+    if (ring.length < 4) return null;
+    if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) {
+      ring.push(ring[0].slice());
+    }
+    return ring;
   }
 
   /** FeatureCollection -> [{ rangeKm, ring:[[lon,lat],…] }] smallest first */
@@ -184,6 +212,8 @@
   return {
     MAX_DRIVE_KM: MAX_DRIVE_KM,
     isoUrl: isoUrl,
+    tomtomUrl: tomtomUrl,
+    parseTomtom: parseTomtom,
     pastMax: pastMax,
     parseIso: parseIso,
     simplify: simplify,
