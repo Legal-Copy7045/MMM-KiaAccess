@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -31,6 +32,8 @@ class KiaAccessBinarySensor(KiaAccessEntity, BinarySensorEntity):
         self._invert = bool(spec.get("invert"))
         if spec.get("device_class"):
             self._attr_device_class = spec["device_class"]
+        if spec.get("category") == "diagnostic":
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def is_on(self) -> bool | None:

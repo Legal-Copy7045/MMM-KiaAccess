@@ -13,7 +13,7 @@ flowchart TB
     subgraph A["Option A · Home Assistant only"]
         direction TB
         coord["kia_access coordinator"]
-        ent["entities<br/>sensors · binary_sensors · buttons<br/>device_tracker · last_charge · charge_session"]
+        ent["entities<br/>sensor · binary_sensor · button · lock · climate<br/>number · switch · select · device_tracker<br/>last_charge · charge_session"]
         evt(["kia_access_alert<br/>bus events → automations"])
         status["sensor.&lt;vehicle&gt;_status<br/>whole flat payload, one entity"]
         card["Lovelace card · custom:kia-access-card"]

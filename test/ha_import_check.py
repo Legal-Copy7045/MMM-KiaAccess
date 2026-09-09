@@ -25,6 +25,7 @@ assert any(r.startswith("hyundai_kia_connect_api") for r in manifest["requiremen
 
 for mod in ("const", "conditions", "vehicle_state", "coordinator", "config_flow",
             "entity", "sensor", "binary_sensor", "button", "device_tracker",
+            "lock", "climate", "number", "switch", "select", "diagnostics",
             "__init__"):
     importlib.import_module(f"{pkg}.{mod}" if mod != "__init__" else pkg)
     print("imported", mod)
@@ -40,6 +41,15 @@ assert len(const.ENTITIES) >= 20
 assert {c["key"] for c in const.COMMANDS} >= {"lock", "unlock", "start_climate", "send_to_car"}
 _calls = {c.get("call", "bare") for c in const.COMMANDS}
 assert _calls <= {"bare", "positional", "climate_options", "poi"}, f"unknown call style: {_calls}"
+assert {"lock", "climate", "number", "switch", "select"} <= set(const.PLATFORMS)
+assert const.SEAT_LEVELS["Heat - high"] == 8 and const.SEAT_LEVELS["Off"] == 0
+assert set(const.DEFAULT_CLIMATE_PREFS) >= {"duration", "front_left_seat", "steering_wheel"}
+_sc = next(c for c in const.COMMANDS if c["key"] == "start_climate")
+assert "front_left_seat" in _sc["options"] and "rear_right_seat" in _sc["options"]
+
+# diagnostics entry point
+diag = importlib.import_module(f"{pkg}.diagnostics")
+assert hasattr(diag, "async_get_config_entry_diagnostics")
 
 cf = importlib.import_module(f"{pkg}.config_flow")
 assert hasattr(cf, "KiaAccessConfigFlow")

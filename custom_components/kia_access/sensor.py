@@ -13,8 +13,16 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from . import sessions as charge_sessions
-from .const import DOMAIN, ENTITIES
+from .const import DOMAIN, ENTITIES, SEAT_LEVELS
 from .entity import KiaAccessEntity
+
+_SEAT_BY_CODE = {v: k for k, v in SEAT_LEVELS.items()}
+_SEATS = {
+    "front_left_seat_status": "Driver seat",
+    "front_right_seat_status": "Passenger seat",
+    "rear_left_seat_status": "Rear-left seat",
+    "rear_right_seat_status": "Rear-right seat",
+}
 
 
 def _num(x):
@@ -36,6 +44,10 @@ async def async_setup_entry(
     entities.append(KiaAccessSummarySensor(coordinator))
     entities.append(KiaAccessLastChargeSensor(coordinator))
     entities.append(KiaAccessChargeSessionSensor(coordinator))
+    entities.append(KiaAccessActionSensor(coordinator))
+    entities += [
+        KiaAccessSeatSensor(coordinator, key, name) for key, name in _SEATS.items()
+    ]
     async_add_entities(entities)
 
 
@@ -50,6 +62,8 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
             self._attr_state_class = spec["state_class"]
         if spec.get("icon"):
             self._attr_icon = spec["icon"]
+        if spec.get("category") == "diagnostic":
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self):
@@ -63,6 +77,53 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
             return int(num) if num.is_integer() else num
         except (TypeError, ValueError):
             return val
+
+
+class KiaAccessSeatSensor(KiaAccessEntity, SensorEntity):
+    """Current heat/vent level of one seat, decoded to a label."""
+
+    _attr_icon = "mdi:car-seat-heater"
+
+    def __init__(self, coordinator, key: str, name: str) -> None:
+        super().__init__(coordinator, key)
+        self._attr_name = name
+
+    @property
+    def native_value(self):
+        val = self._raw()
+        if val in (None, ""):
+            return None
+        try:
+            return _SEAT_BY_CODE.get(int(val), str(val))
+        except (TypeError, ValueError):
+            return str(val)
+
+
+class KiaAccessActionSensor(KiaAccessEntity, SensorEntity):
+    """The remote command currently running (or the last one and its result)."""
+
+    _attr_icon = "mdi:cog-play"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "last_action")
+        self._attr_name = "Remote action"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self):
+        a = self.coordinator.last_action or {}
+        name, status = a.get("name"), a.get("status")
+        if not name:
+            return "idle"
+        return f"{name} ({status})" if status and status != "running" else name
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return dict(self.coordinator.last_action or {})
 
 
 class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):

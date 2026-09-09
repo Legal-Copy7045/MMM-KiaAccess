@@ -134,6 +134,42 @@ start_climate:
           min: 0
           max: 2
           mode: "box"
+    front_left_seat:
+      name: "Front left seat"
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 8
+          mode: "box"
+    front_right_seat:
+      name: "Front right seat"
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 8
+          mode: "box"
+    rear_left_seat:
+      name: "Rear left seat"
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 8
+          mode: "box"
+    rear_right_seat:
+      name: "Rear right seat"
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 8
+          mode: "box"
 
 stop_climate:
   name: "Stop climate"
