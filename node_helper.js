@@ -354,9 +354,10 @@ module.exports = NodeHelper.create({
     this.maybeRangeMap(id, config, payload);
   },
 
-  // ---- optional road-network reachable-area image (Geoapify) ----
-  // Fetches the isoline in the background, caches the built static-map URLs in
-  // the disk cache, and pushes them to the frontend when ready.
+  // ---- optional road-network reachable-area image ----
+  // The polygon comes from TomTom (any distance, needs tomtomKey) or Geoapify
+  // (<= 100 km) or a plain circle; it's drawn onto a Geoapify static map (which
+  // needs `apiKey`). Runs in the background; result pushed via KIA_RANGE_MAP.
   async maybeRangeMap(id, config, payload) {
     const rm = config && config.rangeMap;
     if (!rm || !rm.apiKey || typeof fetch !== "function") return;
@@ -378,30 +379,41 @@ module.exports = NodeHelper.create({
     if (this._rmInFlight === key) return;
     this._rmInFlight = key;
 
+    const timedFetch = async (url) => {
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), 15000);
+      try {
+        const res = await fetch(url, { signal: ctl.signal });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return await res.json();
+      } finally { clearTimeout(to); }
+    };
+
     try {
-      const need = [oneWay, round].filter((k) => k && !isoline.pastMax(k));
-      let parsed = [];
-      if (need.length) {
-        const ctl = new AbortController();
-        const to = setTimeout(() => ctl.abort(), 15000);
-        const res = await fetch(
-          isoline.isoUrl({ apiKey: rm.apiKey, lat, lon, rangesKm: need, mode: rm.mode }),
-          { signal: ctl.signal }
-        );
-        clearTimeout(to);
-        if (!res.ok) throw new Error("isoline HTTP " + res.status);
-        parsed = isoline.parseIso(await res.json());
-      }
-      const pick = (km) => {
+      // one ring per distance: TomTom (any) -> Geoapify (<=100km) -> circle
+      const ringFor = async (km) => {
         if (!km) return null;
-        if (isoline.pastMax(km)) return drange.circleRing(lat, lon, km);
-        let best = null, bd = Infinity;
-        parsed.forEach((p) => {
-          const d = Math.abs((p.rangeKm || 0) - km);
-          if (d < bd) { bd = d; best = p.ring; }
-        });
-        return best || drange.circleRing(lat, lon, km);
+        if (rm.tomtomKey) {
+          try {
+            const j = await timedFetch(isoline.tomtomUrl(
+              { apiKey: rm.tomtomKey, lat, lon, distanceKm: km, mode: rm.mode }));
+            const ring = isoline.parseTomtom(j);
+            if (ring) return { ring, approx: false };
+          } catch (e) { /* fall through */ }
+        }
+        if (rm.apiKey && !isoline.pastMax(km)) {
+          try {
+            const j = await timedFetch(isoline.isoUrl(
+              { apiKey: rm.apiKey, lat, lon, rangesKm: [km], mode: rm.mode }));
+            const p = isoline.parseIso(j);
+            if (p.length && p[p.length - 1].ring) return { ring: p[p.length - 1].ring, approx: false };
+          } catch (e) { /* fall through */ }
+        }
+        return { ring: drange.circleRing(lat, lon, km), approx: true };
       };
+      const oneR = await ringFor(oneWay);
+      const roundR = await ringFor(round);
+      const pick = (r) => r && r.ring;
 
       const far = Math.max(oneWay, round || 0) * 1.6;
       const markers = [{ lat, lon, color: "#4ea1ff", always: true }].concat(
@@ -420,10 +432,10 @@ module.exports = NodeHelper.create({
       s.rangeMap = {
         key: key, at: Date.now(),
         oneWayKm: Math.round(oneWay), roundTripKm: round ? Math.round(round) : null,
-        oneWayApprox: isoline.pastMax(oneWay),
-        roundTripApprox: round ? isoline.pastMax(round) : null,
-        oneWayUrl: smap(pick(oneWay)),
-        roundTripUrl: smap(pick(round))
+        oneWayApprox: !!(oneR && oneR.approx),
+        roundTripApprox: roundR ? !!roundR.approx : null,
+        oneWayUrl: smap(pick(oneR)),
+        roundTripUrl: smap(pick(roundR))
       };
       this.persist(id);
       this.sendSocketNotification("KIA_RANGE_MAP", { identifier: id, rangeMap: s.rangeMap });

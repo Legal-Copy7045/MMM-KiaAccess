@@ -374,25 +374,39 @@
       if (this._rmFetching === key) return;
       if (this._rmFailAt && Date.now() - this._rmFailAt < 60000) return; // back off after an error
       this._rmFetching = key;
+      var mode = cfg.mode || "drive";
 
-      var need = [inp.oneWay, inp.round].filter(function (k) { return k && !ISO.pastMax(k); });
-      var got = need.length
-        ? fetch(ISO.isoUrl({ apiKey: cfg.api_key, lat: inp.lat, lon: inp.lon, rangesKm: need, mode: cfg.mode || "drive" }))
-            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-            .then(function (j) { return ISO.parseIso(j); })
-        : Promise.resolve([]);
-
-      got.then(function (parsed) {
-        function pick(km) {
-          if (!km) return null;
-          if (ISO.pastMax(km)) return RNG.circleRing(inp.lat, inp.lon, km);
-          var best = null, bd = Infinity;
-          parsed.forEach(function (p) {
-            var d = Math.abs((p.rangeKm || 0) - km);
-            if (d < bd) { bd = d; best = p.ring; }
-          });
-          return best || RNG.circleRing(inp.lat, inp.lon, km);
+      // one ring per distance: TomTom (any) -> Geoapify (<=100km) -> circle
+      function ringFor(km) {
+        if (!km) return Promise.resolve(null);
+        var circle = function () { return { ring: RNG.circleRing(inp.lat, inp.lon, km), approx: true }; };
+        var geo = function () {
+          if (!ISO.pastMax(km)) {
+            return fetch(ISO.isoUrl({ apiKey: cfg.api_key, lat: inp.lat, lon: inp.lon, rangesKm: [km], mode: mode }))
+              .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+              .then(function (j) {
+                var p = ISO.parseIso(j);
+                var ring = p.length ? p[p.length - 1].ring : null;
+                if (!ring) throw 0;
+                return { ring: ring, approx: false };
+              }).catch(circle);
+          }
+          return Promise.resolve(circle());
+        };
+        if (cfg.tomtom_key) {
+          return fetch(ISO.tomtomUrl({ apiKey: cfg.tomtom_key, lat: inp.lat, lon: inp.lon, distanceKm: km, mode: mode }))
+            .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+            .then(function (j) {
+              var ring = ISO.parseTomtom(j);
+              if (!ring) throw 0;
+              return { ring: ring, approx: false };
+            }).catch(geo);
         }
+        return geo();
+      }
+
+      Promise.all([ringFor(inp.oneWay), ringFor(inp.round)]).then(function (res) {
+        var oneR = res[0], roundR = res[1];
         // only pin zones that are roughly reachable — a zone on another
         // continent shouldn't drag the map out
         var far = Math.max(inp.oneWay, inp.round || 0) * 1.6;
@@ -422,10 +436,10 @@
           key: key, at: Date.now(),
           oneWayKm: Math.round(inp.oneWay),
           roundKm: inp.round ? Math.round(inp.round) : null,
-          oneWayApprox: ISO.pastMax(inp.oneWay),
-          roundApprox: inp.round ? ISO.pastMax(inp.round) : null,
-          oneWayUrl: smap(pick(inp.oneWay)),
-          roundUrl: smap(pick(inp.round))
+          oneWayApprox: !!(oneR && oneR.approx),
+          roundApprox: roundR ? !!roundR.approx : null,
+          oneWayUrl: smap(oneR && oneR.ring),
+          roundUrl: smap(roundR && roundR.ring)
         };
         self0._rm = rm;
         self0._rmFailAt = 0;

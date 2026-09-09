@@ -156,6 +156,7 @@
         oneWay: RNG.reach(rk, Object.assign({}, o, { roundTrip: false })),
         round: RNG.reach(rk, Object.assign({}, o, { roundTrip: true })),
         apiKey: this._rm.api_key || null,
+        tomtomKey: this._rm.tomtom_key || null,
         mode: this._rm.mode || "drive"
       };
     }
@@ -230,24 +231,37 @@
       });
     }
 
+    // -> { ring:[[lon,lat],…], kind:"roads"|"straight" }
     _ring(inp, dist) {
       var self0 = this;
-      var circle = function () { return RNG.circleRing(inp.lat, inp.lon, dist); };
-      if (!ISO || !inp.apiKey || ISO.pastMax(dist)) return Promise.resolve(circle());
-      var key = ISO.cacheKey(inp.lat, inp.lon, [dist]);
+      var circle = { ring: RNG.circleRing(inp.lat, inp.lon, dist), kind: "straight" };
+      var key = (inp.tomtomKey ? "t:" : "g:") + ISO.cacheKey(inp.lat, inp.lon, [dist]);
       if (this._isoCache[key]) return Promise.resolve(this._isoCache[key]);
-      return fetch(ISO.isoUrl({
-        apiKey: inp.apiKey, lat: inp.lat, lon: inp.lon, rangesKm: [dist], mode: inp.mode
-      }))
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-        .then(function (j) {
-          var parsed = ISO.parseIso(j);
-          var ring = parsed.length ? parsed[parsed.length - 1].ring : null;
-          if (!ring || ring.length < 4) throw new Error("no polygon");
-          self0._isoCache[key] = ring;
-          return ring;
-        })
-        .catch(function () { return circle(); });
+      var save = function (v) { self0._isoCache[key] = v; return v; };
+      var geoOrCircle = function () {
+        if (!ISO || !inp.apiKey || ISO.pastMax(dist)) return Promise.resolve(circle);
+        return fetch(ISO.isoUrl({ apiKey: inp.apiKey, lat: inp.lat, lon: inp.lon, rangesKm: [dist], mode: inp.mode }))
+          .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+          .then(function (j) {
+            var p = ISO.parseIso(j);
+            var ring = p.length ? p[p.length - 1].ring : null;
+            if (!ring || ring.length < 4) throw 0;
+            return { ring: ring, kind: "roads" };
+          })
+          .catch(function () { return circle; });
+      };
+      // TomTom first — real road isochrone at any distance
+      if (inp.tomtomKey) {
+        return fetch(ISO.tomtomUrl({ apiKey: inp.tomtomKey, lat: inp.lat, lon: inp.lon, distanceKm: dist, mode: inp.mode }))
+          .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+          .then(function (j) {
+            var ring = ISO.parseTomtom(j);
+            if (!ring) throw 0;
+            return save({ ring: ring, kind: "roads" });
+          })
+          .catch(function () { return geoOrCircle().then(save); });
+      }
+      return geoOrCircle().then(save);
     }
 
     _draw(fit) {
@@ -262,7 +276,8 @@
       var dist = mode === "round" ? inp.round : inp.oneWay;
       if (!dist) return;
 
-      this._ring(inp, dist).then(function (ring) {
+      this._ring(inp, dist).then(function (res) {
+        var ring = res.ring;
         grp.clearLayers();
         var latlngs = ring.map(function (p) { return [p[1], p[0]]; });
         var col = mode === "round" ? "#ffb300" : "#4caf50";
@@ -304,7 +319,8 @@
         var cap = self0._root.querySelector("[data-cap]");
         if (cap) {
           var head = "Reach <b>" + kmToDisp(dist, metric) + "</b>" +
-            (mode === "round" ? " there &amp; back" : "");
+            (mode === "round" ? " there &amp; back" : "") +
+            (res.kind === "straight" ? " · straight-line" : " · by road");
           var parts = near.slice(0, 3).map(function (x) {
             var ok = x.km <= dist;
             return "<b class='" + (ok ? "ok" : "no") + "'>" + (ok ? "✓ " : "✗ ") +
