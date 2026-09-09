@@ -34,6 +34,12 @@ CHECK_DEFAULTS = {
     "tyrePressure": {"enabled": True, "level": "critical"},
     "chargeComplete": {"enabled": True, "level": "info", "targetPct": None},
     "chargeInterrupted": {"enabled": True, "level": "warning", "targetPct": None, "minGapPct": 3},
+    "chargingStarted": {"enabled": True, "level": "info"},
+    "serviceDue": {"enabled": True, "level": "warning", "belowKm": 800},
+    "notPluggedInHome": {
+        "enabled": True, "level": "warning", "graceMin": 20,
+        "afterHour": None, "beforeHour": None,
+    },
 }
 
 DEFAULTS = {"title": "Kia EV9", "quietWhileDriving": True, "checks": {}}
@@ -256,5 +262,49 @@ def evaluate(s, cfg, prev):
         emit("charge_interrupted", c_i.get("level"), interrupted,
              "Charging stopped early" + (f" - {round(soc)}%" if soc is not None else ""),
              {"pct": soc, "target": target_i}, True)
+
+    # ---- charging started (one-shot: reassurance it plugged in OK) ----
+    c_cs = _check_cfg(cfg, "chargingStarted")
+    if c_cs.get("enabled"):
+        started_now = prev.get("_charging") is not True and s.get("charging") is True
+        kw = _num(s.get("chargeKw"))
+        emit("charging_started", c_cs.get("level"), bool(started_now),
+             "Charging started" + (f" - {round(kw * 10) / 10} kW" if kw else ""),
+             {"kw": kw, "pct": soc}, True)
+
+    # ---- next service due ----
+    c_sv = _check_cfg(cfg, "serviceDue")
+    if c_sv.get("enabled"):
+        sv_km = _num(s.get("serviceKm"))
+        below_km = _num(c_sv.get("belowKm")) if c_sv.get("belowKm") is not None else 800
+        due_active = None if sv_km is None else sv_km <= below_km
+        dist = (
+            None if sv_km is None
+            else f"{round(sv_km)} km" if s.get("units") == "metric"
+            else f"{round(sv_km * 0.621371)} mi"
+        )
+        emit("service_due", c_sv.get("level"), due_active,
+             "Service not due" if due_active is not True
+             else "Service overdue" if sv_km <= 0
+             else f"Service due - {dist} to go",
+             {"km": sv_km, "remaining": dist})
+
+    # ---- home but not plugged in ----
+    c_hp = _check_cfg(cfg, "notPluggedInHome")
+    if c_hp.get("enabled") and not driving:
+        grace = _num(c_hp.get("graceMin")) if c_hp.get("graceMin") is not None else 20
+        home_min = _num(s.get("homeUnpluggedMin"))
+        hr = time.localtime().tm_hour
+        after = _num(c_hp.get("afterHour"))
+        before = _num(c_hp.get("beforeHour"))
+        in_window = (after is None or hr >= after) and (before is None or hr < before)
+        if s.get("plugged") is True or s.get("atHome") is not True:
+            hp_active = False
+        elif home_min is not None and home_min >= grace and in_window:
+            hp_active = True
+        else:
+            hp_active = prev.get("not_plugged_home") is True
+        emit("not_plugged_home", c_hp.get("level"), hp_active,
+             "Home and not plugged in", {"minutesHome": home_min})
 
     return {"conditions": out, "meta": {"charging": _tri(s.get("charging"))}}

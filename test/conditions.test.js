@@ -102,4 +102,41 @@ assert.strictEqual(find(r, "otp_expiring").active, false);
 r = C.evaluate({ tokenAgeDays: null }, {}, {});
 assert.strictEqual(find(r, "otp_expiring").active, null);
 
+// --- charging started (one-shot) ---
+r = C.evaluate({ charging: true, chargeKw: 7.4 }, {}, { _charging: false });
+assert.strictEqual(find(r, "charging_started").active, true);
+assert.ok(/7\.4 kW/.test(find(r, "charging_started").message));
+r = C.evaluate({ charging: true }, {}, { _charging: true }); // already charging last tick
+assert.strictEqual(find(r, "charging_started").active, false);
+
+// --- service due ---
+r = C.evaluate({ serviceKm: 600, units: "imperial" }, {}, {});
+assert.strictEqual(find(r, "service_due").active, true);
+assert.ok(/373 mi to go/.test(find(r, "service_due").message));
+r = C.evaluate({ serviceKm: 4000 }, {}, {});
+assert.strictEqual(find(r, "service_due").active, false);
+r = C.evaluate({ serviceKm: -10, units: "metric" }, {}, {});
+assert.ok(/overdue/.test(find(r, "service_due").message));
+r = C.evaluate({ serviceKm: null }, {}, {});
+assert.strictEqual(find(r, "service_due").active, null);
+
+// --- home but not plugged in ---
+r = C.evaluate({ atHome: true, plugged: false, homeUnpluggedMin: 30 }, {}, {});
+assert.strictEqual(find(r, "not_plugged_home").active, true);
+r = C.evaluate({ atHome: true, plugged: true, homeUnpluggedMin: null }, {}, {});
+assert.strictEqual(find(r, "not_plugged_home").active, false);
+r = C.evaluate({ atHome: true, plugged: false, homeUnpluggedMin: 5 }, {}, {}); // pre-grace
+assert.strictEqual(find(r, "not_plugged_home").active, false);
+r = C.evaluate({ atHome: true, plugged: false, homeUnpluggedMin: 5 }, {}, { not_plugged_home: true }); // hold
+assert.strictEqual(find(r, "not_plugged_home").active, true);
+r = C.evaluate({ plugged: false, homeUnpluggedMin: 60 }, {}, {}); // no atHome -> inert
+assert.strictEqual(find(r, "not_plugged_home").active, false);
+// time window
+r = C.evaluate(
+  { atHome: true, plugged: false, homeUnpluggedMin: 30 },
+  { checks: { notPluggedInHome: { afterHour: 25 } } }, // impossible hour -> never in window
+  {}
+);
+assert.strictEqual(find(r, "not_plugged_home").active, false);
+
 console.log("all conditions tests passed");

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import logging
+import math
+import time
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from . import kia_client
 from .conditions import evaluate as evaluate_conditions
@@ -46,6 +49,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._prev_cond: dict = {}
         self._announced: dict = {}
         self._first_alert_run = True
+        self._home_unplugged_since: float | None = None
 
     def _job(self, **extra) -> dict:
         d = self.entry.data
@@ -93,6 +97,29 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._emit_alerts()
         return self.vehicle
 
+    def _at_home(self, state: dict) -> bool | None:
+        """Within zone.home's radius? None if the zone or a GPS fix is missing."""
+        zone = self.hass.states.get("zone.home")
+        lat = state.get("locationLat")
+        lon = state.get("locationLon")
+        if zone is None or lat is None or lon is None:
+            return None
+        hlat = zone.attributes.get("latitude")
+        hlon = zone.attributes.get("longitude")
+        radius_m = zone.attributes.get("radius", 100)
+        if hlat is None or hlon is None:
+            return None
+        # haversine, metres
+        r = 6371000.0
+        p = math.pi / 180.0
+        a = (
+            0.5
+            - math.cos((hlat - lat) * p) / 2
+            + math.cos(lat * p) * math.cos(hlat * p) * (1 - math.cos((hlon - lon) * p)) / 2
+        )
+        dist_m = 2 * r * math.asin(math.sqrt(a))
+        return dist_m <= float(radius_m)
+
     def _emit_alerts(self) -> None:
         """Fire kia_access_alert events on edge-triggered condition changes,
         using the exact same rules as the MagicMirror module (conditions.py)."""
@@ -101,7 +128,22 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         if self.meta.get("tokenEnrolledAt"):
             flat["_meta.tokenEnrolledAt"] = self.meta["tokenEnrolledAt"]
         cfg = self.entry.options.get("notifications", {}) or {}
-        state = build_state(flat, {})
+        units = "metric" if self.hass.config.units is METRIC_SYSTEM else "imperial"
+        state = build_state(flat, {"units": units})
+
+        # home / not-plugged-in context
+        state["atHome"] = self._at_home(state)
+        home_unplugged = state["atHome"] is True and state.get("plugged") is not True
+        if home_unplugged and self._home_unplugged_since is None:
+            self._home_unplugged_since = time.monotonic()
+        if not home_unplugged:
+            self._home_unplugged_since = None
+        state["homeUnpluggedMin"] = (
+            (time.monotonic() - self._home_unplugged_since) / 60
+            if self._home_unplugged_since is not None
+            else None
+        )
+
         try:
             res = evaluate_conditions(state, cfg, self._prev_cond)
         except Exception:  # noqa: BLE001
