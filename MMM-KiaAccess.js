@@ -614,7 +614,28 @@ Module.register("MMM-KiaAccess", {
     st.homeUnpluggedMin = this._homeUnpluggedSince
       ? (Date.now() - this._homeUnpluggedSince) / 60000 : null;
 
+    if (this.config.debug) {
+      const loc = (this.config.visuals && this.config.visuals.location) || {};
+      Log.info("[MMM-KiaAccess] home check: " + JSON.stringify({
+        carLat: st.locationLat, carLon: st.locationLon,
+        homeLat: loc.homeLat, homeLon: loc.homeLon, radiusKm: loc.homeRadiusKm,
+        distKm: (st.locationLat != null && loc.homeLat != null)
+          ? +this.haversineKm(st.locationLat, st.locationLon,
+              Number(loc.homeLat), Number(loc.homeLon)).toFixed(3) : null,
+        atHome: st.atHome, plugged: st.plugged,
+        homeUnpluggedMin: st.homeUnpluggedMin == null
+          ? null : +st.homeUnpluggedMin.toFixed(1)
+      }));
+    }
+
     const res = this.conditions.evaluate(st, cfg, this.prevCond);
+
+    if (this.config.debug) {
+      const hp = res.conditions.find((c) => c.reason === "not_plugged_home");
+      Log.info("[MMM-KiaAccess] not_plugged_home -> " +
+        (hp ? JSON.stringify({ level: hp.level, active: hp.active, message: hp.message })
+            : "check not evaluated (disabled or driving)"));
+    }
 
     // any active critical condition -> the diagram shows a warning triangle
     // (independent of whether the `alert` notifications are enabled)
