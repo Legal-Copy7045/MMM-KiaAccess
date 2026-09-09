@@ -557,10 +557,11 @@ The car diagram:
   pulse amber five times.
 - **wheels** show a `!` on a per-tyre pressure warning (all four for the
   "all tyres" warning).
-- **critical issue** → a pulsing red warning triangle in the right margin, on
-  the wall-charger centre-line, whenever any `critical` condition is active
-  (tyre pressure, a fault lamp, a hard-low battery). Shows regardless of whether
-  `notifications` are enabled.
+- **warning triangle** → a pulsing triangle in the right margin (wall-charger
+  centre-line) whenever any `warning`- or `critical`-level condition is active —
+  **red** if anything is critical, **amber** otherwise — with the **reason(s)
+  listed underneath** it (`Tyre`, `12V low`, `Door`, `Service`, … up to four,
+  then `+N more`). Shows regardless of whether `notifications` are enabled.
 - **plugged in** → a wall-box + cable appear at the rear-right charge port.
   Charging: the port pulses green, particles flow charger → car, and the
   **kW being drawn** (`ev_charging_power`) + **current in amps**

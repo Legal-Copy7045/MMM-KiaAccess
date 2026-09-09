@@ -249,6 +249,7 @@ Module.register("MMM-KiaAccess", {
     this.staleNote = null;
     this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
     this.firstConditionRun = true;
+    this.diagramAlerts = []; // [{level,label}] under the diagram's warning triangle
 
     // MagicMirror merges `config` shallowly, so a user-supplied nested block
     // replaces the default wholesale — re-apply the defaults for any missing keys
@@ -563,6 +564,11 @@ Module.register("MMM-KiaAccess", {
     this.hasCritical = res.conditions.some(
       (c) => c.level === "critical" && c.active === true
     );
+    // reasons the diagram's warning triangle lists underneath itself
+    this.diagramAlerts =
+      this.visuals && this.visuals.alertLabels
+        ? this.visuals.alertLabels(res.conditions)
+        : [];
 
     if (cfg.enabled) this.fireNotifications(res, cfg);
 
@@ -1065,6 +1071,7 @@ Module.register("MMM-KiaAccess", {
     if (V && vis.enabled) {
       const s = this.visualState();
       s.critical = !!this.hasCritical; // set by processConditions()
+      s.alerts = this.diagramAlerts || []; // reasons under the warning triangle
       const panel = document.createElement("div");
       panel.className = "kiaaccess-visuals";
 

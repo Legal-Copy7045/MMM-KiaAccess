@@ -416,6 +416,7 @@
           state.critical = cres.conditions.some(function (c) {
             return c.level === "critical" && c.active === true;
           });
+          state.alerts = V.alertLabels ? V.alertLabels(cres.conditions) : [];
         } catch (e) { /* ignore */ }
       }
       state.flashing = this._flashing === true;
