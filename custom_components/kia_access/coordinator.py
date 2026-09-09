@@ -214,6 +214,17 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "last_3_months": charge_sessions.summary(self._sessions, 90),
         }
 
+    def _poll_car_directly(self) -> bool:
+        """Master switch: wake the car for live data (vs. Kia's server cache)."""
+        opts = self.entry.options
+        if "poll_car_directly" in opts:
+            return bool(opts["poll_car_directly"])
+        # pre-toggle installs: infer from the old seconds-based option
+        try:
+            return float(opts.get("force_refresh_timeout", 0) or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
     def _job(self, **extra) -> dict:
         d = self.entry.data
         job = {
@@ -225,8 +236,17 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "vin": d.get(CONF_VIN, ""),
             "geocode": d.get(CONF_GEOCODE, False),
             "token": d.get(CONF_TOKEN),
-            "forceRefreshTimeout": self.entry.options.get(
-                "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
+            # "Poll the car directly" is the master switch. When it's off (the
+            # default — kinder to the 12V battery) every update takes Kia's
+            # server-side cache: forceRefreshTimeout 0 tells kia_client not to
+            # wake the car. When on, we wait up to force_refresh_timeout seconds
+            # for a live reading before falling back to the cache.
+            "forceRefreshTimeout": (
+                self.entry.options.get(
+                    "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
+                )
+                if self._poll_car_directly()
+                else 0
             ),
         }
         job.update(extra)

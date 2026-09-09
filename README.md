@@ -30,9 +30,9 @@ Assistant, so the car is only ever woken once.
 > doesn't answer in time.
 > - **MagicMirror** — `refresh: true` wakes the car, `refresh: false` uses the
 >   cache. `forceRefreshTimeout` bounds the wake-up.
-> - **Home Assistant** — **Configure → Live wake-up timeout**: a number of
->   seconds wakes the car (bounded), **`0`** = cached reads only. Poll frequency
->   is the **Scan interval** next to it.
+> - **Home Assistant** — **Configure → Poll the car directly**: off (the
+>   default) reads only Kia's server cache; on wakes the car every poll, bounded
+>   by **Live wake-up wait**. Poll frequency is the **Scan interval** next to it.
 
 ## Supported vehicles
 
@@ -184,11 +184,12 @@ Lovelace card. No MagicMirror required.
    browser. For a fixed one-tap warm-up, call `kia_access.start_climate` from a
    script or automation instead.
 
-**Scan interval** and **Live wake-up timeout** are in the integration's
-**Configure** dialog — set the timeout to `0` to only ever read Kia's cached
-data and never wake the car (see the note at the top of this README). The
-rotated refresh token is stored in the config entry — nothing is written into
-the HACS-managed folder.
+**Scan interval** and **Poll the car directly** are in the integration's
+**Configure** dialog. Leave **Poll the car directly** off (the default) to only
+ever read Kia's cached data and never wake the car (see the note at the top of
+this README); turn it on for live readings, bounded by **Live wake-up wait**.
+The rotated refresh token is stored in the config entry — nothing is written
+into the HACS-managed folder.
 
 ### B · MagicMirror only
 
