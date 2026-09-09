@@ -82,6 +82,26 @@
   color: #ff9a9a;
 }
 
+/* persistent, non-blocking critical banner at the top of the module */
+.kiaaccess-alertbanner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  padding: 5px 9px;
+  border-radius: 5px;
+  background: rgba(200, 40, 40, 0.18);
+  border-left: 3px solid #e53935;
+  color: #ff8a80;
+  font-size: calc(15px * var(--kia-scale, 1));
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.kiaaccess-alertbanner .fa-triangle-exclamation {
+  color: #ffb300;
+}
+
 .kiaaccess-compact {
   font-size: calc(17px * var(--kia-scale, 1));
   padding: 2px 0;
