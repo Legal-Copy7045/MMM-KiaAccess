@@ -26,10 +26,12 @@ flowchart TB
         direction TB
         bridge["kia_bridge.py<br/>spawned once per poll"]
         nh["node_helper.js<br/>token.json · on-disk cache/"]
-        mm["MMM-KiaAccess.js<br/>table · animated car diagram<br/>edge-triggered notifications"]
-        mqtt(["MQTT — optional"])
+        mm["MMM-KiaAccess.js<br/>table · animated car diagram<br/>edge-triggered alerts + webhook events"]
+        mqtt(["MQTT — optional<br/>full state, every poll"])
+        hook(["webhook — optional<br/>HTTP POST per event"])
         bridge --> nh --> mm
         nh --> mqtt
+        nh --> hook
     end
 
     subgraph C["Option C · MagicMirror fed by Home Assistant<br/>(runs Option A underneath — the mirror never touches Kia)"]

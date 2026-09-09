@@ -179,6 +179,22 @@ Module.register("MMM-KiaAccess", {
         // chargingStarted: false,       // "Charging started — 7.4 kW" (info)
         // serviceDue:      { belowKm: 800 },   // ~500 mi to the next service
         // notPluggedInHome:{ graceMin: 20, afterHour: 16 }, // needs visuals.location.homeLat/Lon
+      },
+
+      // ---- optional outbound webhook (node_helper) ----
+      // One HTTP POST per edge-triggered event — reaches services an MQTT broker
+      // can't (Discord/Slack/IFTTT, a cloud logger, a serverless function). The
+      // body is the same shape as the KIA_ACCESS_STATE_CHANGED notification.
+      // Needs notifications.enabled: true (set alertModule: false for webhook-only).
+      webhook: {
+        enabled: false,
+        url: "", // https endpoint; one POST per event
+        method: "POST",
+        headers: {}, // e.g. { Authorization: "Bearer …" }
+        events: "all", // "all", or an array of reason slugs to include
+        levels: "all", // "all", or an array of ["info","warning","critical"]
+        includeState: false, // add the full flattened vehicle state to the body
+        timeoutMs: 8000
       }
     },
 
@@ -243,6 +259,10 @@ Module.register("MMM-KiaAccess", {
     this.config.icons = merge(this.defaults.icons, this.config.icons);
     this.config.homeassistant = merge(this.defaults.homeassistant, this.config.homeassistant);
     this.config.notifications = merge(this.defaults.notifications, this.config.notifications);
+    this.config.notifications.webhook = merge(
+      this.defaults.notifications.webhook,
+      this.config.notifications.webhook
+    );
     this.config.mqtt = merge(this.defaults.mqtt, this.config.mqtt);
     this.config.mqtt.homeAssistant = merge(
       this.defaults.mqtt.homeAssistant,
@@ -562,6 +582,7 @@ Module.register("MMM-KiaAccess", {
       (cfg.notifyOnStartup === "critical" && level === "critical");
 
     this.announcedActive = this.announcedActive || {};
+    const fired = [];
     res.conditions.forEach((c) => {
       const was = this.prevCond[c.reason];
       const becameActive = c.active === true && was !== true;
@@ -573,7 +594,7 @@ Module.register("MMM-KiaAccess", {
       if (becameActive && fire) this.announcedActive[c.reason] = true;
       if (cleared) this.announcedActive[c.reason] = false;
       if (fire) {
-        this.sendNotification("KIA_ACCESS_STATE_CHANGED", {
+        const event = {
           reason: c.reason,
           level: c.level,
           active: c.active,
@@ -582,7 +603,9 @@ Module.register("MMM-KiaAccess", {
           value: c.value,
           vin: vin,
           at: new Date().toISOString()
-        });
+        };
+        fired.push(event);
+        this.sendNotification("KIA_ACCESS_STATE_CHANGED", event);
         if (cfg.alertModule !== false && (c.level === "warning" || c.level === "critical")) {
           const critical = c.level === "critical";
           const secs = critical
@@ -611,6 +634,17 @@ Module.register("MMM-KiaAccess", {
         }
       }
     });
+
+    // hand any fired events to node_helper for the outbound webhook (it applies
+    // the events/levels filter and does the HTTP POST off the main process)
+    const hook = cfg.webhook || {};
+    if (hook.enabled && hook.url && fired.length) {
+      this.sendSocketNotification("KIA_WEBHOOK", {
+        events: fired,
+        webhook: hook,
+        state: hook.includeState ? this.flatMap : null
+      });
+    }
   },
 
   // let another module (or a button) force an immediate refresh
