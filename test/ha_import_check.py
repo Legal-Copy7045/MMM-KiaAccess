@@ -44,6 +44,13 @@ cf = importlib.import_module(f"{pkg}.config_flow")
 assert hasattr(cf, "KiaAccessConfigFlow")
 assert hasattr(cf.KiaAccessConfigFlow, "async_step_otp")
 
+# the options flow must instantiate without touching the read-only
+# OptionsFlow.config_entry property (HA >= 2024.11)
+_fake_entry = type("E", (), {"options": {}, "data": {}, "entry_id": "x"})()
+assert cf.KiaAccessConfigFlow.async_get_options_flow(_fake_entry) is not None
+assert cf.KiaAccessOptionsFlow(_fake_entry)._entry is _fake_entry
+assert callable(cf._number)
+
 init = importlib.import_module(pkg)
 assert hasattr(init, "_register_frontend")
 assert os.path.exists(
