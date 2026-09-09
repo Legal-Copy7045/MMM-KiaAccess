@@ -638,25 +638,27 @@ g.KiaAccessCommands={
         : "";
 
     // live charge readout — only while actually charging: kW drawn + current (A).
-    // Centred under the wall box (its centre is x214), clear of the car body,
-    // kept inside the right viewBox edge (x 232).
+    // Sits under the wall box (centre x214; nudged 3px left so a 3-digit DC "kW"
+    // stays inside the right viewBox edge at x 232), clear of the car body.
     var chargeInfo = "";
     if (s.charging === true) {
+      // no space before the unit — keeps the bigger text inside the viewBox
+      // edge at the centred position under the wall box
       var kwNum = Number(s.chargeKw);
       var kw = isFinite(kwNum) && kwNum > 0
-        ? (kwNum >= 100 ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + " kW"
+        ? (kwNum >= 100 ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + "kW"
         : null;
       var aNum = Number(s.chargeAmps);
-      var amps = isFinite(aNum) && aNum > 0 ? Math.round(aNum) + " A" : null;
+      var amps = isFinite(aNum) && aNum > 0 ? Math.round(aNum) + "A" : null;
       var rows = [];
       if (kw) rows.push([kw, COL.ok]);
       if (amps) rows.push([amps, COL.text]);
       if (rows.length) {
         chargeInfo =
-          '<g transform="translate(214 289)" text-anchor="middle" ' +
-          'style="paint-order:stroke;stroke:#000;stroke-width:2.6px">' +
+          '<g transform="translate(211 289)" text-anchor="middle" ' +
+          'style="paint-order:stroke;stroke:#000;stroke-width:3px">' +
           rows.map(function (r, i) {
-            return '<text x="0" y="' + (i * 11) + '" font-size="9" ' +
+            return '<text x="0" y="' + (i * 12.5) + '" font-size="11" ' +
               'font-weight="700" fill="' + r[1] + '">' + esc(r[0]) + "</text>";
           }).join("") +
           "</g>";
@@ -710,12 +712,12 @@ g.KiaAccessCommands={
     var outT = tempStr(s.outsideTempC, tUnit);   // always shown, outside the body
     var setpointText =
       s.climate && setT
-        ? '<text x="100" y="85" text-anchor="middle" font-size="13" font-weight="700" fill="' +
+        ? '<text x="100" y="87" text-anchor="middle" font-size="17" font-weight="700" fill="' +
           climCol + '" style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' + setT + "</text>"
         : "";
     // small thermometer glyph + the reading, top-left margin, outside the body
     var outsideText = outT
-      ? '<g transform="translate(-25 20)">' +
+      ? '<g transform="translate(-27 18) scale(1.28)">' +
         '<path d="M 4 1.5 a 2.4 2.4 0 0 1 2.4 2.4 v 5.4 a 3.5 3.5 0 1 1 -4.8 0 V 3.9 A 2.4 2.4 0 0 1 4 1.5 z" ' +
         'fill="none" stroke="' + COL.dim + '" stroke-width="1.2"/>' +
         '<path d="M 4 5.5 V 12" stroke="' + COL.dim + '" stroke-width="2.2" stroke-linecap="round"/>' +
