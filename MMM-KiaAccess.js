@@ -133,9 +133,14 @@ Module.register("MMM-KiaAccess", {
           "https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom={zoom}&size={w}x{h}&markers={lat},{lon},red-pushpin"
       },
       chargeCost: {
-        enabled: false,
-        pricePerKwh: 0, // e.g. 0.14
-        currency: "$"
+        enabled: false, // the "est. cost to the target" line while charging
+        pricePerKwh: 0, // your all-in marginal rate, e.g. 0.185
+        currency: "$",
+        capacityKwh: null, // usable pack kWh; falls back to ev_battery_capacity then 99.8 (EV9)
+        log: false, // a charge-session history widget (kWh + cost per session + monthly total)
+        logMonths: 3, // how far back the widget looks
+        logRows: 4, // most recent sessions to list
+        logRetentionDays: 180 // sessions kept on disk
       },
       // readouts shown under the battery gauge (and removed from the table).
       // Uses your labels / formatters / hideWhenFalsy just like table rows.
@@ -205,7 +210,8 @@ Module.register("MMM-KiaAccess", {
       this.file("core/flatten.js"),
       this.file("core/visuals.js"),
       this.file("core/conditions.js"),
-      this.file("core/state.js")
+      this.file("core/state.js"),
+      this.file("core/sessions.js")
     ];
   },
 
@@ -218,8 +224,11 @@ Module.register("MMM-KiaAccess", {
     this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
     this.conditions = typeof KiaConditions !== "undefined" ? KiaConditions : null;
     this.stateBuilder = typeof KiaAccessState !== "undefined" ? KiaAccessState : null;
+    this.sessionLib = typeof KiaAccessSessions !== "undefined" ? KiaAccessSessions : null;
     this.flatMap = null;
     this.history = [];
+    this.sessions = [];
+    this.openSession = null;
     this.stale = false;
     this.staleNote = null;
     this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
@@ -309,6 +318,11 @@ Module.register("MMM-KiaAccess", {
       maxRequestsPerHour: c.maxRequestsPerHour,
       historyDays: c.historyDays,
       historyMinIntervalMinutes: c.historyMinIntervalMinutes,
+      chargeLog: {
+        pricePerKwh: ((c.visuals || {}).chargeCost || {}).pricePerKwh || 0,
+        capacityKwh: ((c.visuals || {}).chargeCost || {}).capacityKwh || null,
+        retentionDays: ((c.visuals || {}).chargeCost || {}).logRetentionDays || 180
+      },
       mqtt: c.mqtt && c.mqtt.enabled && c.mqtt.url ? c.mqtt : null
     };
   },
@@ -322,6 +336,9 @@ Module.register("MMM-KiaAccess", {
       this.rawPayload = data.payload;
       const m = data.payload._meta || {};
       this.history = data.payload.history || [];
+      this.sessions = data.payload.sessions || [];
+      this.openSession = data.payload.openSession || null;
+      this.liveChargeTimer(); // start/stop the "cost this charge" refresh
       this.stale = !!m.stale;
       this.staleNote = m.note || null;
       this.errorMessage = m.error || null; // shown as a strip; data still renders
@@ -657,6 +674,38 @@ Module.register("MMM-KiaAccess", {
     return bits.join(" · ");
   },
 
+  // while a charge session is open, re-render every 30s so the running cost
+  // keeps climbing between polls
+  liveChargeTimer() {
+    const want = !!this.openSession;
+    if (want && !this._liveTimer) {
+      this._liveTimer = setInterval(() => this.updateDom(0), 30000);
+    } else if (!want && this._liveTimer) {
+      clearInterval(this._liveTimer);
+      this._liveTimer = null;
+    }
+  },
+
+  // "£1.23 this charge · 6.7 kWh" for the session in progress, or null
+  sessionCostLine() {
+    const cc = (this.config.visuals || {}).chargeCost || {};
+    if (!this.sessionLib || !this.openSession) return null;
+    const s = this.visualState();
+    if (s.charging !== true) return null;
+    const p = this.sessionLib.progress(this.openSession, {
+      t: Date.now(), charging: true,
+      batteryPct: s.batteryPct, chargeKw: s.chargeKw
+    }, {
+      pricePerKwh: cc.pricePerKwh,
+      capacityKwh: cc.capacityKwh || s.capacityKwh
+    });
+    if (!p || p.kwh == null) return null;
+    const kwh = (Math.round(p.kwh * 10) / 10) + " kWh";
+    return p.cost != null
+      ? (cc.currency || "$") + p.cost.toFixed(2) + " this charge · " + kwh
+      : kwh + " this charge";
+  },
+
   // charge progress bar + "full at HH:MM" when plugged in
   chargeProgressEl() {
     const s = this.visualState();
@@ -683,7 +732,12 @@ Module.register("MMM-KiaAccess", {
       msg = hm + " → " + to + " at " +
         done.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
-    cap.innerHTML = '<div><span class="kiaaccess-bd-value">' + this.escape(msg) + "</span></div>";
+    let html = '<div><span class="kiaaccess-bd-value">' + this.escape(msg) + "</span></div>";
+    const costLine = this.sessionCostLine();
+    if (costLine) {
+      html += '<div><span class="kiaaccess-bd-value">' + this.escape(costLine) + "</span></div>";
+    }
+    cap.innerHTML = html;
     el.appendChild(cap);
     return el;
   },
@@ -812,6 +866,46 @@ Module.register("MMM-KiaAccess", {
             "</span></div>"
         )
         .join("");
+    return el;
+  },
+
+  // charge-session log — recent sessions + a rolling total
+  chargeLogEl() {
+    const cc = (this.config.visuals || {}).chargeCost || {};
+    if (!cc.log) return null;
+    const list = (this.sessions || []).slice()
+      .filter((x) => x && x.endedAt)
+      .sort((a, b) => b.endedAt - a.endedAt);
+    if (!list.length) return null;
+
+    const cur = (n) => (cc.currency || "$") + Number(n).toFixed(2);
+    const kwh = (n) => (Math.round(Number(n) * 10) / 10) + " kWh";
+    const val = (x) =>
+      (x.kwh != null ? kwh(x.kwh) : "") +
+      (x.cost != null ? " · " + cur(x.cost) : "") || "—";
+
+    const months = cc.logMonths || 3;
+    const sum = this.sessionLib
+      ? this.sessionLib.summary(list, months * 30)
+      : { kwh: null, cost: null };
+
+    const el = document.createElement("div");
+    el.className = "kiaaccess-batt-detail";
+    const rows = list.slice(0, cc.logRows || 4).map((x) =>
+      '<div><span class="kiaaccess-bd-label">' +
+      this.escape(this.agoText(new Date(x.endedAt))) +
+      '</span><span class="kiaaccess-bd-value">' + this.escape(val(x)) + "</span></div>"
+    ).join("");
+    const total =
+      '<div style="opacity:.85;border-top:1px solid rgba(255,255,255,.15);margin-top:3px;padding-top:3px">' +
+      '<span class="kiaaccess-bd-label">Last ' + months + ' mo</span>' +
+      '<span class="kiaaccess-bd-value">' + this.escape(
+        (sum.kwh != null ? kwh(sum.kwh) : "") +
+        (sum.cost != null ? " · " + cur(sum.cost) : "")
+      ) + "</span></div>";
+    el.innerHTML =
+      '<div class="kiaaccess-bd-label" style="text-align:center;margin-bottom:2px">Charging log</div>' +
+      rows + total;
     return el;
   },
 
@@ -977,6 +1071,7 @@ Module.register("MMM-KiaAccess", {
         this.v12HistoryEl(),
         this.preconditionEl(),
         this.chargeCostEl(),
+        this.chargeLogEl(),
         this.tripStatsEl(),
         this.locationEl()
       ].forEach((el) => el && wrapper.appendChild(el));

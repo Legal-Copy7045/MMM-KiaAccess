@@ -141,6 +141,12 @@ Lovelace card. No MagicMirror required.
    - sensors + binary sensors (battery, range, charge power, doors, lock, plug,
      climate, tyre warning, next-service distance, valet mode, battery
      preconditioning, …), generated from `core/entities.json`
+   - **`Last charge`** — cost (or kWh) of the most recent completed charge, with
+     the session detail + a 30-/90-day total in its attributes
+   - **`Charge session`** — a live figure that climbs while charging (ticks
+     every 60 s on its own). Both need a price: **Settings → Devices &
+     Services → Kia Access → Configure → Price per kWh** (and optional pack
+     kWh). Sessions run plug-in → unplug and persist across restarts.
    - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
      car), `open` / `close charge port`, `start` / `stop charge`
    - **services**: the no-arg buttons above, plus `kia_access.start_climate`
@@ -406,7 +412,7 @@ Common EV9 (US) paths:
 | `visuals.v12History` | `false` | 12V-battery-% sparkline (`visuals.v12HistoryDays`, default 14) — spot vampire drain |
 | `visuals.tripStats` | `false` | distance / consumption / regen from `month_trip_info` |
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map` — see [Location](#location--map) |
-| `visuals.chargeCost` | `{ enabled:false }` | estimated cost to the charge target (`pricePerKwh`, `currency`) |
+| `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180) |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
@@ -515,14 +521,21 @@ Each is off by default and stacks under the car:
 - **`compact`** — replaces everything with one line: `78% · 312 mi · 🔒 · ⚡ 7.4 kW`.
 - **`chargeProgress`** — while plugged in, a bar (current + target) and either
   `2h 45m → full at 06:40` (or `→ 80%` for a sub-100 target) or "Plugged in,
-  not charging".
+  not charging". With `chargeCost.pricePerKwh` set it also shows a **live running
+  cost** — `$1.85 this charge · 10.0 kWh` — that climbs (re-rendered every 30 s,
+  extrapolated from the last kW between polls).
 - **`rangeRing`** — a radial gauge: SoC on the ring, range in the centre.
 - **`socHistory`** / **`v12History`** — battery-% sparklines (EV and 12V) over the
   last N days, from the history the helper keeps on disk. `v12History` is the one
   to watch for a slow parasitic drain.
 - **`tripStats`** — this month's distance / average consumption / regen.
-- **`chargeCost`** — `{ enabled: true, pricePerKwh: 0.14, currency: "$" }` →
-  "Est. cost to 80%: $6.40" (needs `ev_battery_capacity`).
+- **`chargeCost`** — `{ pricePerKwh: 0.185, currency: "$", capacityKwh: 99.8 }`.
+  `enabled: true` adds the one-line "Est. cost to 80%: $6.40" while charging.
+  `log: true` adds a **charge-session history** widget — the last `logRows` (4)
+  sessions with kWh + cost, and a rolling `logMonths` (3) total. Sessions are
+  detected from plug-in → unplug, stored on disk (`logRetentionDays`, 180), and
+  cost each session at `pricePerKwh`. `capacityKwh` falls back to
+  `ev_battery_capacity`, then 99.8 (EV9).
 
 A **preconditioning schedule** is shown automatically whenever one is set on the
 car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 21°".

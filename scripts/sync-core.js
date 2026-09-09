@@ -23,7 +23,8 @@ for (const rel of [
   "core/commands.json",
   "kia_client.py",
   "conditions.py",
-  "vehicle_state.py"
+  "vehicle_state.py",
+  "sessions.py"
 ]) {
   outputs[path.join(HA, path.basename(rel))] = fs.readFileSync(path.join(ROOT, rel), "utf8");
 }

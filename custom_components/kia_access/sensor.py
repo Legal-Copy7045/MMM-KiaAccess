@@ -1,15 +1,27 @@
 """Kia Access sensors, generated from entities.json."""
 from __future__ import annotations
 
+import time
+from datetime import timedelta
+
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from . import sessions as charge_sessions
 from .const import DOMAIN, ENTITIES
 from .entity import KiaAccessEntity
+
+
+def _num(x):
+    try:
+        return None if x is None or x == "" else float(x)
+    except (TypeError, ValueError):
+        return None
 
 
 async def async_setup_entry(
@@ -22,6 +34,8 @@ async def async_setup_entry(
         if spec["domain"] == "sensor"
     ]
     entities.append(KiaAccessSummarySensor(coordinator))
+    entities.append(KiaAccessLastChargeSensor(coordinator))
+    entities.append(KiaAccessChargeSessionSensor(coordinator))
     async_add_entities(entities)
 
 
@@ -88,3 +102,138 @@ class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
         if note:
             out["note"] = note
         return out
+
+
+class KiaAccessLastChargeSensor(KiaAccessEntity, SensorEntity):
+    """Cost (or kWh, if no price set) of the most recent completed charge.
+
+    Attributes carry the session detail, the recent list, and 30-/90-day
+    totals — feed the Energy dashboard from `last_kwh`, or chart the list.
+    """
+
+    _attr_icon = "mdi:cash-multiple"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "last_charge")
+        self._attr_name = "Last charge"
+
+    def _log(self) -> dict:
+        return self.coordinator.charge_log
+
+    @property
+    def available(self) -> bool:
+        return self._log().get("last") is not None
+
+    def _priced(self) -> bool:
+        return (self.coordinator.entry.options.get("price_per_kwh") or 0) > 0
+
+    @property
+    def native_value(self):
+        last = self._log().get("last")
+        if not last:
+            return None
+        return last.get("cost") if self._priced() else last.get("kwh")
+
+    @property
+    def native_unit_of_measurement(self):
+        return "USD" if self._priced() else "kWh"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        log = self._log()
+        last = log.get("last") or {}
+        return {
+            "started_at": last.get("startedAt"),
+            "ended_at": last.get("endedAt"),
+            "minutes": last.get("minutes"),
+            "start_pct": last.get("startPct"),
+            "end_pct": last.get("endPct"),
+            "gained_pct": last.get("gainedPct"),
+            "last_kwh": last.get("kwh"),
+            "last_cost": last.get("cost"),
+            "peak_kw": last.get("peakKw"),
+            "avg_kw": last.get("avgKw"),
+            "price_per_kwh": last.get("pricePerKwh"),
+            "month_kwh": log["month"].get("kwh"),
+            "month_cost": log["month"].get("cost"),
+            "month_sessions": log["month"].get("count"),
+            "last_3_months_kwh": log["last_3_months"].get("kwh"),
+            "last_3_months_cost": log["last_3_months"].get("cost"),
+            "sessions": log.get("recent"),
+        }
+
+
+class KiaAccessChargeSessionSensor(KiaAccessEntity, SensorEntity):
+    """Live cost (or kWh) of the charge in progress — climbs while charging.
+
+    Ticks every 60s on its own so the figure keeps moving between Kia polls.
+    Unavailable when nothing is charging.
+    """
+
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "charge_session")
+        self._attr_name = "Charge session"
+        self._unsub = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsub = async_track_time_interval(
+            self.hass, self._tick, timedelta(seconds=60)
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._unsub:
+            self._unsub()
+            self._unsub = None
+
+    def _tick(self, _now) -> None:
+        if self.coordinator._open_session is not None:  # noqa: SLF001
+            self.async_write_ha_state()
+
+    def _priced(self) -> bool:
+        return (self.coordinator.entry.options.get("price_per_kwh") or 0) > 0
+
+    def _progress(self):
+        c = self.coordinator
+        v = c.vehicle
+        return charge_sessions.progress(
+            c._open_session,  # noqa: SLF001
+            {
+                "t": time.time() * 1000,
+                "charging": v.get("ev_battery_is_charging"),
+                "batteryPct": _num(v.get("ev_battery_percentage")),
+                "chargeKw": _num(v.get("ev_charging_power")),
+            },
+            {
+                "pricePerKwh": c.entry.options.get("price_per_kwh") or 0,
+                "capacityKwh": c.entry.options.get("capacity_kwh")
+                or _num(v.get("ev_battery_capacity")),
+            },
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator._open_session is not None  # noqa: SLF001
+
+    @property
+    def native_value(self):
+        p = self._progress()
+        if not p:
+            return None
+        return p.get("cost") if self._priced() else p.get("kwh")
+
+    @property
+    def native_unit_of_measurement(self):
+        return "USD" if self._priced() else "kWh"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        p = self._progress() or {}
+        return {
+            "kwh": p.get("kwh"),
+            "cost": p.get("cost"),
+            "gained_pct": p.get("gainedPct"),
+            "minutes": p.get("minutes"),
+        }
