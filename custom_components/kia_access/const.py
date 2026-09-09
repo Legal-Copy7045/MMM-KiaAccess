@@ -21,6 +21,12 @@ EVENT_STATE_CHANGED = "kia_access_alert"
 
 _HERE = Path(__file__).parent
 
+try:
+    with open(_HERE / "manifest.json", encoding="utf-8") as _mf:
+        VERSION: str = json.load(_mf).get("version", "0")
+except Exception:  # noqa: BLE001
+    VERSION = "0"
+
 
 def _load(name: str, key: str) -> list[dict]:
     with open(_HERE / name, encoding="utf-8") as fh:
