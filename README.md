@@ -20,6 +20,19 @@ shared files**, so the two surfaces always show the same data and behave the sam
 way. Run either on its own — or run both and have the mirror read from Home
 Assistant, so the car is only ever woken once.
 
+> **Fresh readings vs. the 12V battery — your choice.** Each poll can either
+> **wake the car** for live data, or read the **cached values Kia / Hyundai
+> already hold on their servers** (which costs the car nothing). Repeatedly
+> waking a parked car is the main way an app flattens its 12V battery in cold
+> weather, so cached reads are the safe choice for frequent updates — and the
+> live wake-up is time-boxed anyway, falling back to the cached copy if the car
+> doesn't answer in time.
+> - **MagicMirror** — `refresh: true` wakes the car, `refresh: false` uses the
+>   cache. `forceRefreshTimeout` bounds the wake-up.
+> - **Home Assistant** — **Configure → Live wake-up timeout**: a number of
+>   seconds wakes the car (bounded), **`0`** = cached reads only. Poll frequency
+>   is the **Scan interval** next to it.
+
 ## Supported vehicles
 
 Anything [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
@@ -131,9 +144,11 @@ Lovelace card. No MagicMirror required.
    browser. For a fixed one-tap warm-up, call `kia_access.start_climate` from a
    script or automation instead.
 
-Poll interval and the live-wake-up timeout are in the integration's
-**Configure** dialog. The rotated refresh token is stored in the config entry —
-nothing is written into the HACS-managed folder.
+**Scan interval** and **Live wake-up timeout** are in the integration's
+**Configure** dialog — set the timeout to `0` to only ever read Kia's cached
+data and never wake the car (see the note at the top of this README). The
+rotated refresh token is stored in the config entry — nothing is written into
+the HACS-managed folder.
 
 ### B · MagicMirror only
 
@@ -419,7 +434,7 @@ depends on its brand, region and powertrain):
 | `updateInterval` | `1800000` | ms between fetches. **Mode C** default: `300000` (push — fallback poll) or `30000` (poll) |
 | `retryInterval` | `300000` | ms before retrying after an error (**mode C** default: `30000`) |
 | `refresh` | `true` | `true` wakes the car; `false` uses Kia's server cache (no battery cost). Use `false` for a **brand-new car that hasn't synced yet** |
-| `forceRefreshTimeout` | `45` | seconds to wait for the `refresh: true` wake-up before falling back to Kia's cached copy for that poll |
+| `forceRefreshTimeout` | `45` | seconds to wait for the `refresh: true` wake-up before falling back to Kia's cached copy for that poll. `0` = never wake the car (same as `refresh: false`) |
 | `backoffMax` | `8` | cap the post-failure exponential backoff at `retryInterval × this` |
 | `maxRequestsPerHour` | `0` | `0` = no cap; otherwise pause fetches once the cap is hit (protects the account) |
 | `historyDays` | `60` | days of SoC / 12V history kept on disk (`cache/`) for the sparkline + drain alert |
