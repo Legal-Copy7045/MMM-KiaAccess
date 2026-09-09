@@ -69,4 +69,35 @@ assert eu_d["odometer"] == 45000.0, eu_d["odometer"]
 none_d = kia_client.dump_vehicle(_Veh(ev_driving_range=300.0))
 assert none_d["ev_driving_range"] == 300.0
 
+
+# --- fetch(): refresh:false / forceRefreshTimeout<=0 must NOT wake the car ---
+class _VM:
+    token = None
+
+    def __init__(self):
+        self.woke = False
+
+    def force_refresh_all_vehicles_states(self):
+        self.woke = True
+
+    def update_all_vehicles_with_cached_state(self):
+        pass
+
+
+def _run_fetch(job):
+    vm = _VM()
+    orig = kia_client.connect
+    kia_client.connect = lambda *a, **k: (vm, None)
+    kia_client._select_vehicles = lambda *a, **k: [_Veh(last_updated_at="x")]
+    try:
+        kia_client.fetch(job)
+    finally:
+        kia_client.connect = orig
+    return vm
+
+
+assert _run_fetch({"refresh": True, "forceRefreshTimeout": 30}).woke is True
+assert _run_fetch({"refresh": True, "forceRefreshTimeout": 0}).woke is False
+assert _run_fetch({"refresh": False, "forceRefreshTimeout": 30}).woke is False
+
 print("dump_vehicle tests passed")

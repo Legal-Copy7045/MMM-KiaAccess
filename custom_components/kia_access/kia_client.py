@@ -284,8 +284,11 @@ def fetch(job, token_file=None):
     vm, enrolled_at = connect(job, token_file)
 
     meta_note = None
-    if job.get("refresh", True):
-        timeout = float(job.get("forceRefreshTimeout", 45) or 45)
+    _raw_to = job.get("forceRefreshTimeout", 45)
+    timeout = float(_raw_to) if _raw_to is not None else 45.0
+    # refresh:false (MM) or a zero/negative wake-up timeout (HA "Live wake-up
+    # timeout = 0") both mean: don't wake the car, just read Kia's server cache.
+    if job.get("refresh", True) and timeout > 0:
         err = {}
 
         def _do_refresh():
