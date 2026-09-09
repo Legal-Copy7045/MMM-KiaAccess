@@ -1,4 +1,4 @@
-# Kia Access — MagicMirror module + Home Assistant integration
+# Kia Access — Home Assistant integration + MagicMirror module
 
 [![CI](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml/badge.svg)](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml)
 
@@ -7,11 +7,13 @@ engine**. Built for a **Kia EV9 (Kia USA)**, works with any Hyundai/Kia/Genesis
 that [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
 supports.
 
-- **MagicMirror² module** — a configurable `key → value` table plus an animated
-  top-down car diagram (doors, lock, charge, climate, tyres…). Read-only.
 - **Home Assistant integration** — sensors and binary sensors, **plus control**
-  (lock / unlock / climate / charging), a Lovelace card that renders the same
-  diagram, and `kia_access_alert` events for automations.
+  (lock / unlock / climate / charging), a Lovelace card that renders a top-down
+  car diagram, `device_tracker` for the car's GPS, and `kia_access_alert` events
+  for automations. HACS-installable.
+- **MagicMirror² module** — a configurable `key → value` table plus an animated
+  top-down car diagram (doors, lock, charge, climate, tyres…). Read-only; can
+  take its data straight from the Home Assistant integration.
 
 The two work **independently**. Or run both and have the module take its data
 **from Home Assistant** instead of polling Kia itself — so the car is woken once,
@@ -28,13 +30,13 @@ not twice.
 
 | | who polls Kia | needs on the mirror | car control | dashboard |
 |---|---|---|---|---|
-| **A · MagicMirror only** | the module | Python venv + one-time OTP | – | the mirror |
-| **B · Home Assistant only** | the integration | – | **yes** | Lovelace card |
+| **A · Home Assistant only** | the integration | – | **yes** | Lovelace card |
+| **B · MagicMirror only** | the module | Python venv + one-time OTP | – | the mirror |
 | **C · MagicMirror fed by HA** | the integration (only) | just a HA token | via HA | both |
 
-- Just a mirror, no Home Assistant → **A**.
-- Home Assistant user who wants control and a dashboard tile → **B** (add a
+- Home Assistant user who wants control and a dashboard tile → **A** (add a
   mirror later with **C**).
+- Just a mirror, no Home Assistant → **B**.
 - Both a mirror **and** Home Assistant → **C**: HA polls the car once, the mirror
   reads that locally. No Python or OTP on the mirror.
 
@@ -42,90 +44,9 @@ not twice.
 
 ## Install
 
-### A · MagicMirror only
+### A · Home Assistant only
 
-The module polls Kia directly through a small Python bridge (`kia_bridge.py`).
-
-```bash
-cd ~/MagicMirror/modules
-git clone https://github.com/Legal-Copy7045/MMM-KiaAccess.git
-cd MMM-KiaAccess
-npm install          # runs setup_python.js: builds ./venv and installs the Python dep
-```
-
-Then add to `~/MagicMirror/config/config.js` and restart MagicMirror:
-
-```js
-{
-  module: "MMM-KiaAccess",
-  position: "top_left",
-  header: "Kia EV9",
-  config: {
-    username: "you@example.com",
-    password: "••••••••",
-    pin: "1234",
-    brand: "KIA",            // KIA | HYUNDAI | GENESIS
-    region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
-    visuals: { enabled: true }
-    // include / labels / formatters / notifications / mqtt — see Configuration
-  }
-}
-```
-
-Mode A needs two more things: a modern **Python** (auto-provisioned, below) and a
-**one-time OTP** enrollment (Kia USA, below).
-
-#### Python version (mode A)
-
-`hyundai_kia_connect_api` now requires **Python ≥ 3.12** (`python_requires`).
-Older Python can only install ancient releases that **can no longer log in to
-Kia USA**. Raspberry Pi OS *Bullseye* ships Python 3.9 — too old.
-
-`setup_python.js` (run automatically by `npm install`) handles this:
-
-1. Looks for the newest `python3.x` ≥ 3.12 — system, `pyenv`, or a previous download.
-2. If none, on Linux it downloads a **self-contained CPython 3.12** from
-   [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-   into `./python-standalone/` (no compiler, ~2 min; arm64 / armv7-hf / x86_64).
-3. Builds `./venv` from whichever it found and installs the library.
-
-So on a Pi 3.9 box you normally just run `npm install` and it sorts itself out.
-
-| Situation | Result |
-|---|---|
-| system Python ≥ 3.12 | latest library, used directly |
-| system Python ≤ 3.11 (Linux) | standalone CPython 3.12 downloaded automatically |
-| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`; install Python ≥ 3.12 yourself, then re-run |
-
-Overrides (env vars): `MMM_KIA_PYTHON=/abs/path/python3` to force an interpreter,
-`MMM_KIA_PBS_RELEASE=<tag>` to pin a different standalone release.
-Or set `pythonBin` in the module config to an absolute path.
-
-If venv creation fails on Debian/RPi OS: `sudo apt install python3-venv`.
-
-#### One-time OTP enrollment (mode A, Kia USA)
-
-Kia USA requires a one-time passcode when a new client first logs in. Run the enrollment
-script **once**, on the mirror, using the module's venv Python:
-
-```bash
-cd ~/MagicMirror/modules/MMM-KiaAccess
-KIA_JOB='{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA"}' \
-  ./venv/bin/python3 enroll.py
-```
-
-(Passing the details in `KIA_JOB` leaves the terminal free for the prompts and keeps the
-password out of `ps`. `argv[1]` or stdin also work.)
-
-It asks where to send the code (SMS / email), you paste the code back, and it writes
-`token.json` (git-ignored, `chmod 600`) next to the script. `kia_bridge.py` then reuses
-and silently refreshes that token — no more prompts until Kia expires the refresh token
-(months away), at which point just run `enroll.py` again. If the module ever shows
-*"OTP enrollment required"*, that's the signal.
-
-### B · Home Assistant only
-
-A native integration — the same data as mode A, **plus control**, plus a
+A native integration — sensors and binary sensors, **plus control**, plus a
 Lovelace card. No MagicMirror required.
 
 1. **Install the integration.** HACS → ⋮ → **Custom repositories** → add
@@ -187,9 +108,90 @@ Poll interval and the live-wake-up timeout are in the integration's
 **Configure** dialog. The rotated refresh token is stored in the config entry —
 nothing is written into the HACS-managed folder.
 
+### B · MagicMirror only
+
+The module polls Kia directly through a small Python bridge (`kia_bridge.py`).
+
+```bash
+cd ~/MagicMirror/modules
+git clone https://github.com/Legal-Copy7045/MMM-KiaAccess.git
+cd MMM-KiaAccess
+npm install          # runs setup_python.js: builds ./venv and installs the Python dep
+```
+
+Then add to `~/MagicMirror/config/config.js` and restart MagicMirror:
+
+```js
+{
+  module: "MMM-KiaAccess",
+  position: "top_left",
+  header: "Kia EV9",
+  config: {
+    username: "you@example.com",
+    password: "••••••••",
+    pin: "1234",
+    brand: "KIA",            // KIA | HYUNDAI | GENESIS
+    region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
+    visuals: { enabled: true }
+    // include / labels / formatters / notifications / mqtt — see Configuration
+  }
+}
+```
+
+Mode B needs two more things: a modern **Python** (auto-provisioned, below) and a
+**one-time OTP** enrollment (Kia USA, below).
+
+#### Python version (mode B)
+
+`hyundai_kia_connect_api` now requires **Python ≥ 3.12** (`python_requires`).
+Older Python can only install ancient releases that **can no longer log in to
+Kia USA**. Raspberry Pi OS *Bullseye* ships Python 3.9 — too old.
+
+`setup_python.js` (run automatically by `npm install`) handles this:
+
+1. Looks for the newest `python3.x` ≥ 3.12 — system, `pyenv`, or a previous download.
+2. If none, on Linux it downloads a **self-contained CPython 3.12** from
+   [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+   into `./python-standalone/` (no compiler, ~2 min; arm64 / armv7-hf / x86_64).
+3. Builds `./venv` from whichever it found and installs the library.
+
+So on a Pi 3.9 box you normally just run `npm install` and it sorts itself out.
+
+| Situation | Result |
+|---|---|
+| system Python ≥ 3.12 | latest library, used directly |
+| system Python ≤ 3.11 (Linux) | standalone CPython 3.12 downloaded automatically |
+| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`; install Python ≥ 3.12 yourself, then re-run |
+
+Overrides (env vars): `MMM_KIA_PYTHON=/abs/path/python3` to force an interpreter,
+`MMM_KIA_PBS_RELEASE=<tag>` to pin a different standalone release.
+Or set `pythonBin` in the module config to an absolute path.
+
+If venv creation fails on Debian/RPi OS: `sudo apt install python3-venv`.
+
+#### One-time OTP enrollment (mode B, Kia USA)
+
+Kia USA requires a one-time passcode when a new client first logs in. Run the enrollment
+script **once**, on the mirror, using the module's venv Python:
+
+```bash
+cd ~/MagicMirror/modules/MMM-KiaAccess
+KIA_JOB='{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA"}' \
+  ./venv/bin/python3 enroll.py
+```
+
+(Passing the details in `KIA_JOB` leaves the terminal free for the prompts and keeps the
+password out of `ps`. `argv[1]` or stdin also work.)
+
+It asks where to send the code (SMS / email), you paste the code back, and it writes
+`token.json` (git-ignored, `chmod 600`) next to the script. `kia_bridge.py` then reuses
+and silently refreshes that token — no more prompts until Kia expires the refresh token
+(months away), at which point just run `enroll.py` again. If the module ever shows
+*"OTP enrollment required"*, that's the signal.
+
 ### C · MagicMirror fed by Home Assistant
 
-Do **mode B first** so Home Assistant is polling the car. Then the module reads
+Do **mode A first** so Home Assistant is polling the car. Then the module reads
 from HA over the local REST API — **no Kia credentials, no OTP, no Python bridge
 on the mirror**, and the car is only ever woken by HA.
 
@@ -220,7 +222,7 @@ Create Token**. Then in `~/MagicMirror/config/config.js`:
       mode: "push"                               // "push" (default) | "poll" — see below
     },
     visuals: { enabled: true }
-    // include / labels / formatters / notifications / mqtt all work exactly as in mode A
+    // include / labels / formatters / notifications / mqtt all work exactly as in mode B
   }
 }
 ```
@@ -238,7 +240,7 @@ values may be `null` until the car's first Kia sync — that only means the
 connection works. A `FAIL:` line gives the exact reason (bad token, wrong URL,
 entity not found).
 
-From here the module is identical to mode A — same diagram, table, sparklines,
+From here the module is identical to mode B — same diagram, table, sparklines,
 history, notifications and optional MQTT re-publishing — it just gets its data
 from Home Assistant.
 
@@ -258,7 +260,7 @@ cache when the data actually changed, so a fast rate costs almost nothing.
 
 ## Configuration
 
-> Applies to the **MagicMirror module** (modes A and C). In mode C, drop
+> Applies to the **MagicMirror module** (modes B and C). In mode C, drop
 > `username` / `password` / `pin` and add the `source` / `homeassistant` block
 > shown above; everything else below is the same. Home Assistant's own options
 > are in its **Configure** dialog.
@@ -373,16 +375,16 @@ Common EV9 (US) paths:
 
 | Option | Default | Notes |
 |---|---|---|
-| `source` | `"kia"` | `"kia"` = poll Kia directly (modes A). `"homeassistant"` = read from the native integration (mode C) |
+| `source` | `"kia"` | `"kia"` = poll Kia directly (mode B). `"homeassistant"` = read from the native integration (mode C) |
 | `homeassistant.url` | `""` | mode C only — e.g. `http://homeassistant.local:8123` |
 | `homeassistant.token` | `""` | mode C only — a HA long-lived access token |
 | `homeassistant.entity` | `""` | mode C only — the `…_status` summary sensor; auto-detected when blank |
 | `homeassistant.mode` | `"push"` | mode C only — `"push"` (live WebSocket, Node ≥ 22) or `"poll"` (REST every `updateInterval`) |
-| `username` / `password` / `pin` | `""` | Kia Connect / Bluelink credentials. **Required for mode A**; not used when `source: "homeassistant"` |
-| `brand` | `"KIA"` | `KIA` \| `HYUNDAI` \| `GENESIS` (mode A) |
-| `region` | `"USA"` | `USA` `CA` `EU` `AU` `CN` `IN` `NZ` `BR` (mode A) |
-| `vin` | `""` | Blank = first vehicle on the account (mode A) |
-| `pythonBin` | `"python3"` | mode A — command used to run the bridge (`PYTHON` env var also works) |
+| `username` / `password` / `pin` | `""` | Kia Connect / Bluelink credentials. **Required for mode B**; not used when `source: "homeassistant"` |
+| `brand` | `"KIA"` | `KIA` \| `HYUNDAI` \| `GENESIS` (mode B) |
+| `region` | `"USA"` | `USA` `CA` `EU` `AU` `CN` `IN` `NZ` `BR` (mode B) |
+| `vin` | `""` | Blank = first vehicle on the account (mode B) |
+| `pythonBin` | `"python3"` | mode B — command used to run the bridge (`PYTHON` env var also works) |
 | `fetchTimeout` | `90` | Seconds before the bridge process is killed |
 | `updateInterval` | `1800000` | ms between fetches. **Mode C** default: `300000` (push — fallback poll) or `30000` (poll) |
 | `retryInterval` | `300000` | ms before retrying after an error (**mode C** default: `30000`) |
@@ -643,7 +645,7 @@ promote it to a persistent critical.
 | `chargingStarted` | info | charging just began — a "it plugged in OK" nudge (one-shot) |
 | `serviceDue` | warning | `next_service_distance` ≤ `belowKm` (800 ≈ 500 mi) |
 | `notPluggedInHome` | warning | car is home + unplugged for `graceMin` (20). Needs a home point — MM: `visuals.location.homeLat/homeLon`; HA: `zone.home`. Optional `afterHour` / `beforeHour` to only nag in an evening window |
-| `otpExpiring` | warning | OTP within `otpWarnDays` of expiry (mode A) |
+| `otpExpiring` | warning | OTP within `otpWarnDays` of expiry (mode B) |
 
 `info`-level checks broadcast the `KIA_ACCESS_STATE_CHANGED` notification but
 don't pop the `alert` module.
@@ -668,8 +670,8 @@ this.sendNotification("KIA_ACCESS_STATE_CHANGED", {
 
 ## MQTT (state publishing)
 
-> **Do you need this?** Only in **mode A**. If you run the native Home Assistant
-> integration (mode B/C) you already have proper entities — don't also enable
+> **Do you need this?** Only in **mode B**. If you run the native Home Assistant
+> integration (mode A/C) you already have proper entities — don't also enable
 > `mqtt.homeAssistant` or you'll get a second, duplicate set. MQTT here is the
 > way to get a mode-A mirror's data into HA / Node-RED / dashboards *without*
 > the integration.
@@ -702,9 +704,9 @@ to individual retained topics; set `mqtt.publishRaw: true` if you want it. The
 `kia/ev9/state` JSON blob still contains everything (turn it off with
 `publishJson: false`).
 
-### Home Assistant discovery (mode A only)
+### Home Assistant discovery (mode B only)
 
-**Skip this if you use the native integration (mode B/C)** — it already gives
+**Skip this if you use the native integration (mode A/C)** — it already gives
 you these entities, better. This path is for a mode-A mirror that wants entities
 in HA without installing the integration.
 
@@ -758,7 +760,7 @@ current.
   every 30–60 min. Lower risks draining the 12V battery in cold weather. Use
   `refresh: false` for frequent updates from Kia's cache.
 - The MagicMirror module is **read-only**. Car control (lock / unlock / climate /
-  charging) is in the Home Assistant integration — see mode B.
+  charging) is in the Home Assistant integration — see mode A.
 - Test the bridge directly:
   ```bash
   echo '{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA","refresh":false}' | python3 kia_bridge.py
@@ -806,11 +808,11 @@ bridge (`kia_bridge.py`) stay at the repo root as MagicMirror requires.
 ### Tracking `hyundai_kia_connect_api`
 
 The whole data layer is [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api).
-`npm install` (mode A) and a HACS redownload (mode B/C) both pull the current
+`npm install` (mode B) and a HACS redownload (mode A/C) both pull the current
 release, so:
 
 - **new `Vehicle` attributes** appear automatically — the bridge dumps every one,
-  `include: []` shows them on the mirror, and mode B/C carries them in the
+  `include: []` shows them on the mirror, and mode A/C carries them in the
   summary sensor.
 - **new HA sensors / buttons / services** need a one-line addition to
   `core/entities.json` or `core/commands.json` (then `npm run sync`).
@@ -859,7 +861,7 @@ action:
 
 ## Home Assistant — reference
 
-Install and setup are **mode B** above. Some details:
+Install and setup are **mode A** above. Some details:
 
 - **How the card gets its data.** The integration adds one diagnostic sensor,
   `sensor.<vehicle>_status`, whose attributes carry the whole flat vehicle
