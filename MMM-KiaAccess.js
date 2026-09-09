@@ -184,6 +184,14 @@ Module.register("MMM-KiaAccess", {
       alertModule: true, // also emit SHOW_ALERT for the built-in `alert` module (warning + critical)
       alertSeconds: 15, // warning-level SHOW_ALERT auto-dismiss timer (seconds)
       criticalAlertSeconds: 0, // critical-level alerts: 0 = stay on screen until the condition clears
+      // How a still-active critical condition is kept visible:
+      //   persistentBanner: a slim bar at the top of THIS module (non-blocking) — default
+      //   criticalPopup:    also throw the centre-screen `alert` modal that dims the
+      //                     whole mirror until the condition clears (off by default —
+      //                     it's the big blocking box). When off, a critical still
+      //                     gets one brief corner growl as it fires.
+      persistentBanner: true,
+      criticalPopup: false,
       notifyOnStartup: "critical", // false | "critical" | true — which levels fire on the first data after (re)start
       quietWhileDriving: true, // suppress open-part / unlocked alerts while the car is on
       title: "Kia EV9",
@@ -697,11 +705,14 @@ Module.register("MMM-KiaAccess", {
             : (cfg.alertSeconds != null ? cfg.alertSeconds : 15);
           // A `notification`-type alert ALWAYS gets a ttl from the alert module
           // (its display_time when no timer is given) — it can't truly persist.
-          // Only a `type: "alert"` with no `timer` stays until HIDE_ALERT.
-          const persistent = critical && !(secs > 0);
+          // Only a `type: "alert"` with no `timer` stays until HIDE_ALERT — and
+          // that one dims the whole mirror, so it's opt-in (cfg.criticalPopup).
+          // Otherwise a still-active critical lives in the in-module banner
+          // (see getDom) and only throws a brief corner growl as it fires.
+          const wantsModal = critical && !(secs > 0) && cfg.criticalPopup === true;
           if (becameActive) {
             const alert = { title: c.title, message: c.message };
-            if (persistent) {
+            if (wantsModal) {
               alert.type = "alert"; // centre popup, stays until HIDE_ALERT
             } else {
               alert.type = "notification"; // corner growl
@@ -709,9 +720,9 @@ Module.register("MMM-KiaAccess", {
             }
             this.sendNotification("SHOW_ALERT", alert);
             this._alertShown = this._alertShown || {};
-            if (persistent) this._alertShown[c.reason] = true;
+            if (wantsModal) this._alertShown[c.reason] = true;
           } else if (cleared && this._alertShown && this._alertShown[c.reason]) {
-            // a persistent alert's condition cleared — dismiss it
+            // a persistent modal's condition cleared — dismiss it
             this.sendNotification("HIDE_ALERT");
             this._alertShown[c.reason] = false;
           }
@@ -1195,6 +1206,19 @@ Module.register("MMM-KiaAccess", {
       n.className = "kiaaccess-error xsmall";
       n.innerHTML = "⚠ " + this.escape(otp);
       wrapper.appendChild(n);
+    }
+
+    // persistent, non-blocking banner for any still-active critical condition
+    // (e.g. "Home and not plugged in"). Stays until the condition clears.
+    const ncfg = this.config.notifications || {};
+    const crit = (this.diagramAlerts || []).filter((a) => a.level === "critical");
+    if (ncfg.persistentBanner !== false && crit.length) {
+      const bar = document.createElement("div");
+      bar.className = "kiaaccess-alertbanner";
+      bar.innerHTML =
+        '<i class="fa-solid fa-triangle-exclamation"></i> ' +
+        crit.map((a) => this.escape(a.label)).join(" · ");
+      wrapper.appendChild(bar);
     }
 
     const V = this.visuals;
