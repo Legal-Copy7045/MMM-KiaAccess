@@ -120,14 +120,27 @@
    */
   function staticMapUrl(o) {
     var rings = (o.rings || []).map(function (r) {
-      return { ring: cap(simplify(r.ring, o.simplifyDeg || 0.02), 90), color: r.color };
+      // simplify only a dense raw isochrone; leave a tidy circle / small ring alone
+      var ring = (r.ring && r.ring.length > 100)
+        ? simplify(r.ring, o.simplifyDeg || 0.02)
+        : (r.ring || []);
+      return { ring: cap(ring, 90), color: r.color };
     }).filter(function (r) { return r.ring && r.ring.length > 3; });
+    if (!rings.length && !(o.markers || []).length) return null;
 
-    var all = [];
-    rings.forEach(function (r) { r.ring.forEach(function (p) { all.push(p); }); });
-    (o.markers || []).forEach(function (m) { all.push([m.lon, m.lat]); });
-    if (!all.length) return null;
-    var b = bbox(all, o.padFrac);
+    // The map extent is set by the reachable-area ring(s) — NOT by the markers,
+    // so a far-away zone can't zoom the whole map out. Markers outside that
+    // extent (padded a little) are simply dropped from the image.
+    var ringPts = [];
+    rings.forEach(function (r) { r.ring.forEach(function (p) { ringPts.push(p); }); });
+    var b = ringPts.length
+      ? bbox(ringPts, o.padFrac)
+      : bbox((o.markers || []).map(function (m) { return [m.lon, m.lat]; }), o.padFrac);
+    var mx = (b[2] - b[0]) * 0.15;
+    var my = (b[3] - b[1]) * 0.15;
+    var inView = function (lon, lat) {
+      return lon >= b[0] - mx && lon <= b[2] + mx && lat >= b[1] - my && lat <= b[3] + my;
+    };
 
     // one geometry= param, polygons joined by "|"; one marker= param likewise
     var geom = rings.map(function (r) {
@@ -139,12 +152,14 @@
         ";fillcolor:" + enc(r.color || "#4caf50") + ";fillopacity:0.2";
     }).join("|");
 
-    var marks = (o.markers || []).map(function (m) {
-      return "lonlat:" + m.lon.toFixed(5) + "," + m.lat.toFixed(5) +
-        ";type:material;size:34;color:" + enc(m.color || "#e53935") +
-        ";contentcolor:%23ffffff" +
-        (m.text ? ";text:" + enc(String(m.text).slice(0, 1).toUpperCase()) : "");
-    }).join("|");
+    var marks = (o.markers || [])
+      .filter(function (m) { return m.always || inView(m.lon, m.lat); })
+      .map(function (m) {
+        return "lonlat:" + m.lon.toFixed(5) + "," + m.lat.toFixed(5) +
+          ";type:material;size:34;color:" + enc(m.color || "#e53935") +
+          ";contentcolor:%23ffffff" +
+          (m.text ? ";text:" + enc(String(m.text).slice(0, 1).toUpperCase()) : "");
+      }).join("|");
 
     return (
       SMAP +

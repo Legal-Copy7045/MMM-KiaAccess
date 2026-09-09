@@ -403,10 +403,13 @@ module.exports = NodeHelper.create({
         return best || drange.circleRing(lat, lon, km);
       };
 
-      const markers = [{ lat, lon, color: "#4ea1ff" }].concat(
-        (rm.pois || []).slice(0, 6).map((p) => ({
-          lat: Number(p.lat), lon: Number(p.lon), color: "#e53935", text: p.name
-        }))
+      const far = Math.max(oneWay, round || 0) * 1.6;
+      const markers = [{ lat, lon, color: "#4ea1ff", always: true }].concat(
+        (rm.pois || [])
+          .map((p) => ({ lat: Number(p.lat), lon: Number(p.lon), color: "#e53935", text: p.name }))
+          .filter((p) => isFinite(p.lat) && isFinite(p.lon) &&
+            drange.haversineKm(lat, lon, p.lat, p.lon) <= far)
+          .slice(0, 6)
       );
       const smap = (ring) => ring && isoline.staticMapUrl({
         apiKey: rm.apiKey, width: rm.width, height: rm.height, style: rm.style,
