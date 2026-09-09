@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 DOMAIN = "kia_access"
-PLATFORMS = ["sensor", "binary_sensor", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "button", "device_tracker"]
 
 CONF_REGION = "region"
 CONF_BRAND = "brand"

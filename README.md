@@ -141,6 +141,10 @@ Lovelace card. No MagicMirror required.
    - sensors + binary sensors (battery, range, charge power, doors, lock, plug,
      climate, tyre warning, next-service distance, valet mode, battery
      preconditioning, …), generated from `core/entities.json`
+   - **`device_tracker.<vehicle>_location`** — the car's GPS position (with the
+     EV battery % as `battery_level`), so HA's map card, zones, presence and
+     "left home / arrived at work" automations work natively. Needs a GPS fix
+     from the car; enable *Reverse-geocode* at setup for a street address too.
    - **`Last charge`** — cost (or kWh) of the most recent completed charge, with
      the session detail + a 30-/90-day total in its attributes
    - **`Charge session`** — a live figure that climbs while charging (ticks
