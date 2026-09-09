@@ -171,6 +171,8 @@ Lovelace card. No MagicMirror required.
    # entity: sensor.<vehicle>_status   # optional; auto-detected otherwise
    # temperature_unit: F               # optional; "C" / "F" — otherwise follows HA
    ```
+   The same bundle also provides **`custom:kia-range-map-card`** — an interactive
+   map of how far you can drive (see [Location](#location--map)).
    The integration serves and auto-registers `/kia_access/kia-access-card.js`.
    If the card doesn't show up, hard-refresh the browser, or add that path as a
    **Lovelace resource** (type: JavaScript Module) manually.
@@ -703,20 +705,37 @@ builds the image; the module shows the one-way or round-trip shape per
 `reachRoundTrip`. Over ~100 km / 60 mi it's a straight-line circle; under that,
 the real road-network isochrone.
 
-On **Home Assistant** the `custom:kia-access-card` does it client-side — add
-`range_map` to the card:
+**Home Assistant** — two cards:
 
-```yaml
-type: custom:kia-access-card
-range_map:
-  api_key: YOUR_GEOAPIFY_KEY
-  style: osm-bright-grey
-  height: 300
-  mode: drive
-```
+- **`custom:kia-range-map-card`** — an **interactive Leaflet map** (pan / zoom),
+  auto-zoomed to the reachable area, with a **How far / & back** toggle and
+  `zone.*` markers (only the ones near enough to matter). Tiles come from
+  Geoapify when an `api_key` is set (styled), otherwise OpenStreetMap. The
+  polygon is drawn client-side — **no API call at all** unless the reach is
+  under ~100 km, when it fetches the road-network isochrone.
 
-The card has a **How far / & back** toggle; POI pins come from your `zone.*`.
-Cached in the browser; ~2 Geoapify calls per real move.
+  ```yaml
+  type: custom:kia-range-map-card
+  height: 420
+  range_map:
+    api_key: YOUR_GEOAPIFY_KEY   # optional (nicer tiles + the ≤100 km isochrone)
+    style: osm-bright-grey
+    mode: drive
+  ```
+
+- **`custom:kia-access-card`** with a `range_map:` block — the same thing as a
+  **static image** inside the main card (no Leaflet), for a lighter panel:
+
+  ```yaml
+  type: custom:kia-access-card
+  range_map:
+    api_key: YOUR_GEOAPIFY_KEY
+    style: osm-bright-grey
+    height: 300
+  ```
+
+Both take POI markers from `zone.*` and derate with `factor` / `reserve_pct`
+(defaulting to the `sensor.<vehicle>_range_reach` options).
 
 Row icons come from a built-in map (battery → battery, range → road, lock → lock,
 charging → bolt, door → car-side, …) with keyword fallbacks. Override any of them:

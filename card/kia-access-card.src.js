@@ -244,7 +244,7 @@
   }
 
   // ---- range-map (Geoapify isoline -> static image) ----
-  var RM_STORE = "kia-access-rangemap";
+  var RM_STORE = "kia-access-rangemap-v2"; // bump to bust stale cached image URLs
   function loadRm() {
     try { return JSON.parse(window.localStorage.getItem(RM_STORE) || "{}") || {}; }
     catch (e) { return {}; }

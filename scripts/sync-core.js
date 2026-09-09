@@ -42,7 +42,8 @@ outputs[path.join(HA, "frontend", "kia-access-card.js")] = [
   read("core/conditions.js"),
   read("core/range.js"),
   read("core/isoline.js"),
-  read("card/kia-access-card.src.js")
+  read("card/kia-access-card.src.js"),
+  read("card/kia-range-map-card.src.js")
 ].join("\n");
 
 // generated services.yaml
