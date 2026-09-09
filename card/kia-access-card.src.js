@@ -412,6 +412,8 @@
           key: key, at: Date.now(),
           oneWayKm: Math.round(inp.oneWay),
           roundKm: inp.round ? Math.round(inp.round) : null,
+          oneWayApprox: ISO.pastMax(inp.oneWay),
+          roundApprox: inp.round ? ISO.pastMax(inp.round) : null,
           oneWayUrl: smap(pick(inp.oneWay)),
           roundUrl: smap(pick(inp.round))
         };
@@ -429,6 +431,7 @@
       var dist = mode === "round" ? inp.round : inp.oneWay;
       var rm = this._rm;
       var url = rm && (mode === "round" ? rm.roundUrl : rm.oneWayUrl);
+      var approx = rm && (mode === "round" ? rm.roundApprox : rm.oneWayApprox);
       var poi = RNG.poiStatus(inp.lat, inp.lon, zonePois(hass), dist);
       var caps = poi.slice(0, 3).map(function (p) {
         return "<b class='" + (p.reachable ? "ok" : "no") + "'>" +
@@ -443,6 +446,7 @@
         "</span></div>" +
         (url ? "<img loading='lazy' src='" + esc(url) + "' alt='reachable driving area'>"
              : "<div class='cap'>Building the map…</div>") +
+        (approx ? "<div class='cap'>straight-line radius · road isochrone under ~60 mi range</div>" : "") +
         (caps ? "<div class='cap'>" + caps + "</div>" : "") +
         "</div>";
     }

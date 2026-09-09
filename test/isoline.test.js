@@ -3,15 +3,15 @@ const assert = require("assert");
 const I = require("../core/isoline.js");
 
 // ---- isoUrl: km -> metres, clamp, multi-range ----
-let u = I.isoUrl({ apiKey: "K", lat: 40.7, lon: -79.7, rangesKm: [240, 120] });
-assert.ok(u.includes("range=240000,120000"), u);
+let u = I.isoUrl({ apiKey: "K", lat: 40.7, lon: -79.7, rangesKm: [80, 40] });
+assert.ok(u.includes("range=80000,40000"), u);
 assert.ok(u.includes("type=distance") && u.includes("mode=drive"));
 assert.ok(u.includes("apiKey=K"));
-// past the ceiling gets clamped, zero/neg dropped
+// past the ceiling gets clamped to MAX_DRIVE_KM, zero/neg dropped
 u = I.isoUrl({ apiKey: "K", lat: 1, lon: 2, rangesKm: [800, 0, -5] });
-assert.ok(u.includes("range=500000"), u);
-assert.strictEqual(I.pastMax(600), true);
-assert.strictEqual(I.pastMax(300), false);
+assert.ok(u.includes("range=" + I.MAX_DRIVE_KM * 1000), u);
+assert.strictEqual(I.pastMax(I.MAX_DRIVE_KM + 1), true);
+assert.strictEqual(I.pastMax(I.MAX_DRIVE_KM - 1), false);
 
 // ---- parseIso: FeatureCollection -> rings, smallest first ----
 const fc = {

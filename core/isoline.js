@@ -12,7 +12,11 @@
 
   var ISO = "https://api.geoapify.com/v1/isoline";
   var SMAP = "https://maps.geoapify.com/v1/staticmap";
-  var MAX_DRIVE_KM = 500; // Geoapify distance-isoline ceiling for drive/truck
+  // Geoapify's free-tier distance-isoline ceiling. Above this we draw a plain
+  // straight-line reachable-radius circle instead (still on the same map).
+  // In practice a full EV charge is well over this, so the map is usually a
+  // circle and "upgrades" to the road-network shape as the battery runs down.
+  var MAX_DRIVE_KM = 100;
 
   var enc = encodeURIComponent;
 

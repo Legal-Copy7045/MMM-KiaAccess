@@ -417,6 +417,8 @@ module.exports = NodeHelper.create({
       s.rangeMap = {
         key: key, at: Date.now(),
         oneWayKm: Math.round(oneWay), roundTripKm: round ? Math.round(round) : null,
+        oneWayApprox: isoline.pastMax(oneWay),
+        roundTripApprox: round ? isoline.pastMax(round) : null,
         oneWayUrl: smap(pick(oneWay)),
         roundTripUrl: smap(pick(round))
       };

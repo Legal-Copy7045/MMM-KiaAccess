@@ -1550,7 +1550,11 @@ g.KiaAccessCommands={
 
   var ISO = "https://api.geoapify.com/v1/isoline";
   var SMAP = "https://maps.geoapify.com/v1/staticmap";
-  var MAX_DRIVE_KM = 500; // Geoapify distance-isoline ceiling for drive/truck
+  // Geoapify's free-tier distance-isoline ceiling. Above this we draw a plain
+  // straight-line reachable-radius circle instead (still on the same map).
+  // In practice a full EV charge is well over this, so the map is usually a
+  // circle and "upgrades" to the road-network shape as the battery runs down.
+  var MAX_DRIVE_KM = 100;
 
   var enc = encodeURIComponent;
 
@@ -2126,6 +2130,8 @@ g.KiaAccessCommands={
           key: key, at: Date.now(),
           oneWayKm: Math.round(inp.oneWay),
           roundKm: inp.round ? Math.round(inp.round) : null,
+          oneWayApprox: ISO.pastMax(inp.oneWay),
+          roundApprox: inp.round ? ISO.pastMax(inp.round) : null,
           oneWayUrl: smap(pick(inp.oneWay)),
           roundUrl: smap(pick(inp.round))
         };
@@ -2143,6 +2149,7 @@ g.KiaAccessCommands={
       var dist = mode === "round" ? inp.round : inp.oneWay;
       var rm = this._rm;
       var url = rm && (mode === "round" ? rm.roundUrl : rm.oneWayUrl);
+      var approx = rm && (mode === "round" ? rm.roundApprox : rm.oneWayApprox);
       var poi = RNG.poiStatus(inp.lat, inp.lon, zonePois(hass), dist);
       var caps = poi.slice(0, 3).map(function (p) {
         return "<b class='" + (p.reachable ? "ok" : "no") + "'>" +
@@ -2157,6 +2164,7 @@ g.KiaAccessCommands={
         "</span></div>" +
         (url ? "<img loading='lazy' src='" + esc(url) + "' alt='reachable driving area'>"
              : "<div class='cap'>Building the map…</div>") +
+        (approx ? "<div class='cap'>straight-line radius · road isochrone under ~60 mi range</div>" : "") +
         (caps ? "<div class='cap'>" + caps + "</div>" : "") +
         "</div>";
     }
