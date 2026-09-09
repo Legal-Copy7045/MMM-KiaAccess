@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 
-from .const import COMMANDS, DOMAIN, PLATFORMS
+from .const import COMMANDS, DOMAIN, PLATFORMS, VERSION
 from .coordinator import KiaAccessCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +27,12 @@ _FRONTEND_REGISTERED = False
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kia Access from a config entry."""
+    # Register the Lovelace card first, independent of the vehicle data fetch:
+    # if the Kia cloud call below is slow or fails, HA raises ConfigEntryNotReady
+    # and retries later -- but the card element must still be defined in the
+    # browser, or every dashboard using it shows a bare "Configuration error".
+    await _register_frontend(hass)
+
     coordinator = KiaAccessCoordinator(hass, entry)
     coordinator.last_options = dict(entry.options)
     await coordinator.async_load_sessions()
@@ -35,7 +41,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass)
-    await _register_frontend(hass)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
@@ -49,7 +54,6 @@ async def _register_frontend(hass: HomeAssistant) -> None:
     global _FRONTEND_REGISTERED
     if _FRONTEND_REGISTERED:
         return
-    _FRONTEND_REGISTERED = True
     if not os.path.exists(_CARD_PATH):
         _LOGGER.warning("Kia Access card bundle missing at %s", _CARD_PATH)
         return
@@ -65,9 +69,13 @@ async def _register_frontend(hass: HomeAssistant) -> None:
 
         from homeassistant.components.frontend import add_extra_js_url
 
-        add_extra_js_url(hass, CARD_URL)
+        # version query string busts the browser cache after a HACS update
+        add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
     except Exception as err:  # noqa: BLE001
+        # leave _FRONTEND_REGISTERED False so the next entry setup retries
         _LOGGER.warning("Could not auto-register Kia Access card: %s", err)
+        return
+    _FRONTEND_REGISTERED = True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
