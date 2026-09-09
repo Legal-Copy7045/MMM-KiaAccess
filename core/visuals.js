@@ -291,6 +291,12 @@
     return out;
   }
 
+  // right-margin the viewBox needs so the flashing triangle (translate 192 70,
+  // reaches x~237 with its outer stroke) isn't clipped by the x232 edge
+  function alertExtra(alerts) {
+    return alerts && alerts.length ? 10 : 0;
+  }
+
   // warning badge — the triangle in the front-right margin (translate 192 70),
   // flashing, red if anything is critical else amber. No wording: the reasons
   // are listed in the status bar under the header.
@@ -407,11 +413,13 @@
     o = o || {};
     // Canvas centred on the car body (centre x100, viewBox -32..232). Charger
     // strip lives at x 200..228. The warning badge is icon-only (its reasons go
-    // in the module status bar), so the viewBox is a fixed width.
+    // in the module status bar); the viewBox only gains a few px on the right so
+    // the flashing triangle isn't clipped, and `width` scales with it so the
+    // car itself stays the same size.
     var alertsIn = Array.isArray(s.alerts)
       ? s.alerts
       : (s.critical === true ? [{ level: "critical", label: "" }] : []);
-    var vbW = 264;
+    var vbW = 264 + alertExtra(alertsIn);
     var VB = "-32 0 " + vbW + " 330";
     var w = Math.round((o.width || 190) * vbW / 264);
 
