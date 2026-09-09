@@ -291,54 +291,22 @@
     return out;
   }
 
-  // reasons shown under the badge (capped at 3, + a "+N more" line)
-  function alertRows(alerts) {
-    if (!alerts || !alerts.length) return 0;
-    return Math.min(alerts.length, 3) + (alerts.length > 3 ? 1 : 0);
-  }
-  // extra viewBox width the badge needs on the right for the centred reason
-  // text. The triangle sits at absolute x~214 and the reason lines are
-  // centre-anchored under it, so a long label ("12V battery critical") needs
-  // more right margin than a short one ("Door open").
-  function alertExtra(alerts) {
-    if (!alertRows(alerts)) return 0;
-    var longest = 0;
-    (alerts || []).slice(0, 3).forEach(function (a) {
-      var n = String(a && a.label || "").length;
-      if (n > longest) longest = n;
-    });
-    var halfWidth = longest * 4.3;              // ~8.6px per char at font-16 bold
-    return Math.max(34, Math.ceil(halfWidth - 42));
-  }
-
-  // warning badge — the triangle back in the front-right margin (translate
-  // 192 70, as it always was), red if anything is critical else amber, with the
-  // reason(s) it is on **centred directly under it** and sized to match the
-  // outside-temp reading. The viewBox widens on the right so the text fits.
+  // warning badge — the triangle in the front-right margin (translate 192 70),
+  // flashing, red if anything is critical else amber. No wording: the reasons
+  // are listed in the status bar under the header.
   function alertBadge(alerts) {
     var hasCrit = alerts.some(function (a) { return a.level === "critical"; });
     var triCol = hasCrit ? COL.bad : COL.warn;
-    var shown = alerts.slice(0, 3);
-    var TCX = 22;      // triangle centre, local to the translate(192 70) group
-    var lines = shown.map(function (a, i) {
-      return '<text x="' + TCX + '" y="' + (52 + i * 18) + '" font-size="16" font-weight="700" fill="' +
-        (a.level === "critical" ? COL.bad : COL.warn) + '">' + esc(a.label) + "</text>";
-    });
-    if (alerts.length > shown.length) {
-      lines.push('<text x="' + TCX + '" y="' + (52 + shown.length * 18) +
-        '" font-size="15" fill="' + COL.dim + '">+' + (alerts.length - shown.length) + " more</text>");
-    }
     return (
-      '<g transform="translate(192 70)" class="kiaaccess-critical" text-anchor="middle" ' +
+      '<g transform="translate(192 70)" class="kiaaccess-critical" ' +
       'style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' +
+      '<g>' +
+      pulse("opacity", "1", "0.25", hasCrit ? 0.85 : 1.3) +
       '<path d="M 20 1 Q 22 -2 24 1 L 41 32 Q 43 36 38 36 L 6 36 Q 1 36 3 32 Z" ' +
-      'fill="' + triCol + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round" opacity="0.95">' +
-      pulse("opacity", "0.5", "1", 1.05) +
-      "</path>" +
+      'fill="' + triCol + '" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/>' +
       '<rect x="20.5" y="11" width="3" height="12" rx="1.5" fill="#fff"/>' +
       '<circle cx="22" cy="29" r="2" fill="#fff"/>' +
-      lines.join("") +
-      "</g>"
+      "</g></g>"
     );
   }
 
@@ -438,13 +406,12 @@
     s = s || {};
     o = o || {};
     // Canvas centred on the car body (centre x100, viewBox -32..232). Charger
-    // strip lives at x 200..228. When a warning badge is showing, the viewBox
-    // gains width on the right for the centred reason text under the triangle —
-    // and `width` scales with it so the car itself stays the same size.
+    // strip lives at x 200..228. The warning badge is icon-only (its reasons go
+    // in the module status bar), so the viewBox is a fixed width.
     var alertsIn = Array.isArray(s.alerts)
       ? s.alerts
       : (s.critical === true ? [{ level: "critical", label: "" }] : []);
-    var vbW = 264 + alertExtra(alertsIn);
+    var vbW = 264;
     var VB = "-32 0 " + vbW + " 330";
     var w = Math.round((o.width || 190) * vbW / 264);
 

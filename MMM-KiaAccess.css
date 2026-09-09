@@ -82,24 +82,38 @@
   color: #ff9a9a;
 }
 
-/* persistent, non-blocking critical banner at the top of the module */
+/* persistent, non-blocking status bar under the header — one line per issue,
+   transparent background, font colour by severity */
 .kiaaccess-alertbanner {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 7px;
   margin-bottom: 6px;
-  padding: 5px 9px;
-  border-radius: 5px;
-  background: rgba(200, 40, 40, 0.18);
-  border-left: 3px solid #e53935;
-  color: #ff8a80;
+  padding: 2px 0;
+  background: transparent;
   font-size: calc(15px * var(--kia-scale, 1));
-  font-weight: 600;
-  line-height: 1.25;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .kiaaccess-alertbanner .fa-triangle-exclamation {
-  color: #ffb300;
+  flex: none;
+  animation: kiaaccess-alertflash 1.3s ease-in-out infinite;
+}
+.kiaaccess-alertbanner.is-critical .fa-triangle-exclamation { color: #e53935; }
+.kiaaccess-alertbanner.is-critical .fa-triangle-exclamation { animation-duration: 0.85s; }
+.kiaaccess-alertbanner.is-warning  .fa-triangle-exclamation { color: #ffb300; }
+
+.kiaaccess-alert-crit { color: #e53935; }
+.kiaaccess-alert-warn { color: #ffb300; }
+.kiaaccess-alert-sep  { color: #5f6368; font-weight: 400; }
+
+@keyframes kiaaccess-alertflash {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kiaaccess-alertbanner .fa-triangle-exclamation { animation: none; }
 }
 
 .kiaaccess-compact {
