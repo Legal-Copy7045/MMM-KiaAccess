@@ -25,7 +25,8 @@ for (const rel of [
   "conditions.py",
   "vehicle_state.py",
   "sessions.py",
-  "range.py"
+  "range.py",
+  "trips.py"
 ]) {
   outputs[path.join(HA, path.basename(rel))] = fs.readFileSync(path.join(ROOT, rel), "utf8");
 }
@@ -42,6 +43,7 @@ outputs[path.join(HA, "frontend", "kia-access-card.js")] = [
   read("core/conditions.js"),
   read("core/range.js"),
   read("core/isoline.js"),
+  read("core/trips.js"),
   read("card/kia-access-card.src.js"),
   read("card/kia-range-map-card.src.js")
 ].join("\n");

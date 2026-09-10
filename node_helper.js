@@ -23,6 +23,7 @@ const { flatten } = require("./core/flatten.js");
 const haDiscovery = require("./core/ha-discovery.js");
 const haSource = require("./ha_source.js");
 const sessions = require("./core/sessions.js");
+const trips = require("./core/trips.js");
 const drange = require("./core/range.js");
 const isoline = require("./core/isoline.js");
 const webhook = require("./webhook.js");
@@ -103,7 +104,8 @@ module.exports = NodeHelper.create({
     if (this.state[id]) return this.state[id];
     var s = {
       failStreak: 0, reqTimes: [], lastGood: null, history: [],
-      sessions: [], openSession: null, rangeMap: null
+      sessions: [], openSession: null, rangeMap: null,
+      trips: [], openTrip: null
     };
     try {
       var disk = JSON.parse(fs.readFileSync(this.cacheFile(id), "utf8"));
@@ -113,6 +115,8 @@ module.exports = NodeHelper.create({
         s.sessions = Array.isArray(disk.sessions) ? disk.sessions : [];
         s.openSession = disk.openSession || null;
         s.rangeMap = disk.rangeMap || null;
+        s.trips = Array.isArray(disk.trips) ? disk.trips : [];
+        s.openTrip = disk.openTrip || null;
       }
     } catch (e) {
       /* no cache yet */
@@ -134,7 +138,8 @@ module.exports = NodeHelper.create({
         JSON.stringify({
           lastGood: s.lastGood, history: s.history,
           sessions: s.sessions, openSession: s.openSession,
-          rangeMap: s.rangeMap
+          rangeMap: s.rangeMap,
+          trips: s.trips, openTrip: s.openTrip
         })
       );
       fs.renameSync(tmp, file);
@@ -358,6 +363,35 @@ module.exports = NodeHelper.create({
         (sess.closed.cost != null ? " / " + sess.closed.cost : ""));
     }
 
+    // ---- trip / drive-segment log ----
+    const tcfg = config.tripLog || {};
+    const tr = trips.update(s.openTrip, {
+      t: sample.t,
+      odometerKm: numOrNull(vehicle.odometer),
+      batteryPct: numOrNull(vehicle.ev_battery_percentage),
+      charging: truthy(vehicle.ev_battery_is_charging),
+      carOn: truthy(vehicle.engine_is_running),
+      locationLat: numOrNull(vehicle.location_latitude),
+      locationLon: numOrNull(vehicle.location_longitude)
+    }, {
+      pricePerKwh: cl.pricePerKwh,
+      capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity),
+      minKm: tcfg.minKm,
+      parkGapMin: tcfg.parkGapMin
+    });
+    let tripChanged = JSON.stringify(tr.open) !== JSON.stringify(s.openTrip);
+    s.openTrip = tr.open;
+    if (tr.closed) {
+      s.trips.push(tr.closed);
+      const keepTrips = Date.now() - (Number(tcfg.retentionDays) || 365) * 864e5;
+      s.trips = s.trips.filter((x) => x && x.endedAt >= keepTrips).slice(-500);
+      tripChanged = true;
+      Log.info("[MMM-KiaAccess] trip logged: " + tr.closed.distanceMi + " mi" +
+        (tr.closed.miPerKwh != null ? " @ " + tr.closed.miPerKwh + " mi/kWh" : "") +
+        (tr.closed.cost != null ? " / " + tr.closed.cost : ""));
+    }
+    if (tripChanged) sessChanged = true; // reuse the "persist + re-render" flag
+
     s.failStreak = 0;
     s.lastGood = payload;
     // only touch the disk cache when something changed — avoids an SD-card
@@ -498,6 +532,8 @@ module.exports = NodeHelper.create({
     payload.sessions = s.sessions.slice(-60);
     payload.openSession = s.openSession || null;
     payload.rangeMap = s.rangeMap || null;
+    payload.trips = s.trips.slice(-60);
+    payload.openTrip = s.openTrip || null;
     // note: `config` (credentials / token) is deliberately NOT echoed back
     this.sendSocketNotification("KIA_DATA", { identifier: id, payload });
   },

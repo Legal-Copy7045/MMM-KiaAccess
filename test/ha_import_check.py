@@ -52,6 +52,13 @@ diag = importlib.import_module(f"{pkg}.diagnostics")
 assert hasattr(diag, "async_get_config_entry_diagnostics")
 
 # range engine parity surface
+tp = importlib.import_module(f"{pkg}.trips")
+_r = tp.update(None, {"t": 0, "odometerKm": 100, "batteryPct": 80}, {})
+assert _r["open"] and _r["closed"] is None
+assert tp.summary([], 30)["count"] == 0
+_sen = importlib.import_module(f"{pkg}.sensor")
+assert hasattr(_sen, "KiaAccessLastTripSensor") and hasattr(_sen, "KiaAccessCostPerMileSensor")
+
 rng = importlib.import_module(f"{pkg}.range")
 assert rng.reach(300, {"reservePct": 10, "factor": 0.92}) is not None
 assert rng.summary(40.7, -79.7, 300, [{"name": "H", "lat": 40.7, "lon": -79.7}])["pois"][0]["reachable"]

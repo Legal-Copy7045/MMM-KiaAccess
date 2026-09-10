@@ -17,6 +17,7 @@ from homeassistant.util.unit_system import METRIC_SYSTEM
 from . import kia_client
 from . import range as drive_range
 from . import sessions as charge_sessions
+from . import trips as drive_trips
 from .conditions import evaluate as evaluate_conditions
 from .const import (
     CONF_BRAND,
@@ -60,6 +61,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
+        self._trips: list[dict] = []
+        self._open_trip: dict | None = None
+        self._trips_store = Store(hass, 1, f"{DOMAIN}_trips_{entry.entry_id}")
         self._prefs_store = Store(hass, 1, f"{DOMAIN}_prefs_{entry.entry_id}")
         self.climate_prefs: dict = dict(DEFAULT_CLIMATE_PREFS)
         # last control command, for the "action in progress" sensor
@@ -69,6 +73,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         data = await self._sessions_store.async_load() or {}
         self._sessions = data.get("sessions") or []
         self._open_session = data.get("open") or None
+        tdata = await self._trips_store.async_load() or {}
+        self._trips = tdata.get("trips") or []
+        self._open_trip = tdata.get("open") or None
 
     async def async_load_prefs(self) -> None:
         data = await self._prefs_store.async_load() or {}
@@ -156,6 +163,63 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             await self._sessions_store.async_save(
                 {"sessions": self._sessions, "open": self._open_session}
             )
+
+    async def _update_trips(self) -> None:
+        v = self.vehicle
+
+        def _num(x):
+            try:
+                return None if x is None or x == "" else float(x)
+            except (TypeError, ValueError):
+                return None
+
+        opts = self.entry.options
+        res = drive_trips.update(
+            self._open_trip,
+            {
+                "t": time.time() * 1000,
+                "odometerKm": _num(v.get("odometer")),
+                "batteryPct": _num(v.get("ev_battery_percentage")),
+                "charging": v.get("ev_battery_is_charging"),
+                "carOn": v.get("engine_is_running"),
+                "locationLat": _num(v.get("location_latitude")),
+                "locationLon": _num(v.get("location_longitude")),
+            },
+            {
+                "pricePerKwh": opts.get("price_per_kwh") or 0,
+                "capacityKwh": opts.get("capacity_kwh") or _num(v.get("ev_battery_capacity")),
+            },
+        )
+        changed = res["open"] != self._open_trip
+        self._open_trip = res["open"]
+        if res["closed"]:
+            self._trips.append(res["closed"])
+            keep_after = (time.time() * 1000) - 365 * 864e5
+            self._trips = [
+                t for t in self._trips if t and t.get("endedAt", 0) >= keep_after
+            ][-500:]
+            changed = True
+            _LOGGER.info(
+                "Kia Access trip logged: %s mi%s",
+                res["closed"].get("distanceMi"),
+                f" @ {res['closed'].get('miPerKwh')} mi/kWh" if res["closed"].get("miPerKwh") else "",
+            )
+        if changed:
+            await self._trips_store.async_save(
+                {"trips": self._trips, "open": self._open_trip}
+            )
+
+    @property
+    def trip_log(self) -> dict:
+        """Data for the trip sensors + cost-per-mile."""
+        recent = sorted(self._trips, key=lambda t: t.get("endedAt", 0), reverse=True)
+        return {
+            "last": recent[0] if recent else None,
+            "recent": recent[:30],
+            "last_30_days": drive_trips.summary(self._trips, 30),
+            "last_90_days": drive_trips.summary(self._trips, 90),
+            "lifetime": drive_trips.summary(self._trips, 36500),
+        }
 
     def _zone_pois(self) -> list[dict]:
         """Every zone.* as {name, lat, lon} for the range-reach readout."""
@@ -278,6 +342,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             )
         self.vehicle = (result.get("vehicles") or [{}])[0]
         await self._update_sessions()
+        await self._update_trips()
         self._emit_alerts()
         return self.vehicle
 

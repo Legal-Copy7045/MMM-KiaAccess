@@ -46,6 +46,8 @@ async def async_setup_entry(
     entities.append(KiaAccessChargeSessionSensor(coordinator))
     entities.append(KiaAccessActionSensor(coordinator))
     entities.append(KiaAccessRangeReachSensor(coordinator))
+    entities.append(KiaAccessLastTripSensor(coordinator))
+    entities.append(KiaAccessCostPerMileSensor(coordinator))
     entities += [
         KiaAccessSeatSensor(coordinator, key, name) for key, name in _SEATS.items()
     ]
@@ -351,4 +353,99 @@ class KiaAccessChargeSessionSensor(KiaAccessEntity, SensorEntity):
             "cost": p.get("cost"),
             "gained_pct": p.get("gainedPct"),
             "minutes": p.get("minutes"),
+        }
+
+
+class KiaAccessLastTripSensor(KiaAccessEntity, SensorEntity):
+    """The most recent auto-detected drive.
+
+    State is the trip distance (miles); attributes carry the energy /
+    efficiency / cost detail, the recent list, and rolling totals.
+    """
+
+    _attr_icon = "mdi:map-marker-path"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.MILES
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "last_trip")
+        self._attr_name = "Last trip"
+
+    def _log(self) -> dict:
+        return self.coordinator.trip_log
+
+    @property
+    def available(self) -> bool:
+        return self._log().get("last") is not None
+
+    @property
+    def native_value(self):
+        last = self._log().get("last")
+        return last.get("distanceMi") if last else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        log = self._log()
+        last = log.get("last") or {}
+        m30 = log["last_30_days"]
+        return {
+            "started_at": last.get("startedAt"),
+            "ended_at": last.get("endedAt"),
+            "minutes": last.get("minutes"),
+            "distance_km": last.get("distanceKm"),
+            "used_pct": last.get("usedPct"),
+            "kwh": last.get("kwh"),
+            "mi_per_kwh": last.get("miPerKwh"),
+            "kwh_per_100mi": last.get("kwhPer100mi"),
+            "cost": last.get("cost"),
+            "charged_during": last.get("chargedDuring"),
+            "from_lat": last.get("fromLat"),
+            "from_lon": last.get("fromLon"),
+            "to_lat": last.get("toLat"),
+            "to_lon": last.get("toLon"),
+            "trips_30d": m30.get("count"),
+            "miles_30d": m30.get("distanceMi"),
+            "kwh_30d": m30.get("kwh"),
+            "cost_30d": m30.get("cost"),
+            "mi_per_kwh_30d": m30.get("miPerKwh"),
+            "trips": log.get("recent"),
+        }
+
+
+class KiaAccessCostPerMileSensor(KiaAccessEntity, SensorEntity):
+    """Running cost per mile from the trip log — 30-day figure as the state,
+    90-day and lifetime in the attributes. Needs a price per kWh set."""
+
+    _attr_icon = "mdi:cash-multiple"
+    _attr_native_unit_of_measurement = "USD/mi"
+    _attr_suggested_display_precision = 3
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "cost_per_mile")
+        self._attr_name = "Cost per mile"
+
+    def _log(self) -> dict:
+        return self.coordinator.trip_log
+
+    @property
+    def available(self) -> bool:
+        return (
+            (self.coordinator.entry.options.get("price_per_kwh") or 0) > 0
+            and self._log()["last_30_days"].get("costPerMi") is not None
+        )
+
+    @property
+    def native_value(self):
+        return self._log()["last_30_days"].get("costPerMi")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        log = self._log()
+        return {
+            "cost_per_mile_90d": log["last_90_days"].get("costPerMi"),
+            "cost_per_mile_lifetime": log["lifetime"].get("costPerMi"),
+            "mi_per_kwh_30d": log["last_30_days"].get("miPerKwh"),
+            "mi_per_kwh_lifetime": log["lifetime"].get("miPerKwh"),
+            "miles_30d": log["last_30_days"].get("distanceMi"),
+            "cost_30d": log["last_30_days"].get("cost"),
         }
