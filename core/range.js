@@ -92,6 +92,8 @@
       }
       out.push({
         name: p.name || "",
+        lat: pla,
+        lon: plo,
         km: km,
         reachable: reachKm != null && km <= reachKm,
         marginKm: reachKm != null ? reachKm - km : null,

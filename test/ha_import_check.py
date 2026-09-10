@@ -95,6 +95,12 @@ assert _cln({"road": "Main St", "city": "Pittsburgh"}) == "Main St"
 assert _cln("123 Main St") == "123 Main St"
 assert _cln(None) is None
 
+_in_us = co.KiaAccessCoordinator._in_us
+assert _in_us(40.71, -79.75) is True      # Sarver PA
+assert _in_us(51.5, -0.12) is False       # London
+assert _in_us(None, None) is False
+assert hasattr(co.KiaAccessCoordinator, "async_refresh_calendar_pois")
+
 # diagnostics must redact the GPS (incl. the combined "location" string) + keys
 diag = importlib.import_module(f"{pkg}.diagnostics")
 assert {"location", "location_latitude", "location_longitude", "token",

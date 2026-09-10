@@ -62,6 +62,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._moved_since: float | None = None
         self._parked: dict | None = None
         self._was_on: bool | None = None
+        self._geo_cache: dict = {}
+        self._geo_store = Store(hass, 1, f"{DOMAIN}_geocache_{entry.entry_id}")
+        self._cal_pois: list[dict] = []
+        self._cal_pois_at: float = 0.0
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
@@ -84,6 +88,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
     async def async_load_prefs(self) -> None:
         data = await self._prefs_store.async_load() or {}
         self.climate_prefs = {**DEFAULT_CLIMATE_PREFS, **data}
+        self._geo_cache = (await self._geo_store.async_load() or {}).get("geo", {})
 
     async def async_set_pref(self, key: str, value) -> None:
         self.climate_prefs[key] = value
@@ -225,13 +230,27 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "lifetime": drive_trips.summary(self._trips, 36500),
         }
 
+    # continental US + Alaska + Hawaii bounding boxes — keeps foreign zones
+    # (e.g. UK "Parent's") out of the reachable-destinations list
+    _US_BOXES = (
+        (24.4, 49.5, -125.0, -66.9),
+        (51.0, 71.6, -179.9, -129.0),
+        (18.8, 22.3, -160.5, -154.7),
+    )
+
+    @classmethod
+    def _in_us(cls, lat, lon) -> bool:
+        if lat is None or lon is None:
+            return False
+        return any(a <= lat <= b and c <= lon <= d for a, b, c, d in cls._US_BOXES)
+
     def _zone_pois(self) -> list[dict]:
-        """Every zone.* as {name, lat, lon} for the range-reach readout."""
+        """Every US zone.* as {name, lat, lon} for the range-reach readout."""
         out = []
         for st in self.hass.states.async_all("zone"):
             lat = st.attributes.get("latitude")
             lon = st.attributes.get("longitude")
-            if lat is None or lon is None:
+            if not self._in_us(lat, lon):
                 continue
             out.append(
                 {
@@ -242,6 +261,58 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 }
             )
         return out
+
+    async def _geocode_cached(self, address: str):
+        """address -> (lat, lon) via Nominatim, cached in the prefs store."""
+        key = " ".join(address.lower().split())[:200]
+        if key in self._geo_cache:
+            return self._geo_cache[key]
+        result = None
+        try:
+            lat, lon, _ = await self.hass.async_add_executor_job(
+                kia_client._geocode, address  # noqa: SLF001
+            )
+            result = [lat, lon] if self._in_us(lat, lon) else None
+        except Exception:  # noqa: BLE001
+            result = None
+        self._geo_cache[key] = result
+        await self._geo_store.async_save({"geo": self._geo_cache})
+        return result
+
+    async def async_refresh_calendar_pois(self) -> None:
+        """Pull locations off the configured calendars for the next N hours,
+        geocode them (US only), and cache as POIs for the range-reach readout."""
+        raw = self.entry.options.get("calendar_entities") or ""
+        cals = [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
+        if not cals:
+            self._cal_pois = []
+            return
+        hours = float(self.entry.options.get("calendar_lookahead_hours") or 72)
+        start = dt_util.now()
+        end = start + timedelta(hours=hours)
+        pois: list[dict] = []
+        seen: set[str] = set()
+        for cal in cals:
+            try:
+                resp = await self.hass.services.async_call(
+                    "calendar", "get_events",
+                    {"entity_id": cal, "start_date_time": start.isoformat(),
+                     "end_date_time": end.isoformat()},
+                    blocking=True, return_response=True,
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            events = (resp or {}).get(cal, {}).get("events", []) if resp else []
+            for ev in events:
+                loc = (ev.get("location") or "").strip()
+                summary = (ev.get("summary") or "Event").strip()
+                if not loc or loc.lower() in seen:
+                    continue
+                seen.add(loc.lower())
+                ll = await self._geocode_cached(loc)
+                if ll:
+                    pois.append({"name": summary[:40], "lat": ll[0], "lon": ll[1]})
+        self._cal_pois = pois[:12]
 
     @property
     def range_reach(self) -> dict | None:
@@ -269,7 +340,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "batteryPct": _n(self.vehicle.get("ev_battery_percentage")),
             "roadFactor": 1.3,
         }
-        return drive_range.summary(lat, lon, rng, self._zone_pois(), o)
+        pois = self._zone_pois() + [
+            p for p in self._cal_pois
+            if not any(z["name"] == p["name"] for z in self._zone_pois())
+        ]
+        return drive_range.summary(lat, lon, rng, pois, o)
 
     @staticmethod
     def _clean_address(v) -> str | None:
@@ -404,6 +479,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self.vehicle = (result.get("vehicles") or [{}])[0]
         await self._update_sessions()
         await self._update_trips()
+        # refresh calendar destinations at most every 30 min (each is a geocode)
+        if time.monotonic() - self._cal_pois_at > 1800:
+            self._cal_pois_at = time.monotonic()
+            try:
+                await self.async_refresh_calendar_pois()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("calendar POI refresh failed", exc_info=True)
         self._emit_alerts()
         return self.vehicle
 
