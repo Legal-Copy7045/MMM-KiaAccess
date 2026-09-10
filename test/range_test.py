@@ -21,13 +21,13 @@ assert R.reach(None) is None
 assert R.reach(5, {"reserveKm": 50}) == 0
 
 # haversine / bearing
-d = R.haversine_km(40.71374, -79.75464, 40.4406, -79.9959)
+d = R.haversine_km(40.7539, -79.8103, 40.4406, -79.9959)
 assert 28 < d < 40, d
-b = R.bearing_deg(40.71374, -79.75464, 40.4406, -79.9959)
+b = R.bearing_deg(40.7539, -79.8103, 40.4406, -79.9959)
 assert 180 < b < 260, b
 
 # poi_status
-car = (40.71374, -79.75464)
+car = (40.7539, -79.8103)
 pois = [
     {"name": "Shore", "lat": 38.34, "lon": -75.08},
     {"name": "Work", "lat": 40.4406, "lon": -79.9959},
@@ -52,10 +52,10 @@ assert st2[0]["durationMin"] < st2[1]["durationMin"], "duration grows with dista
 assert 25 < st2[0]["durationMin"] < 55, st2[0]["durationMin"]
 
 # circle_ring
-ring = R.circle_ring(40.71374, -79.75464, 100, 32)
+ring = R.circle_ring(40.7539, -79.8103, 100, 32)
 assert len(ring) == 33
 assert ring[0] == ring[32]
-assert near(ring[0][1] - 40.71374, 100 / 111.32, 0.02)
+assert near(ring[0][1] - 40.7539, 100 / 111.32, 0.02)
 
 # summary
 s = R.summary(car[0], car[1], 300, pois, {"roundTrip": True})

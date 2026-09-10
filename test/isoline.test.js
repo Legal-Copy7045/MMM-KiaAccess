@@ -14,8 +14,8 @@ assert.strictEqual(I.pastMax(I.MAX_DRIVE_KM + 1), true);
 assert.strictEqual(I.pastMax(I.MAX_DRIVE_KM - 1), false);
 
 // ---- TomTom: URL + boundary -> ring ----
-var tt = I.tomtomUrl({ apiKey: "TT", lat: 40.71, lon: -79.75, distanceKm: 237, mode: "drive" });
-assert.ok(tt.indexOf("calculateReachableRange/40.71%2C-79.75/json") !== -1, tt);
+var tt = I.tomtomUrl({ apiKey: "TT", lat: 40.7539, lon: -79.8103, distanceKm: 237, mode: "drive" });
+assert.ok(tt.indexOf("calculateReachableRange/40.7539%2C-79.8103/json") !== -1, tt);
 assert.ok(tt.includes("distanceBudgetInMeters=237000") && tt.includes("key=TT") && tt.includes("travelMode=car"));
 var ttRing = I.parseTomtom({ reachableRange: { center: { latitude: 40.7, longitude: -79.7 }, boundary: [
   { latitude: 41.0, longitude: -80.0 }, { latitude: 41.0, longitude: -79.4 },
@@ -71,8 +71,8 @@ assert.ok(smap.includes("marker=lonlat:") && smap.includes(";text:H"), "marker t
 assert.strictEqual(I.staticMapUrl({ apiKey: "K", rings: [], markers: [] }), null);
 
 // ---- cacheKey: stable under small wiggle ----
-const k1 = I.cacheKey(40.713, -79.751, [241, 118]);
-const k2 = I.cacheKey(40.714, -79.749, [243, 121]);
+const k1 = I.cacheKey(40.7539, -79.8103, [241, 118]);
+const k2 = I.cacheKey(40.7512, -79.8087, [243, 121]);
 assert.strictEqual(k1, k2, "coarse key ignores GPS jitter + range noise");
 
 console.log("all isoline tests passed");

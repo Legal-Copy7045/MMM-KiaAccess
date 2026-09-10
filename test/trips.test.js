@@ -20,8 +20,8 @@ function run(samples, opts) {
 // ---- a plain home -> work drive, parked at each end ----
 let t = Date.UTC(2026, 8, 10, 8, 0, 0);
 const drive = run([
-  { t: t + 0 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.71, locationLon: -79.75 },
-  { t: t + 5 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.71, locationLon: -79.75 },
+  { t: t + 0 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+  { t: t + 5 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
   { t: t + 20 * MIN, odometerKm: 1015, batteryPct: 87, carOn: true, locationLat: 40.62, locationLon: -79.80 },
   { t: t + 35 * MIN, odometerKm: 1030, batteryPct: 84, carOn: true, locationLat: 40.55, locationLon: -79.88 },
   { t: t + 45 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 },

@@ -20,17 +20,17 @@ assert.strictEqual(R.reach(null), null);
 assert.strictEqual(R.reach(5, { reserveKm: 50 }), 0, "reserve past range -> 0");
 
 // ---- haversine + bearing ----
-// Sarver PA -> downtown Pittsburgh ~ 33 km, bearing ~ SW
-const dHome = R.haversineKm(40.71374, -79.75464, 40.4406, -79.9959);
+// Saxonburg PA -> downtown Pittsburgh ~ 38 km, bearing ~ SW
+const dHome = R.haversineKm(40.7539, -79.8103, 40.4406, -79.9959);
 assert.ok(dHome > 28 && dHome < 40, dHome);
-const b = R.bearingDeg(40.71374, -79.75464, 40.4406, -79.9959);
+const b = R.bearingDeg(40.7539, -79.8103, 40.4406, -79.9959);
 assert.ok(b > 180 && b < 260, "bearing SW-ish: " + b);
 
 // ---- poiStatus: sorted, reachable flag, margin ----
-const car = [40.71374, -79.75464];
+const car = [40.7539, -79.8103];
 const pois = [
   { name: "Shore", lat: 38.34, lon: -75.08 },   // ~400 km, far
-  { name: "Work", lat: 40.4406, lon: -79.9959 }, // ~33 km, near
+  { name: "Work", lat: 40.4406, lon: -79.9959 }, // ~38 km, near
   { name: "Cabin", lat: 39.87, lon: -79.49 },    // ~95 km
   { name: "bad", lat: null, lon: 1 }             // dropped
 ];
@@ -49,15 +49,15 @@ assert.strictEqual(st2[2].arrivalPct, 0, "shore is way out of range -> 0%");
 assert.ok(st2[0].arrivalPct > st2[1].arrivalPct, "nearer place = more charge left");
 assert.ok(st2[0].durationMin >= 0 && st2[0].durationMin < st2[1].durationMin, "duration grows with distance");
 assert.ok(st2.map((p) => p.durationMin).every((d) => typeof d === "number"));
-// Work ~33 km * 1.3 / 68 kmh * 60 ~= 38 min
+// Work ~38 km * 1.3 / 68 kmh * 60 ~= 44 min
 assert.ok(st2[0].durationMin > 25 && st2[0].durationMin < 55, st2[0].durationMin);
 
 // ---- circleRing: closed ring, right size ----
-const ring = R.circleRing(40.71374, -79.75464, 100, 32);
+const ring = R.circleRing(40.7539, -79.8103, 100, 32);
 assert.strictEqual(ring.length, 33, "n+1 points, closed");
 assert.deepStrictEqual(ring[0], ring[32], "ring is closed");
 // north point ~ 100 km / 111.32 deg north
-assert.ok(near(ring[0][1] - 40.71374, 100 / 111.32, 0.02));
+assert.ok(near(ring[0][1] - 40.7539, 100 / 111.32, 0.02));
 
 // ---- summary: both distances + active + circle ----
 const s = R.summary(car[0], car[1], 300, pois, { roundTrip: true });

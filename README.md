@@ -666,7 +666,7 @@ A **preconditioning schedule** is shown automatically whenever one is set on the
 car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 21°".
 
 - **`drivingTimes`** — a standalone **Driving times** panel: each destination
-  with its live drive time, the route (`via PA 28 · Greensburg Rd`), an ETA
+  with its live drive time, the route (`via I-95 · Main St`), an ETA
   **coloured by traffic delay**, the calendar event time, and the battery
   you'd **arrive with**. Needs `source: "homeassistant"` and the integration's
   **Calendar entities** / **Static destinations** / **Drive-time provider**
@@ -677,10 +677,10 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
   drivingTimes: {
     enabled: true,
     header: "Driving times",
-    max: 6,
-    order: "soonest",      // calendar time, then distance | "nearest"
+    max: 8,
+    order: "grouped",      // 📅 calendar (by time) → ⭐ static → 📍 zones (by distance) | "nearest"
     showVia: true,
-    showConsumption: true, // "· arrive 78% · ~14 kWh"
+    showConsumption: true, // "→78% ~14kWh"
     delayStops: [          // ETA colour by % slower than free-flow
       { pctOver: 10, color: "#ffff00" },
       { pctOver: 20, color: "#ff9900" },
@@ -702,8 +702,8 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
 visuals: {
   location: {
     enabled: true,
-    homeLat: 40.71374,          // both set -> "3.2 mi from home" / "At home"
-    homeLon: -79.75464,
+    homeLat: 40.7128,           // your home — both set -> "3.2 mi from home" / "At home"
+    homeLon: -74.0060,
     map: true,                  // show a static map image
     mapZoom: 14,
     mapWidth: 210, mapHeight: 120,
@@ -747,7 +747,7 @@ Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 dialog):
 
 - **Static destinations** — one `Name | address` per line, always shown
-  (geocoded once, cached). Good for "Nana | 5025 Hialeah Dr, Pittsburgh PA".
+  (geocoded once, cached), e.g. `White House | 1600 Pennsylvania Ave NW, Washington, DC`.
 - **Calendar entities** + **Calendar look-ahead (hours)** — any event with a
   location in the next N hours, geocoded (US only, cached). Call
   **`kia_access.refresh_calendar_destinations`** to re-read now instead of
@@ -778,8 +778,8 @@ places pinned. Two providers, both free:
 ```js
 location: {
   enabled: true,
-  homeLat: 40.71374, homeLon: -79.75464,
-  reach: true, pois: [{ name: "Work", lat: 40.4406, lon: -79.9959 }],
+  homeLat: 40.7128, homeLon: -74.0060,
+  reach: true, pois: [{ name: "Work", lat: 40.75, lon: -73.99 }],
   rangeMap: {
     enabled: true,
     apiKey: "YOUR_GEOAPIFY_KEY",
@@ -1154,8 +1154,8 @@ OpenStreetMap) or explicit `latitude` / `longitude`:
 ```yaml
 service: kia_access.send_to_car
 data:
-  name: "Nana's house"
-  address: "5025 Hialeah Drive, Pittsburgh, PA"
+  name: "White House"
+  address: "1600 Pennsylvania Ave NW, Washington, DC"
 ```
 
 **Send your calendar destinations before you leave:**

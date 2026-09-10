@@ -66,7 +66,7 @@
           "drive_time_provider": "Estimate (default) uses straight-line distance. Geoapify or TomTom return real road distance and live-traffic drive time via one matrix call per poll (free tiers are plenty; needs the matching API key).",
           "routing_api_key": "Used for live drive times AND for geocoding calendar event locations. A Geoapify key works for both even if the drive-time provider is left on “estimate” (Nominatim increasingly blocks Home Assistant).",
           "drive_time_routes": "TomTom only: one routing call per destination each refresh so the reachable list can show “via <roads>” and colour the ETA by traffic delay. Turn off for one cheap matrix call (time + distance only).",
-          "static_destinations": "Always-shown destinations for the reachable list / driving-times panel, e.g. “Nana | 5025 Hialeah Dr, Pittsburgh PA”. Geocoded once and cached."
+          "static_destinations": "Always-shown destinations for the reachable list / driving-times panel, one per line as \"Name | address\" — e.g. \"White House | 1600 Pennsylvania Ave NW, Washington, DC\". Geocoded once and cached."
         }
       }
     }

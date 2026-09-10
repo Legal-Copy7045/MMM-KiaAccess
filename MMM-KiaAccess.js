@@ -172,8 +172,8 @@ Module.register("MMM-KiaAccess", {
       drivingTimes: {
         enabled: false,
         header: "Driving times",
-        max: 6, // rows to show
-        order: "soonest", // "soonest" (calendar time, then distance) | "nearest"
+        max: 8, // rows to show
+        order: "grouped", // "grouped" (calendar by time -> static -> zones by distance) | "nearest"
         showVia: true, // the "via <roads>" subline
         showConsumption: true, // "· arrive 78% · ~14 kWh"
         packKwh: null, // usable kWh for the kWh estimate (falls back to chargeCost.capacityKwh, then 99.8)
@@ -1346,16 +1346,21 @@ Module.register("MMM-KiaAccess", {
     if (!rows.length) return null;
 
     if (dt.hideUnreachable) rows = rows.filter((r) => r.reachable);
-    if ((dt.order || "soonest") === "soonest") {
-      const cal = rows.filter((r) => r.source === "calendar")
-        .sort((a, b) => String(a.when || "").localeCompare(String(b.when || "")));
-      const zone = rows.filter((r) => r.source !== "calendar")
-        .sort((a, b) => a.km - b.km);
-      rows = cal.concat(zone);
-    } else {
+    if ((dt.order || "grouped") === "nearest") {
       rows.sort((a, b) => a.km - b.km);
+    } else {
+      // grouped: calendar (by event time) -> static -> other US zones (by distance)
+      const rank = { calendar: 0, static: 1, zone: 2 };
+      rows.sort((a, b) => {
+        const g = (rank[a.source] != null ? rank[a.source] : 3) -
+          (rank[b.source] != null ? rank[b.source] : 3);
+        if (g) return g;
+        if (a.source === "calendar")
+          return String(a.when || "").localeCompare(String(b.when || ""));
+        return a.km - b.km;
+      });
     }
-    rows = rows.slice(0, Number(dt.max) || 6);
+    rows = rows.slice(0, Number(dt.max) || 8);
 
     const stops = (Array.isArray(dt.delayStops) ? dt.delayStops : [])
       .filter((s) => s && isFinite(s.pctOver))
@@ -1376,19 +1381,22 @@ Module.register("MMM-KiaAccess", {
     el.className = "kiaaccess-batt-detail kiaaccess-drivetimes";
     let html =
       '<div class="kiaaccess-dt-header">' + this.escape(dt.header || "Driving times") + "</div>";
+    let anyRouted = false;
     rows.forEach((r) => {
-      const icon = r.source === "calendar" ? "📅" : "📍";
+      if (r.routed) anyRouted = true;
+      const icon = r.source === "calendar" ? "📅" : r.source === "static" ? "⭐" : "📍";
       const col = delayColor(r);
       const timeTxt = r.durationMin != null ? hm(r.durationMin) : "—";
       const delayTxt = r.delayMin ? " +" + hm(r.delayMin) : "";
+      // compact sub-line: [when] · [via] · [→SoC ~kWh]
       const subBits = [];
-      if (dt.showVia !== false && r.via) subBits.push(this.escape(r.via));
       if (r.whenLocal) subBits.push(this.escape(r.whenLocal));
+      if (dt.showVia !== false && r.via) subBits.push(this.escape(r.via));
       if (dt.showConsumption !== false && r.arrivalPct != null) {
-        let c = "arrive " + r.arrivalPct + "%";
+        let c = "→" + r.arrivalPct + "%";
         if (battPct != null && pack) {
           const kwh = Math.max(0, (battPct - r.arrivalPct) / 100 * pack);
-          if (kwh >= 0.5) c += " · ~" + kwh.toFixed(0) + " kWh";
+          if (kwh >= 0.5) c += " ~" + kwh.toFixed(0) + "kWh";
         }
         subBits.push(c);
       } else if (dt.showConsumption !== false && !r.reachable) {
@@ -1406,6 +1414,11 @@ Module.register("MMM-KiaAccess", {
             : "") +
         "</div>";
     });
+    if (rr && rr.length && !anyRouted && dt.showVia !== false) {
+      html +=
+        '<div class="kiaaccess-dt-hint">Set a Drive-time provider (TomTom) in ' +
+        'Home Assistant for routes + traffic delay</div>';
+    }
     el.innerHTML = html;
     return el;
   },

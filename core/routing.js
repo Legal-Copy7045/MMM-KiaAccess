@@ -175,13 +175,15 @@
     if (provider === "tomtom") {
       var mode = o.mode === "truck" ? "truck" : "car";
       return {
+        // NB: no routeRepresentation=summaryOnly — that would strip the
+        // guidance.instructions we need for the "via <roads>" summary.
         url: "https://api.tomtom.com/routing/1/calculateRoute/" +
           s.lat + "," + s.lon + ":" + d.lat + "," + d.lon + "/json" +
           "?key=" + encodeURIComponent(apiKey) +
           "&travelMode=" + mode +
           "&traffic=" + (traffic ? "true" : "false") +
           "&computeTravelTimeFor=all" +
-          "&instructionsType=text&sectionType=street&routeRepresentation=summaryOnly",
+          "&instructionsType=text",
         method: "GET"
       };
     }

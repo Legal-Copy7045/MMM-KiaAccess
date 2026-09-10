@@ -29,9 +29,9 @@ t = 1_788_000_000_000
 # plain home -> work drive
 _, closed = run([
     {"t": t + 0 * MIN, "odometerKm": 1000, "batteryPct": 90, "carOn": False,
-     "locationLat": 40.71, "locationLon": -79.75},
+     "locationLat": 40.7539, "locationLon": -79.8103},
     {"t": t + 5 * MIN, "odometerKm": 1000, "batteryPct": 90, "carOn": False,
-     "locationLat": 40.71, "locationLon": -79.75},
+     "locationLat": 40.7539, "locationLon": -79.8103},
     {"t": t + 20 * MIN, "odometerKm": 1015, "batteryPct": 87, "carOn": True,
      "locationLat": 40.62, "locationLon": -79.80},
     {"t": t + 35 * MIN, "odometerKm": 1030, "batteryPct": 84, "carOn": True,
