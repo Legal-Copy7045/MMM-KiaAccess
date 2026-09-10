@@ -79,6 +79,7 @@
     var pct = Number(trip.batteryPct);
     var rng = Number(trip.rangeKm);
     var road = Number(trip.roadFactor) || 1.3;
+    var avgKmh = Number(trip.avgKmh) || 68; // ~42 mph blended local/highway
     var canArrive = isFinite(pct) && isFinite(rng) && rng > 0;
     var out = [];
     pois.forEach(function (p) {
@@ -98,7 +99,8 @@
         reachable: reachKm != null && km <= reachKm,
         marginKm: reachKm != null ? reachKm - km : null,
         bearing: bearingDeg(lat, lon, pla, plo),
-        arrivalPct: arrivalPct
+        arrivalPct: arrivalPct,
+        durationMin: Math.round((km * road) / avgKmh * 60)
       });
     });
     out.sort(function (a, b) { return a.km - b.km; });

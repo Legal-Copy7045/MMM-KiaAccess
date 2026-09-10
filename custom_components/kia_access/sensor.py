@@ -32,6 +32,14 @@ def _num(x):
         return None
 
 
+def _hm(minutes) -> str | None:
+    """90 -> '1h 30m', 25 -> '25m'"""
+    if minutes is None:
+        return None
+    m = int(round(minutes))
+    return f"{m // 60}h {m % 60:02d}m" if m >= 60 else f"{m}m"
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -163,6 +171,7 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
         r = self._reach() or {}
         cal_names = {p["name"] for p in getattr(self.coordinator, "_cal_pois", [])}
         return {
+            "calendar_status": getattr(self.coordinator, "_cal_status", {}),
             "one_way_km": r.get("oneWayKm"),
             "one_way_mi": round(r["oneWayKm"] * 0.621371, 1)
             if r.get("oneWayKm") is not None else None,
@@ -188,6 +197,8 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
                     if p["marginKm"] is not None
                     else None,
                     "arrival_pct": p.get("arrivalPct"),
+                    "duration_min": p.get("durationMin"),
+                    "duration": _hm(p.get("durationMin")),
                     "source": "calendar" if p["name"] in cal_names else "zone",
                 }
                 for p in r.get("pois", [])

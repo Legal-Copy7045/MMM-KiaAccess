@@ -79,6 +79,7 @@ def poi_status(lat, lon, pois, reach_km, trip=None):
     pct = _num(trip.get("batteryPct"))
     rng = _num(trip.get("rangeKm"))
     road = _num(trip.get("roadFactor")) or 1.3
+    avg_kmh = _num(trip.get("avgKmh")) or 68
     can_arrive = pct is not None and rng is not None and rng > 0
     out = []
     for p in pois:
@@ -98,6 +99,7 @@ def poi_status(lat, lon, pois, reach_km, trip=None):
                 "marginKm": (reach_km - km) if reach_km is not None else None,
                 "bearing": bearing_deg(lat, lon, float(p["lat"]), float(p["lon"])),
                 "arrivalPct": arrival_pct,
+                "durationMin": round((km * road) / avg_kmh * 60),
             }
         )
     out.sort(key=lambda x: x["km"])
