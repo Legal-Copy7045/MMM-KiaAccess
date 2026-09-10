@@ -67,6 +67,15 @@ _ps = rng.poi_status(40.7, -79.7, [{"name": "H", "lat": 40.8, "lon": -79.7}], 50
 assert _ps[0]["arrivalPct"] is not None and _ps[0]["arrivalPct"] < 80
 assert rng.summary(40.7, -79.7, 300, [{"name": "H", "lat": 40.7, "lon": -79.7}])["pois"][0]["reachable"]
 
+rt = importlib.import_module(f"{pkg}.routing")
+assert rt.matrix_request("geoapify", {"lat": 40.7, "lon": -79.7},
+                         [{"lat": 40.8, "lon": -79.7}], "K")["method"] == "POST"
+assert rt.matrix_request("geoapify", {"lat": 40.7, "lon": -79.7}, [], "K") is None
+_rm = rt.parse_matrix("geoapify",
+                      {"sources_to_targets": [[{"target_index": 0,
+                                                "distance": 1000, "time": 120}]]}, 1)
+assert _rm[0]["durationMin"] == 2 and abs(_rm[0]["distanceKm"] - 1) < 1e-6
+
 cf = importlib.import_module(f"{pkg}.config_flow")
 assert hasattr(cf, "KiaAccessConfigFlow")
 assert hasattr(cf.KiaAccessConfigFlow, "async_step_otp")
@@ -100,6 +109,8 @@ assert _in_us(40.71, -79.75) is True      # Sarver PA
 assert _in_us(51.5, -0.12) is False       # London
 assert _in_us(None, None) is False
 assert hasattr(co.KiaAccessCoordinator, "async_refresh_calendar_pois")
+assert hasattr(co.KiaAccessCoordinator, "_refresh_drive_times")
+assert co.KiaAccessCoordinator._poi_key(40.712345, -79.754321) == "40.7123,-79.7543"
 
 # diagnostics must redact the GPS (incl. the combined "location" string) + keys
 diag = importlib.import_module(f"{pkg}.diagnostics")

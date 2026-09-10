@@ -172,6 +172,8 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
         cal_names = {p["name"] for p in getattr(self.coordinator, "_cal_pois", [])}
         return {
             "calendar_status": getattr(self.coordinator, "_cal_status", {}),
+            "drive_time_source": r.get("drive_time_source", "estimate"),
+            "drive_time_status": getattr(self.coordinator, "_route_status", {}),
             "one_way_km": r.get("oneWayKm"),
             "one_way_mi": round(r["oneWayKm"] * 0.621371, 1)
             if r.get("oneWayKm") is not None else None,
@@ -199,6 +201,7 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
                     "arrival_pct": p.get("arrivalPct"),
                     "duration_min": p.get("durationMin"),
                     "duration": _hm(p.get("durationMin")),
+                    "routed": bool(p.get("routed")),
                     "source": "calendar" if p["name"] in cal_names else "zone",
                 }
                 for p in r.get("pois", [])

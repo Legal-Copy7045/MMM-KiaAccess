@@ -160,7 +160,12 @@ def _register_services(hass: HomeAssistant) -> None:
     async def _refresh_calendar(call: ServiceCall) -> None:
         coordinator = _coordinator_for(hass, call)
         coordinator._cal_pois_at = 0.0  # noqa: SLF001 — clear the throttle
+        coordinator._route_at = 0.0  # noqa: SLF001 — re-route the new POIs too
         await coordinator.async_refresh_calendar_pois()
+        try:
+            await coordinator._refresh_drive_times()  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            pass
         coordinator.async_update_listeners()
 
     hass.services.async_register(

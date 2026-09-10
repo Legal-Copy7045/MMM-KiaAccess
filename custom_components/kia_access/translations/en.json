@@ -53,12 +53,16 @@
           "range_factor": "Range reach factor (haircut on the car's range estimate)",
           "range_reserve_pct": "Range reach reserve % (arrive with this much charge left)",
           "calendar_entities": "Calendar entities for trip destinations (comma-separated, e.g. calendar.work, calendar.family)",
-          "calendar_lookahead_hours": "Calendar look-ahead (hours) for upcoming destinations"
+          "calendar_lookahead_hours": "Calendar look-ahead (hours) for upcoming destinations",
+          "drive_time_provider": "Drive-time provider for reachable destinations",
+          "routing_api_key": "Routing API key (Geoapify or TomTom)"
         },
         "data_description": {
           "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
           "force_refresh_timeout": "How long to wait for the car to answer before falling back to the cached copy for that poll.",
-          "calendar_entities": "Events with a location on these calendars are geocoded and added to the reachable-destinations list / range-map pins. US locations only."
+          "calendar_entities": "Events with a location on these calendars are geocoded and added to the reachable-destinations list / range-map pins. US locations only.",
+          "drive_time_provider": "Estimate (default) uses straight-line distance. Geoapify or TomTom return real road distance and live-traffic drive time via one matrix call per poll (free tiers are plenty; needs the matching API key).",
+          "routing_api_key": "Only used when the drive-time provider is Geoapify or TomTom."
         }
       }
     }

@@ -265,6 +265,17 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         "calendar_lookahead_hours",
                         default=float(opts.get("calendar_lookahead_hours") or 72),
                     ): _number(6, 336, 1),
+                    vol.Optional(
+                        "drive_time_provider",
+                        default=opts.get("drive_time_provider", "estimate"),
+                    ): vol.In(["estimate", "geoapify", "tomtom"]),
+                    vol.Optional(
+                        "routing_api_key",
+                        default=opts.get("routing_api_key", ""),
+                        description={
+                            "suggested_value": opts.get("routing_api_key", "")
+                        },
+                    ): str,
                 }
             ),
         )

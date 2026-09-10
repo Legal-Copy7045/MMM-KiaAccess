@@ -26,6 +26,7 @@ for (const rel of [
   "vehicle_state.py",
   "sessions.py",
   "range.py",
+  "routing.py",
   "trips.py"
 ]) {
   outputs[path.join(HA, path.basename(rel))] = fs.readFileSync(path.join(ROOT, rel), "utf8");
