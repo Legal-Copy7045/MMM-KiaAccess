@@ -201,9 +201,19 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
             "routes_enabled": rs.get("routes_enabled"),
             "with_roads": rs.get("with_roads", 0),
             "routed_pois": sum(1 for p in pois_out if p.get("routed")),
+            "poi_state": [
+                {
+                    "name": p.get("name"),
+                    "src": ("calendar" if p["name"] in cal_names
+                            else "static" if p["name"] in static_names else "zone"),
+                    "routed": bool(p.get("routed")),
+                    "via": bool(p.get("via")),
+                }
+                for p in pois_out
+            ],
+            "route_errors": rs.get("route_errors", {}),
             "errors": (cs.get("geocode_errors", []) or [])[:3]
-            + ([rs["error"]] if rs.get("error") else [])
-            + ([rs["route_error"]] if rs.get("route_error") else []),
+            + ([rs["error"]] if rs.get("error") else []),
         }
         return {
             "calendar_status": cs,
