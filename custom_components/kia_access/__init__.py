@@ -145,7 +145,11 @@ def _register_services(hass: HomeAssistant) -> None:
                     k: v for k, v in call.data.items() if k != "entry_id"
                 }
                 try:
-                    await coordinator.async_run_command(command_key, options)
+                    await coordinator.async_run_command(
+                        command_key, options, context=call.context
+                    )
+                except HomeAssistantError:
+                    raise
                 except Exception as err:  # noqa: BLE001
                     raise HomeAssistantError(
                         f"Kia Access '{command_key}' failed: {err}"

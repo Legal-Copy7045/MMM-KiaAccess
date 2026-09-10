@@ -146,6 +146,19 @@ assert _psd("Museum | 100 Main St\nAirport = 1 Terminal Rd\n\n123 Elm St, Town")
     ("Museum", "100 Main St"), ("Airport", "1 Terminal Rd"), ("123 Elm St", "123 Elm St, Town")
 ]
 assert _psd("") == [] and _psd(None) == []
+
+# "block automated climate": user-context calls pass, automation contexts don't
+_cb = co.KiaAccessCoordinator._climate_blocked
+_ctx = lambda uid: type("Ctx", (), {"user_id": uid})()
+_bc = lambda opts: type("C", (), {
+    "entry": type("E", (), {"options": opts})(),
+    "_CLIMATE_COMMANDS": co.KiaAccessCoordinator._CLIMATE_COMMANDS,
+})()
+assert _cb(_bc({}), "start_climate", _ctx(None)) is False, "off by default"
+assert _cb(_bc({"block_automated_climate": True}), "start_climate", _ctx(None)) is True
+assert _cb(_bc({"block_automated_climate": True}), "start_climate", _ctx("abc")) is False
+assert _cb(_bc({"block_automated_climate": True}), "lock", _ctx(None)) is False, "non-climate"
+assert _cb(_bc({"block_automated_climate": True}), "stop_climate", None) is True
 assert co.KiaAccessCoordinator._poi_key(40.712345, -79.754321) == "40.7123,-79.7543"
 
 # diagnostics must redact the GPS (incl. the combined "location" string) + keys

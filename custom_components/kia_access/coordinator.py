@@ -1009,7 +1009,31 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._prev_cond["_charging"] = res["meta"]["charging"]
         self._first_alert_run = False
 
-    async def async_run_command(self, command: str, options: dict | None = None) -> None:
+    # commands gated by the "block automated climate" option
+    _CLIMATE_COMMANDS = frozenset({"start_climate", "stop_climate"})
+
+    def _climate_blocked(self, command: str, context) -> bool:
+        """True when this is an automated climate call and the user has asked
+        for climate to be manual-only. A direct UI / Developer-Tools / card
+        action carries a user_id in its context; an automation/script/scene
+        does not."""
+        if command not in self._CLIMATE_COMMANDS:
+            return False
+        if not self.entry.options.get("block_automated_climate"):
+            return False
+        return getattr(context, "user_id", None) is None
+
+    async def async_run_command(
+        self, command: str, options: dict | None = None, context=None
+    ) -> None:
+        if self._climate_blocked(command, context):
+            from homeassistant.exceptions import HomeAssistantError
+
+            raise HomeAssistantError(
+                "Kia Access: automated climate control is disabled "
+                "('Block automated climate' option). Start it by hand from the "
+                "card, the button, or Developer Tools."
+            )
         job = self._job(command=command, options=options or {})
         self.last_action = {
             "name": command,

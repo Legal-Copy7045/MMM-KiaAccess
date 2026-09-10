@@ -247,6 +247,10 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ): _number(0, 180, 1),
                     vol.Optional(
+                        "block_automated_climate",
+                        default=opts.get("block_automated_climate", False),
+                    ): bool,
+                    vol.Optional(
                         "price_per_kwh",
                         default=float(opts.get("price_per_kwh") or 0),
                     ): _number(0, 10, 0.001),
