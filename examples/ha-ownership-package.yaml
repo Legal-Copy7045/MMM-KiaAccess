@@ -1,0 +1,257 @@
+# ===========================================================================
+# Kia Access — ownership helpers for Home Assistant
+#
+#   • efficiency proxy (range per 1% charge)
+#   • seasonal range: full-charge range now vs your warm-weather best
+#   • lease-mileage tracker with an excess-mileage cost projection
+#   • maintenance / renewals countdown with one-tap "done" buttons
+#
+# These are optional extras built on the sensors the integration already
+# exposes — nothing here is required for the integration to work.
+#
+# INSTALL
+#   1. save this file as  config/packages/kia_ownership.yaml
+#   2. in configuration.yaml:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   3. Developer Tools → YAML → Check configuration → Restart
+#
+# BEFORE YOU RESTART — edit two things:
+#   • the entity prefix: this file uses  sensor.kia_ev9_*  — change every
+#     occurrence to your vehicle's prefix (Developer Tools → States, search
+#     for your car). The sensors used are  _odometer  _ev_range  _ev_battery
+#     _next_service_in.
+#   • the lease block near the bottom of the `template:` section
+#     (start date, term, allowance, delivery odometer, excess rate).
+# ===========================================================================
+
+template:
+  - sensor:
+
+      # -- odometer in miles, unit-safe (HA may already convert km→mi) --------
+      - name: "Kia odometer miles"
+        unique_id: kia_odometer_miles
+        unit_of_measurement: "mi"
+        device_class: distance
+        state_class: total_increasing
+        icon: mdi:counter
+        availability: >
+          {{ states('sensor.kia_ev9_odometer') not in
+             ['unknown', 'unavailable', 'none', 'None', none] }}
+        state: >
+          {% set od = states('sensor.kia_ev9_odometer') | float(0) %}
+          {% set u = (state_attr('sensor.kia_ev9_odometer','unit_of_measurement') or '') | lower %}
+          {{ (od if u in ['mi', 'miles'] else od * 0.621371) | round(1) }}
+
+      # -- efficiency proxy --------------------------------------------------
+      - name: "Kia range per percent"
+        unique_id: kia_range_per_percent
+        unit_of_measurement: "/%"
+        state_class: measurement
+        icon: mdi:speedometer
+        availability: "{{ states('sensor.kia_ev9_ev_battery') | float(0) > 0 }}"
+        state: >
+          {% set r = states('sensor.kia_ev9_ev_range') | float(0) %}
+          {% set b = states('sensor.kia_ev9_ev_battery') | float(0) %}
+          {{ (r / b) | round(2) if b > 0 else none }}
+
+      # -- seasonal range: full-charge range now ---------------------------
+      - name: "Kia full range estimate"
+        unique_id: kia_full_range_estimate
+        unit_of_measurement: "mi"
+        device_class: distance
+        state_class: measurement
+        icon: mdi:map-marker-distance
+        availability: "{{ states('sensor.kia_ev9_ev_battery') | float(0) > 0 }}"
+        state: >
+          {% set r = states('sensor.kia_ev9_ev_range') | float(0) %}
+          {% set b = states('sensor.kia_ev9_ev_battery') | float(0) %}
+          {% set u = (state_attr('sensor.kia_ev9_ev_range','unit_of_measurement') or '') | lower %}
+          {% set full = (r / b * 100) if b > 0 else 0 %}
+          {{ ((full if u in ['mi','miles'] else full * 0.621371)) | round(0) if full else none }}
+
+      - name: "Kia range vs baseline"
+        unique_id: kia_range_vs_baseline
+        unit_of_measurement: "%"
+        icon: mdi:sun-snowflake-variant
+        availability: "{{ states('sensor.kia_full_range_baseline') | float(0) > 0 }}"
+        state: >
+          {% set now_r = states('sensor.kia_full_range_estimate') | float(0) %}
+          {% set base = states('sensor.kia_full_range_baseline') | float(0) %}
+          {{ ((now_r / base - 1) * 100) | round(0) if base > 0 else none }}
+
+      # ================= LEASE — EDIT THESE =================
+      #   start .......... 2025-01-01
+      #   term ........... 36 months  → term_days below (1096 incl. one leap year)
+      #   allowance ...... 30000 miles
+      #   delivery odo ... 10 miles
+      #   excess rate .... 0.25 USD / mile  (check your contract)
+      - name: "Kia lease miles used"
+        unique_id: kia_lease_miles_used
+        unit_of_measurement: "mi"
+        state_class: total_increasing
+        icon: mdi:highway
+        state: >
+          {% set start_odo = 10 %}
+          {{ (states('sensor.kia_odometer_miles') | float(0) - start_odo) | round(0) }}
+
+      - name: "Kia lease miles allowed to date"
+        unique_id: kia_lease_miles_allowed
+        unit_of_measurement: "mi"
+        icon: mdi:calendar-check
+        state: >
+          {% set start = as_timestamp(strptime('2025-01-01 00:00', '%Y-%m-%d %H:%M')) %}
+          {% set term_days = 1096 %}
+          {% set allowance = 30000 %}
+          {% set days = [(now().timestamp() - start) / 86400, 0] | max %}
+          {{ (days * (allowance / term_days)) | round(0) }}
+
+      - name: "Kia lease margin"
+        unique_id: kia_lease_margin
+        unit_of_measurement: "mi"
+        icon: mdi:plus-minus-variant
+        state: >
+          {{ (states('sensor.kia_lease_miles_allowed') | float(0)
+              - states('sensor.kia_lease_miles_used') | float(0)) | round(0) }}
+
+      - name: "Kia lease projected total"
+        unique_id: kia_lease_projected_total
+        unit_of_measurement: "mi"
+        icon: mdi:trending-up
+        state: >
+          {% set start = as_timestamp(strptime('2025-01-01 00:00', '%Y-%m-%d %H:%M')) %}
+          {% set term_days = 1096 %}
+          {% set days = (now().timestamp() - start) / 86400 %}
+          {% set used = states('sensor.kia_lease_miles_used') | float(0) %}
+          {{ ((used / days) * term_days) | round(0) if days >= 1 else used | round(0) }}
+
+      - name: "Kia lease excess cost projected"
+        unique_id: kia_lease_excess_cost_projected
+        unit_of_measurement: "USD"
+        icon: mdi:cash-alert
+        state: >
+          {% set rate = 0.25 %}
+          {% set cap = 30000 %}
+          {% set proj = states('sensor.kia_lease_projected_total') | float(0) %}
+          {{ ([proj - cap, 0] | max * rate) | round(0) }}
+
+      # ================= MAINTENANCE / RENEWALS =================
+      - name: "Kia tire rotation due in"
+        unique_id: kia_tire_rotation_due_in
+        unit_of_measurement: "mi"
+        icon: mdi:tire
+        state: >
+          {% set interval = 7500 %}
+          {% set last = states('input_number.kia_odo_last_tire_rotation') | float(0) %}
+          {{ (interval - (states('sensor.kia_odometer_miles') | float(0) - last)) | round(0) }}
+
+      - name: "Kia cabin filter due in"
+        unique_id: kia_cabin_filter_due_in
+        unit_of_measurement: "mi"
+        icon: mdi:air-filter
+        state: >
+          {% set interval = 15000 %}
+          {% set last = states('input_number.kia_odo_last_cabin_filter') | float(0) %}
+          {{ (interval - (states('sensor.kia_odometer_miles') | float(0) - last)) | round(0) }}
+
+      - name: "Kia brake fluid due in"
+        unique_id: kia_brake_fluid_due_in
+        unit_of_measurement: "d"
+        icon: mdi:car-brake-fluid-level
+        state: >
+          {% set last = state_attr('input_datetime.kia_brake_fluid_last', 'timestamp') %}
+          {{ ((last + 3 * 365 * 86400 - now().timestamp()) / 86400) | round(0) if last else 'unknown' }}
+
+      - name: "Kia state inspection due in"
+        unique_id: kia_state_inspection_due_in
+        unit_of_measurement: "d"
+        icon: mdi:clipboard-check-outline
+        state: >
+          {% set due = state_attr('input_datetime.kia_state_inspection_due', 'timestamp') %}
+          {{ ((due - now().timestamp()) / 86400) | round(0) if due else 'unknown' }}
+
+      - name: "Kia registration due in"
+        unique_id: kia_registration_due_in
+        unit_of_measurement: "d"
+        icon: mdi:card-account-details-outline
+        state: >
+          {% set due = state_attr('input_datetime.kia_registration_due', 'timestamp') %}
+          {{ ((due - now().timestamp()) / 86400) | round(0) if due else 'unknown' }}
+
+  - binary_sensor:
+      - name: "Kia upkeep needs attention"
+        unique_id: kia_upkeep_attention
+        device_class: problem
+        icon: mdi:wrench-clock
+        state: >
+          {% set ns = namespace(hit=false) %}
+          {% for s in ['sensor.kia_tire_rotation_due_in', 'sensor.kia_cabin_filter_due_in'] %}
+            {% if states(s) | float(9999) < 500 %}{% set ns.hit = true %}{% endif %}
+          {% endfor %}
+          {% for s in ['sensor.kia_brake_fluid_due_in', 'sensor.kia_state_inspection_due_in',
+                       'sensor.kia_registration_due_in'] %}
+            {% if states(s) | float(9999) < 21 %}{% set ns.hit = true %}{% endif %}
+          {% endfor %}
+          {% if states('sensor.kia_ev9_next_service_in') | float(9999) < 800 %}{% set ns.hit = true %}{% endif %}
+          {{ ns.hit }}
+
+# statistics: warm-weather best full-charge range, rolling 60 days
+sensor:
+  - platform: statistics
+    name: "Kia full range baseline"
+    unique_id: kia_full_range_baseline
+    entity_id: sensor.kia_full_range_estimate
+    state_characteristic: value_max
+    max_age:
+      days: 60
+    sampling_size: 3000
+
+input_number:
+  kia_odo_last_tire_rotation:
+    name: Kia — odometer at last tire rotation
+    min: 0
+    max: 300000
+    step: 1
+    unit_of_measurement: mi
+    icon: mdi:tire
+  kia_odo_last_cabin_filter:
+    name: Kia — odometer at last cabin filter
+    min: 0
+    max: 300000
+    step: 1
+    unit_of_measurement: mi
+    icon: mdi:air-filter
+
+input_datetime:
+  kia_brake_fluid_last:
+    name: Kia — brake fluid last changed
+    has_date: true
+    has_time: false
+  kia_state_inspection_due:
+    name: Kia — inspection due
+    has_date: true
+    has_time: false
+  kia_registration_due:
+    name: Kia — registration renewal due
+    has_date: true
+    has_time: false
+
+script:
+  kia_log_tire_rotation:
+    alias: Kia — log tire rotation done now
+    sequence:
+      - service: input_number.set_value
+        target: { entity_id: input_number.kia_odo_last_tire_rotation }
+        data: { value: "{{ states('sensor.kia_odometer_miles') | float(0) | round(0) }}" }
+  kia_log_cabin_filter:
+    alias: Kia — log cabin filter done now
+    sequence:
+      - service: input_number.set_value
+        target: { entity_id: input_number.kia_odo_last_cabin_filter }
+        data: { value: "{{ states('sensor.kia_odometer_miles') | float(0) | round(0) }}" }
+  kia_log_brake_fluid:
+    alias: Kia — log brake fluid changed today
+    sequence:
+      - service: input_datetime.set_datetime
+        target: { entity_id: input_datetime.kia_brake_fluid_last }
+        data: { date: "{{ now().strftime('%Y-%m-%d') }}" }

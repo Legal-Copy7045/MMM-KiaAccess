@@ -191,6 +191,13 @@ this README); turn it on for live readings, bounded by **Live wake-up wait**.
 The rotated refresh token is stored in the config entry — nothing is written
 into the HACS-managed folder.
 
+**Ownership extras (optional):** [`examples/ha-ownership-package.yaml`](examples/ha-ownership-package.yaml)
+is a drop-in HA package that adds an efficiency proxy, a seasonal-range
+comparison (full-charge range now vs your 60-day best), a **lease-mileage
+tracker** with an excess-mileage cost projection, and a **maintenance /
+renewals countdown** with one-tap "done" buttons. Edit the entity prefix and
+the lease block, drop it in `config/packages/`, restart.
+
 ### B · MagicMirror only
 
 The module polls the Kia / Hyundai cloud directly through a small Python bridge
