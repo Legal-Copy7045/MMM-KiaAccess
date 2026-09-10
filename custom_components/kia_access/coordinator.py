@@ -366,7 +366,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _parse_static_destinations(raw: str) -> list[tuple[str, str]]:
-        """'Nana | 5 Foo St\\nAirport = 700 Bar Rd' -> [(name, address), ...]"""
+        """'Museum | 100 Main St\\nAirport = 1 Terminal Rd' -> [(name, address), ...]"""
         out = []
         for line in (raw or "").replace(";", "\n").splitlines():
             line = line.strip()
@@ -619,7 +619,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             provider == "tomtom"
             and self.entry.options.get("drive_time_routes", True)
         )
+        self._route_status["routes_enabled"] = do_routes
         n_routed = 0
+        route_err = None
         if do_routes:
             for p in pois:
                 rreq = drive_routing.route_request(
@@ -632,11 +634,15 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     rdata = await self._http_json(rreq)
                     parsed = drive_routing.parse_route(provider, rdata)
                 except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("route call failed for %s: %s", p["name"], err)
+                    route_err = route_err or f"{p['name']}: {err}"
+                    _LOGGER.warning("Kia Access: route call for %r failed: %s",
+                                    p["name"], err)
                     continue
                 if parsed:
                     out.setdefault(self._poi_key(p["lat"], p["lon"]), {}).update(parsed)
                     n_routed += 1
+        if route_err:
+            self._route_status["route_error"] = route_err
 
         self._route_out = out
         self._route_origin = (lat, lon)

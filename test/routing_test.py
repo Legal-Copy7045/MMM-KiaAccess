@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import routing as R  # noqa: E402
 
-origin = {"lat": 40.75390, "lon": -111.81030}
+origin = {"lat": 40.7539, "lon": -111.8103}
 targets = [{"lat": 40.4406, "lon": -111.9959}, {"lat": 39.87, "lon": -111.49}]
 
 # matrix_request: geoapify
@@ -14,7 +14,7 @@ g = R.matrix_request("geoapify", origin, targets, "KEY")
 assert g["method"] == "POST"
 assert "routematrix?apiKey=KEY" in g["url"]
 gb = json.loads(g["body"])
-assert gb["sources"][0]["location"] == [-111.81030, 40.75390]
+assert gb["sources"][0]["location"] == [-111.8103, 40.7539]
 assert len(gb["targets"]) == 2
 assert gb["mode"] == "drive"
 
@@ -22,7 +22,7 @@ assert gb["mode"] == "drive"
 t = R.matrix_request("tomtom", origin, targets, "KEY2", {"traffic": False})
 assert "matrix/2?key=KEY2" in t["url"]
 tb = json.loads(t["body"])
-assert tb["origins"][0]["point"]["latitude"] == 40.75390
+assert tb["origins"][0]["point"]["latitude"] == 40.7539
 assert tb["options"]["traffic"] == "historical"
 assert tb["options"]["travelMode"] == "car"
 
@@ -69,10 +69,10 @@ assert R.parse_matrix("nope", t_resp, 2) == [None, None]
 # geocode_request / parse_geocode
 gg = R.geocode_request("geoapify", "100 Main St, Hillcrest", "K")
 assert gg["method"] == "GET"
-assert "geocode/search?text=409%20Hillcrest" in gg["url"]
+assert "geocode/search?text=100%20Main" in gg["url"]
 assert "countrycode:us" in gg["url"] and "apiKey=K" in gg["url"]
 tg = R.geocode_request("tomtom", "100 Main St", "K2")
-assert "/geocode/409%20Hillcrest%20Rd.json" in tg["url"] and "countrySet=US" in tg["url"]
+assert "/geocode/100%20Main%20St.json" in tg["url"] and "countrySet=US" in tg["url"]
 assert R.geocode_request("geoapify", "", "K") is None
 assert R.geocode_request("nope", "x", "K") is None
 
@@ -87,12 +87,12 @@ assert R.parse_geocode("tomtom", None) is None
 # route_request / parse_route
 rr = R.route_request("tomtom", origin, targets[0], "K")
 assert rr["method"] == "GET"
-assert "/calculateRoute/40.75390,-111.81030:40.4406,-111.9959/json" in rr["url"]
+assert "/calculateRoute/40.7539,-111.8103:40.4406,-111.9959/json" in rr["url"]
 assert "computeTravelTimeFor=all" in rr["url"] and "traffic=true" in rr["url"]
 assert R.route_request("tomtom", origin, {"lat": None, "lon": 1}, "K") is None
 assert R.route_request("nope", origin, targets[0], "K") is None
 gr = R.route_request("geoapify", origin, targets[0], "K")
-assert "routing?waypoints=40.75390,-111.81030|40.4406,-111.9959" in gr["url"]
+assert "routing?waypoints=40.7539,-111.8103|40.4406,-111.9959" in gr["url"]
 
 tt_route = {
     "routes": [{

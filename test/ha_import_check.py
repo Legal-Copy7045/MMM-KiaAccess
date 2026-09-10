@@ -130,20 +130,20 @@ _off_job = _FakeCoord({"poll_car_directly": False, "force_refresh_timeout": 60})
 assert _off_job["refresh"] is False and _off_job["forceRefreshTimeout"] == 0
 
 _cln = co.KiaAccessCoordinator._clean_address
-assert _cln(["Maple Avenue", "Maple Avenue, Hillcrest, PA", {"road": "x"}]) == "Maple Avenue"
+assert _cln(["Maple Street", "Maple St, Springfield, PA", {"road": "x"}]) == "Maple Street"
 assert _cln({"road": "Main St", "city": "Lakeview"}) == "Main St"
 assert _cln("123 Main St") == "123 Main St"
 assert _cln(None) is None
 
 _in_us = co.KiaAccessCoordinator._in_us
-assert _in_us(40.71, -111.75) is True      # Hillcrest
+assert _in_us(40.7539, -111.8103) is True      # Hillcrest
 assert _in_us(51.5, -0.12) is False       # London
 assert _in_us(None, None) is False
 assert hasattr(co.KiaAccessCoordinator, "async_refresh_calendar_pois")
 assert hasattr(co.KiaAccessCoordinator, "_refresh_drive_times")
 _psd = co.KiaAccessCoordinator._parse_static_destinations
-assert _psd("Nana | 5 Foo St\nAirport = 700 Bar Rd\n\n123 Main St, Town") == [
-    ("Nana", "5 Foo St"), ("Airport", "700 Bar Rd"), ("123 Main St", "123 Main St, Town")
+assert _psd("Museum | 100 Main St\nAirport = 1 Terminal Rd\n\n123 Elm St, Town") == [
+    ("Museum", "100 Main St"), ("Airport", "1 Terminal Rd"), ("123 Elm St", "123 Elm St, Town")
 ]
 assert _psd("") == [] and _psd(None) == []
 assert co.KiaAccessCoordinator._poi_key(40.752345, -111.808321) == "40.7523,-111.8083"

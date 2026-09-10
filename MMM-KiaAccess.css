@@ -153,29 +153,30 @@
   opacity: 0.9;
 }
 
-/* "Driving times" panel */
+/* "Driving times" panel — compact */
 .kiaaccess-drivetimes {
   text-align: left;
-  margin-top: 9px;
+  margin-top: 8px;
+  line-height: 1.2;
 }
 .kiaaccess-dt-header {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: calc(11px * var(--kia-scale, 1));
-  opacity: 0.55;
+  font-size: calc(10px * var(--kia-scale, 1));
+  opacity: 0.5;
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-  padding-bottom: 3px;
-  margin-bottom: 5px;
+  padding-bottom: 2px;
+  margin-bottom: 3px;
 }
 .kiaaccess-dt-row {
   white-space: normal;
-  margin: 5px 0;
+  margin: 3px 0;
 }
 .kiaaccess-dt-line {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
 }
 .kiaaccess-dt-name {
   overflow: hidden;
@@ -187,9 +188,18 @@
   flex: none;
 }
 .kiaaccess-dt-sub {
-  opacity: 0.6;
-  font-size: calc(11.5px * var(--kia-scale, 1));
-  line-height: 1.35;
+  opacity: 0.55;
+  font-size: calc(10.5px * var(--kia-scale, 1));
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kiaaccess-dt-hint {
+  opacity: 0.4;
+  font-size: calc(10px * var(--kia-scale, 1));
+  margin-top: 3px;
+  font-style: italic;
 }
 
 .kiaaccess-footer {

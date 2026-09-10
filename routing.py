@@ -188,13 +188,14 @@ def route_request(provider, origin, dest, api_key, o=None):
     if provider == "tomtom":
         mode = "truck" if o.get("mode") == "truck" else "car"
         return {
+            # no routeRepresentation=summaryOnly: it strips guidance.instructions
             "url": "https://api.tomtom.com/routing/1/calculateRoute/"
             + f"{s[0]},{s[1]}:{d[0]},{d[1]}/json"
             + "?key=" + str(api_key)
             + "&travelMode=" + mode
             + "&traffic=" + ("true" if traffic else "false")
             + "&computeTravelTimeFor=all"
-            + "&instructionsType=text&sectionType=street&routeRepresentation=summaryOnly",
+            + "&instructionsType=text",
             "method": "GET",
         }
     if provider == "geoapify":

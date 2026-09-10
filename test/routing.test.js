@@ -2,7 +2,7 @@
 const assert = require("assert");
 const R = require("../core/routing.js");
 
-const origin = { lat: 40.75390, lon: -111.81030 };
+const origin = { lat: 40.7539, lon: -111.8103 };
 const targets = [
   { lat: 40.4406, lon: -111.9959 },
   { lat: 39.87, lon: -111.49 }
@@ -13,7 +13,7 @@ const g = R.matrixRequest("geoapify", origin, targets, "KEY");
 assert.strictEqual(g.method, "POST");
 assert.ok(g.url.includes("routematrix?apiKey=KEY"));
 const gb = JSON.parse(g.body);
-assert.deepStrictEqual(gb.sources[0].location, [-111.81030, 40.75390], "lon,lat order");
+assert.deepStrictEqual(gb.sources[0].location, [-111.8103, 40.7539], "lon,lat order");
 assert.strictEqual(gb.targets.length, 2);
 assert.strictEqual(gb.mode, "drive");
 
@@ -21,7 +21,7 @@ assert.strictEqual(gb.mode, "drive");
 const t = R.matrixRequest("tomtom", origin, targets, "KEY2", { traffic: false });
 assert.ok(t.url.includes("matrix/2?key=KEY2"));
 const tb = JSON.parse(t.body);
-assert.strictEqual(tb.origins[0].point.latitude, 40.75390);
+assert.strictEqual(tb.origins[0].point.latitude, 40.7539);
 assert.strictEqual(tb.options.traffic, "historical");
 assert.strictEqual(tb.options.travelMode, "car");
 
@@ -70,10 +70,10 @@ assert.deepStrictEqual(R.parseMatrix("nope", tResp, 2), [null, null]);
 // ---- geocodeRequest / parseGeocode ----
 const gg = R.geocodeRequest("geoapify", "100 Main St, Hillcrest", "K");
 assert.strictEqual(gg.method, "GET");
-assert.ok(gg.url.includes("geocode/search?text=409%20Hillcrest"));
+assert.ok(gg.url.includes("geocode/search?text=100%20Main"));
 assert.ok(gg.url.includes("countrycode:us") && gg.url.includes("apiKey=K"));
 const tg = R.geocodeRequest("tomtom", "100 Main St", "K2");
-assert.ok(tg.url.includes("/geocode/409%20Hillcrest%20Rd.json") && tg.url.includes("countrySet=US"));
+assert.ok(tg.url.includes("/geocode/100%20Main%20St.json") && tg.url.includes("countrySet=US"));
 assert.strictEqual(R.geocodeRequest("geoapify", "", "K"), null);
 assert.strictEqual(R.geocodeRequest("nope", "x", "K"), null);
 
@@ -90,12 +90,12 @@ assert.strictEqual(R.parseGeocode("tomtom", null), null);
 // ---- routeRequest / parseRoute ----
 const rr = R.routeRequest("tomtom", origin, targets[0], "K");
 assert.strictEqual(rr.method, "GET");
-assert.ok(rr.url.includes("/calculateRoute/40.75390,-111.81030:40.4406,-111.9959/json"));
+assert.ok(rr.url.includes("/calculateRoute/40.7539,-111.8103:40.4406,-111.9959/json"));
 assert.ok(rr.url.includes("computeTravelTimeFor=all") && rr.url.includes("traffic=true"));
 assert.strictEqual(R.routeRequest("tomtom", origin, { lat: null, lon: 1 }, "K"), null);
 assert.strictEqual(R.routeRequest("nope", origin, targets[0], "K"), null);
 const gr = R.routeRequest("geoapify", origin, targets[0], "K");
-assert.ok(gr.url.includes("routing?waypoints=40.75390,-111.81030|40.4406,-111.9959"));
+assert.ok(gr.url.includes("routing?waypoints=40.7539,-111.8103|40.4406,-111.9959"));
 
 const ttRoute = {
   routes: [{
