@@ -236,6 +236,7 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
             "pois": [
                 {
                     "name": p["name"],
+                    "entity_id": p.get("zone_id"),
                     "latitude": p.get("lat"),
                     "longitude": p.get("lon"),
                     "km": round(p["km"], 1),

@@ -1315,6 +1315,7 @@ Module.register("MMM-KiaAccess", {
     if (rr && rr.length) {
       rows = rr.map((p) => ({
         name: p.name,
+        entityId: p.entity_id || null,
         source: p.source || "zone",
         km: Number(p.km),
         durationMin: p.duration_min != null ? Number(p.duration_min) : null,
@@ -1351,23 +1352,25 @@ Module.register("MMM-KiaAccess", {
     if (!rows.length) return null;
 
     // zone filter (calendar + static always pass). "-Name" excludes; a plain
-    // list is a whitelist. HA's `mm_zone_entities` option wins over config;
-    // matches HA's `zone_entities` rule.
+    // list is a whitelist. HA's zone option wins over config. Matches on the
+    // zone entity id OR its name, with punctuation stripped so "zone.nana_s"
+    // and "Nana's" are the same key.
+    const znorm = (s) => String(s || "").toLowerCase()
+      .replace(/^zone\./, "").replace(/[^a-z0-9]+/g, "");
     const haZones = (this.rangeReach && this.rangeReach.mmZones) || "";
     const zfRaw = haZones.trim()
       ? haZones.split(/[\n,]/)
       : (Array.isArray(dt.zones) ? dt.zones : []);
-    const zf = zfRaw
-      .map((z) => String(z).trim().toLowerCase().replace(/^zone\./, "").replace(/_/g, " "))
-      .filter(Boolean);
-    if (zf.length) {
-      const inc = zf.filter((z) => z[0] !== "-" && z[0] !== "!");
-      const exc = zf.filter((z) => z[0] === "-" || z[0] === "!").map((z) => z.slice(1).trim());
+    const inc = [], exc = [];
+    zfRaw.map((z) => String(z).trim()).filter(Boolean).forEach((z) => {
+      (z[0] === "-" || z[0] === "!" ? exc : inc).push(znorm(z.replace(/^[-!]/, "")));
+    });
+    if (inc.length || exc.length) {
       rows = rows.filter((r) => {
         if (r.source !== "zone") return true;
-        const n = String(r.name || "").toLowerCase();
-        if (exc.includes(n)) return false;
-        return inc.length === 0 || inc.includes(n);
+        const keys = [znorm(r.name), znorm(r.entityId)].filter(Boolean);
+        if (exc.some((e) => keys.includes(e))) return false;
+        return inc.length === 0 || inc.some((k) => keys.includes(k));
       });
     }
 
