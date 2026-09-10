@@ -62,7 +62,7 @@
           "force_refresh_timeout": "How long to wait for the car to answer before falling back to the cached copy for that poll.",
           "calendar_entities": "Events with a location on these calendars are geocoded and added to the reachable-destinations list / range-map pins. US locations only.",
           "drive_time_provider": "Estimate (default) uses straight-line distance. Geoapify or TomTom return real road distance and live-traffic drive time via one matrix call per poll (free tiers are plenty; needs the matching API key).",
-          "routing_api_key": "Only used when the drive-time provider is Geoapify or TomTom."
+          "routing_api_key": "Used for live drive times AND for geocoding calendar event locations. A Geoapify key works for both even if the drive-time provider is left on “estimate” (Nominatim increasingly blocks Home Assistant)."
         }
       }
     }
