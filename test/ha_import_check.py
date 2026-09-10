@@ -146,10 +146,6 @@ assert _psd("Museum | 100 Main St\nAirport = 1 Terminal Rd\n\n123 Elm St, Town")
     ("Museum", "100 Main St"), ("Airport", "1 Terminal Rd"), ("123 Elm St", "123 Elm St, Town")
 ]
 assert _psd("") == [] and _psd(None) == []
-_pzf = co.KiaAccessCoordinator._parse_zone_filter
-assert _pzf("zone.home, Work\n-Grandma") == ({"home", "work"}, {"grandma"})
-assert _pzf("") == (set(), set()) and _pzf(None) == (set(), set())
-assert _pzf("-Far Zone") == (set(), {"far zone"})
 assert co.KiaAccessCoordinator._poi_key(40.712345, -79.754321) == "40.7123,-79.7543"
 
 # diagnostics must redact the GPS (incl. the combined "location" string) + keys

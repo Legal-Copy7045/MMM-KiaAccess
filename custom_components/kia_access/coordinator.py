@@ -269,43 +269,16 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return False
         return any(a <= lat <= b and c <= lon <= d for a, b, c, d in cls._US_BOXES)
 
-    @staticmethod
-    def _parse_zone_filter(raw: str) -> tuple[set, set]:
-        """'zone.work, Home\\n-Grandma' -> (includes, excludes) of normalised keys
-        (lowercase, `zone.` prefix stripped, spaces/underscores unified)."""
-        def norm(s: str) -> str:
-            s = s.strip().lower()
-            if s.startswith("zone."):
-                s = s[5:]
-            return s.replace("_", " ").strip()
-
-        inc, exc = set(), set()
-        for tok in (raw or "").replace(",", "\n").splitlines():
-            tok = tok.strip()
-            if not tok:
-                continue
-            if tok[0] in "-!":
-                exc.add(norm(tok[1:]))
-            else:
-                inc.add(norm(tok))
-        return inc, exc
-
     def _zone_pois(self) -> list[dict]:
-        """US zone.* as {name, lat, lon} for the range-reach readout, filtered by
-        the `zone_entities` option (whitelist; lines starting with - exclude)."""
-        inc, exc = self._parse_zone_filter(self.entry.options.get("zone_entities") or "")
+        """Every US zone.* as {name, lat, lon}. This is the full set — Home
+        Assistant (dashboard / sensor) always sees all of them. The
+        `zone_entities` option only narrows the MagicMirror panel, and the
+        mirror applies that itself (via the mm_zone_filter attribute)."""
         out = []
         for st in self.hass.states.async_all("zone"):
             lat = st.attributes.get("latitude")
             lon = st.attributes.get("longitude")
             if not self._in_us(lat, lon):
-                continue
-            slug = st.entity_id.split(".", 1)[-1].replace("_", " ").lower()
-            friendly = (st.attributes.get("friendly_name") or "").lower()
-            keys = {slug, friendly}
-            if exc & keys:
-                continue
-            if inc and not (inc & keys):
                 continue
             out.append(
                 {
