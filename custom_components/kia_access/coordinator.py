@@ -271,6 +271,37 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         }
         return drive_range.summary(lat, lon, rng, self._zone_pois(), o)
 
+    @staticmethod
+    def _clean_address(v) -> str | None:
+        """The geocoder hands back a (name, display_name, raw_dict) tuple — pull
+        a short readable street/area out of whatever shape it is."""
+        if v in (None, "", "—"):
+            return None
+        if isinstance(v, str):
+            return v
+        if isinstance(v, (list, tuple)):
+            strs = [x for x in v if isinstance(x, str) and x.strip()]
+            if strs:
+                # the first element is usually the short name, the second the
+                # long "display name" — prefer the short one, cap the long one
+                short = strs[0]
+                return short if len(short) <= 60 else short[:57] + "…"
+            for x in v:
+                got = KiaAccessCoordinator._clean_address(x)
+                if got:
+                    return got
+            return None
+        if isinstance(v, dict):
+            for keys in (
+                ("house_number", "road"), ("road",), ("neighbourhood", "suburb"),
+                ("hamlet", "village", "town"), ("city", "county"),
+            ):
+                parts = [str(v[k]) for k in keys if v.get(k)]
+                if parts:
+                    return " ".join(parts) if len(keys) == 2 else parts[0]
+            return None
+        return str(v)
+
     @property
     def parked_location(self) -> dict | None:
         """Where the car was last seen parked, with map links + distance home."""
@@ -286,7 +317,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         return {
             "latitude": lat,
             "longitude": lon,
-            "address": p.get("address"),
+            "address": self._clean_address(p.get("address")),
             "parked_at": p.get("at"),
             "km_from_home": round(km_home, 2) if km_home is not None else None,
             "google_maps": f"https://www.google.com/maps/search/?api=1&query={ll}",

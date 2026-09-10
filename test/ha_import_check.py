@@ -59,6 +59,11 @@ assert tp.summary([], 30)["count"] == 0
 _sen = importlib.import_module(f"{pkg}.sensor")
 assert hasattr(_sen, "KiaAccessLastTripSensor") and hasattr(_sen, "KiaAccessCostPerMileSensor")
 assert hasattr(_sen, "KiaAccessParkedSensor")
+_cln = co.KiaAccessCoordinator._clean_address
+assert _cln(["Oak Creek Drive", "Oak Creek, Sarver, PA", {"road": "x"}]) == "Oak Creek Drive"
+assert _cln({"road": "Main St", "city": "Pittsburgh"}) == "Main St"
+assert _cln("123 Main St") == "123 Main St"
+assert _cln(None) is None
 
 rng = importlib.import_module(f"{pkg}.range")
 assert rng.reach(300, {"reservePct": 10, "factor": 0.92}) is not None
