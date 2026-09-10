@@ -2,73 +2,78 @@
 
 [![CI](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml/badge.svg)](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml)
 
-**Kia Connect / Bluelink vehicle data and controls for Home Assistant and
-MagicMirror², from one shared engine.** The
+## TL;DR
+
+**Your Kia / Hyundai / Genesis, on Home Assistant and/or MagicMirror², from one
+shared engine.** A HACS **Home Assistant integration** (sensors, remote
+control, GPS, `kia_access_alert` events, Lovelace cards) and a read-only
+**MagicMirror² module** (animated car diagram + a configurable data table +
+notifications). Every sensor, command and alert rule is defined once, so the
+two surfaces always agree. Works in every region
 [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
-vehicle model becomes a **Home Assistant integration** (HACS — sensors, native
-control entities, a `device_tracker`, `kia_access_alert` events and a Lovelace
-card) and a read-only **MagicMirror² module** (an animated car diagram + a
-configurable data table, with notifications and MQTT). Every sensor, command,
-alert rule and the diagram come from the same files, so both surfaces always
-agree. Run either alone, or run both with the mirror reading from HA so the car
-is woken only once.
+supports; built and tested on a Kia EV9 (Kia USA).
 
-See [**What you get**](#what-you-get) for the feature list per surface.
+### Pick a mode
 
-> **Fresh readings vs. the 12V battery — your choice.** Each poll either **wakes
-> the car** for live data or reads the **cached values Kia / Hyundai already hold
-> on their servers** (which costs the car nothing). Repeatedly waking a parked
-> car is how an app flattens its 12V battery in the cold, so cached reads are the
-> safe default for frequent updates; the live wake-up is time-boxed and falls
-> back to the cache if the car doesn't answer.
-> - **Home Assistant** — **Configure → Poll the car directly**: off (default) =
->   cache only; on = wake every poll, bounded by **Live wake-up wait**.
-> - **MagicMirror (mode B)** — `refresh: false` = cache, `refresh: true` = wake
->   (bounded by `forceRefreshTimeout`). Mode C leaves this to HA.
+| Mode | What runs | Car control | You need |
+|---|---|---|---|
+| **A — Home Assistant** | the HACS integration | ✅ | your Kia login; a one-time SMS/email code (Kia USA / CA) |
+| **B — MagicMirror, standalone** | the module + a bundled Python bridge | – read-only | your Kia login + one-time code; Python ≥ 3.12 (auto-provisioned) |
+| **C — MagicMirror, fed by Home Assistant** | HA polls the car; the mirror reads HA locally | ✅ via HA | mode A first, then a HA token on the mirror |
 
-## Supported vehicles
+Home Assistant user → **A** (add a mirror later with **C**). Mirror only → **B**.
+Both → **C** — the car is woken once, by HA; no Python or OTP on the mirror.
 
-Anything [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
-supports:
+### Quick start
 
-- **Brands** — Kia (Connect / UVO), Hyundai (Bluelink), Genesis
-- **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil
-- **Powertrains** — EV, PHEV, HEV and ICE. The EV-specific sensors and diagram
-  parts (charge, plug, drive battery) simply stay empty on a car that doesn't
-  have them.
+**A — Home Assistant** ([full steps](#a--home-assistant))
+1. HACS → ⋮ → *Custom repositories* → add this repo, category **Integration** →
+   Download → restart HA.
+2. Settings → Devices & Services → **+ Add Integration → “Kia Access”** → enter
+   your Kia login and region; paste the OTP when asked (Kia USA / CA).
+3. Add the **Kia Access** dashboard card.
 
-Developed and tested against a **Kia EV9 on Kia USA**. Other brands, regions and
-models go through the same library but are less battle-tested —
-[open an issue](https://github.com/Legal-Copy7045/MMM-KiaAccess/issues) if
-something looks wrong.
+**B — MagicMirror, standalone** ([full steps](#b--magicmirror-only))
+```bash
+cd ~/MagicMirror/modules
+git clone https://github.com/Legal-Copy7045/MMM-KiaAccess.git
+cd MMM-KiaAccess && npm install        # builds ./venv + installs the Python dep
+```
+Then run the one-time OTP enrollment (`enroll.py`) and add the module block to
+`~/MagicMirror/config/config.js`.
 
-> **Region notes**
-> - **Kia USA / Canada** need a **one-time OTP** (SMS / email code) the first
->   time a new client logs in — HA asks in the config flow, the mirror has
->   `enroll.py`.
-> - The Kia US / CA API reports °F and miles; the engine normalises to °C / km,
->   then formatters render your chosen units. Climate set-point is sent in
->   **°F (62–82)** for USA, **°C (16–30)** elsewhere.
-> - Both surfaces use the Python `hyundai_kia_connect_api` (the same library as
->   HA's official Kia/Hyundai integration) — the Node `bluelinky` library is
->   blocked by Kia USA's bot protection.
+**C — MagicMirror, fed by Home Assistant** ([full steps](#c--magicmirror-fed-by-home-assistant))
+Set up **mode A** first. Then `npm install` the module (as in B), create a HA
+**long-lived access token**, and in `config.js` set `source: "homeassistant"`
+with your HA URL + token. No Kia credentials, no OTP, no Python needed.
+
+### Fresh readings vs. the 12V battery
+
+Each poll either **wakes the car** for live data or reads the **cached values
+Kia / Hyundai already hold** (which costs the car nothing). Repeatedly waking a
+parked car flattens its 12V battery in the cold, so cached reads are the safe
+default; the live wake-up is time-boxed and falls back to the cache.
+- **HA** — *Configure → Poll the car directly*: off (default) = cache only.
+- **MagicMirror mode B** — `refresh: false` = cache. Mode C leaves this to HA.
 
 ---
 
-## Which setup do you want?
+## Supported vehicles
 
-| | polls the car | dashboard | car control | extra setup |
-|---|---|---|---|---|
-| **A · Home Assistant** | the integration | Lovelace card | ✅ | OTP in the config flow |
-| **B · MagicMirror only** | the module (Python bridge) | the mirror | – | Python venv + one-time OTP |
-| **C · MagicMirror + Home Assistant** | Home Assistant only | both | ✅ via HA | a HA token on the mirror |
+- **Brands** — Kia (Connect / UVO), Hyundai (Bluelink), Genesis
+- **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil
+- **Powertrains** — EV, PHEV, HEV, ICE (EV-only sensors / diagram parts stay
+  empty on a car without them)
 
-- **Home Assistant user** → **A**. Add a mirror later with **C**.
-- **Just a mirror**, no Home Assistant → **B**.
-- **Both** → **C**: HA polls the car once, the mirror reads it locally — no
-  Python, no OTP and no second wake-up on the mirror.
+Tested on a **Kia EV9 (Kia USA)** — other combinations use the same library but
+are less battle-tested; [open an issue](https://github.com/Legal-Copy7045/MMM-KiaAccess/issues)
+if something looks off. Kia USA / CA needs a **one-time OTP** (SMS / email code)
+on first login — HA asks in the config flow, the mirror has `enroll.py`. The
+Kia US / CA API reports °F / miles; the engine normalises to °C / km and the
+formatters render your chosen units (climate set-point is sent in °F 62–82 for
+USA, °C 16–30 elsewhere).
 
-![Data flow for options A, B and C](docs/data-flow.svg)
+![Data flow for modes A, B and C](docs/data-flow.svg)
 
 ---
 
@@ -147,7 +152,7 @@ API, not from Kia. So:
 
 ---
 
-## Install
+## Install & setup — in full
 
 ### A · Home Assistant
 
