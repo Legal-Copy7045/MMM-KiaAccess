@@ -508,7 +508,9 @@ g.KiaAccessCommands={
     service_due: "Service due",
     not_plugged_home: "Not plugged in",
     otp_expiring: "OTP expiring",
-    charge_interrupted: "Charge interrupted"
+    charge_interrupted: "Charge interrupted",
+    unexpected_move: "Moved while parked",
+    cant_get_home: "Range too low for home"
   };
 
   // "door_open" / "evBatteryLow" -> "Door open" / "Ev battery low"
@@ -1135,6 +1137,15 @@ g.KiaAccessCommands={
     // HA: zone.home). afterHour/beforeHour null = any time.
     notPluggedInHome: {
       enabled: true, level: "warning", graceMin: 20, afterHour: null, beforeHour: null
+    },
+    // GPS moved while the odometer stayed put and the car was off (tow / theft)
+    unexpectedMove: {
+      enabled: true, level: "critical", thresholdKm: 0.5, sustainedMin: 3
+    },
+    // not enough range to drive home (only when away from home)
+    cantGetHome: {
+      enabled: true, level: "warning", reservePct: 15, roadFactor: 1.3,
+      roundTrip: false, warnMarginPct: 25
     }
   };
 
@@ -1387,6 +1398,59 @@ g.KiaAccessCommands={
       emit("not_plugged_home", cHP.level, hpActive,
         "Home and not plugged in",
         { minutesHome: homeMin });
+    }
+
+    // ---- moved while parked (tow / theft) ----
+    // needs s.movedWhileParkedKm + s.movedWhileParkedMin from the caller: how
+    // far the GPS has shifted, and for how long, while the odometer stayed put
+    // and the car was off. Inert when not provided.
+    var cMv = checkCfg(cfg, "unexpectedMove");
+    if (cMv.enabled) {
+      var mk = num(s.movedWhileParkedKm);
+      var mmin = num(s.movedWhileParkedMin);
+      var thr = num(cMv.thresholdKm) != null ? num(cMv.thresholdKm) : 0.5;
+      var sustained = num(cMv.sustainedMin) != null ? num(cMv.sustainedMin) : 3;
+      var mvActive;
+      if (mk == null) mvActive = null;
+      else if (s.carOn === true) mvActive = false; // being driven — not a tow
+      else if (mk >= thr && (mmin == null || mmin >= sustained)) mvActive = true;
+      else if (mk < thr / 2) mvActive = false;
+      else mvActive = prev.unexpected_move === true;
+      emit("unexpected_move", cMv.level, mvActive,
+        mk != null && mk >= thr
+          ? "Vehicle moved " +
+            (mk >= 1 ? Math.round(mk) + " km" : Math.round(mk * 1000) + " m") +
+            " while parked and off"
+          : "Parked position steady",
+        { movedKm: mk != null ? Math.round(mk * 100) / 100 : null });
+    }
+
+    // ---- not enough range to get home ----
+    // needs s.atHome (false when away) + s.homeDistanceKm (car->home, km) +
+    // s.rangeKm from the caller. Level escalates warning -> critical.
+    var cGH = checkCfg(cfg, "cantGetHome");
+    if (cGH.enabled && s.atHome === false) {
+      var dHome = num(s.homeDistanceKm);
+      var rng = num(s.rangeKm);
+      if (dHome != null && rng != null && rng > 0) {
+        var resv = num(cGH.reservePct) != null ? num(cGH.reservePct) : 15;
+        var road = num(cGH.roadFactor) || 1.3;
+        var usable = rng * (1 - resv / 100);
+        if (cGH.roundTrip === true) usable = usable / 2;
+        var need = dHome * road;
+        var slack = usable - need;
+        var warnAt = need * ((num(cGH.warnMarginPct) || 25) / 100);
+        var ghActive;
+        if (slack < 0) ghActive = true;
+        else if (slack > warnAt) ghActive = false;
+        else ghActive = prev.cant_get_home === true;
+        emit("cant_get_home", slack < 0 ? "critical" : "warning", ghActive,
+          slack < 0
+            ? "Not enough range to get home — need ~" + Math.round(need) +
+              " km, ~" + Math.round(usable) + " km usable"
+            : "Range getting tight for the drive home — ~" + Math.round(slack) + " km slack",
+          { homeKm: Math.round(dHome), usableKm: Math.round(usable), needKm: Math.round(need) });
+      }
     }
 
     return { conditions: out, meta: { charging: triState(s.charging) } };

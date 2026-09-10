@@ -40,6 +40,13 @@ CHECK_DEFAULTS = {
         "enabled": True, "level": "warning", "graceMin": 20,
         "afterHour": None, "beforeHour": None,
     },
+    "unexpectedMove": {
+        "enabled": True, "level": "critical", "thresholdKm": 0.5, "sustainedMin": 3,
+    },
+    "cantGetHome": {
+        "enabled": True, "level": "warning", "reservePct": 15, "roadFactor": 1.3,
+        "roundTrip": False, "warnMarginPct": 25,
+    },
 }
 
 DEFAULTS = {"title": "Kia EV9", "quietWhileDriving": True, "checks": {}}
@@ -306,5 +313,55 @@ def evaluate(s, cfg, prev):
             hp_active = prev.get("not_plugged_home") is True
         emit("not_plugged_home", c_hp.get("level"), hp_active,
              "Home and not plugged in", {"minutesHome": home_min})
+
+    # ---- moved while parked (tow / theft) ----
+    c_mv = _check_cfg(cfg, "unexpectedMove")
+    if c_mv.get("enabled"):
+        mk = _num(s.get("movedWhileParkedKm"))
+        mmin = _num(s.get("movedWhileParkedMin"))
+        thr = _num(c_mv.get("thresholdKm")) if c_mv.get("thresholdKm") is not None else 0.5
+        sustained = _num(c_mv.get("sustainedMin")) if c_mv.get("sustainedMin") is not None else 3
+        if mk is None:
+            mv_active = None
+        elif s.get("carOn") is True:
+            mv_active = False
+        elif mk >= thr and (mmin is None or mmin >= sustained):
+            mv_active = True
+        elif mk < thr / 2:
+            mv_active = False
+        else:
+            mv_active = prev.get("unexpected_move") is True
+        emit("unexpected_move", c_mv.get("level"), mv_active,
+             (f"Vehicle moved {round(mk) if mk >= 1 else round(mk * 1000)}"
+              f"{' km' if mk >= 1 else ' m'} while parked and off")
+             if (mk is not None and mk >= thr) else "Parked position steady",
+             {"movedKm": round(mk * 100) / 100 if mk is not None else None})
+
+    # ---- not enough range to get home ----
+    c_gh = _check_cfg(cfg, "cantGetHome")
+    if c_gh.get("enabled") and s.get("atHome") is False:
+        d_home = _num(s.get("homeDistanceKm"))
+        rng = _num(s.get("rangeKm"))
+        if d_home is not None and rng is not None and rng > 0:
+            resv = _num(c_gh.get("reservePct")) if c_gh.get("reservePct") is not None else 15
+            road = _num(c_gh.get("roadFactor")) or 1.3
+            usable = rng * (1 - resv / 100)
+            if c_gh.get("roundTrip") is True:
+                usable = usable / 2
+            need = d_home * road
+            slack = usable - need
+            warn_at = need * ((_num(c_gh.get("warnMarginPct")) or 25) / 100)
+            if slack < 0:
+                gh_active = True
+            elif slack > warn_at:
+                gh_active = False
+            else:
+                gh_active = prev.get("cant_get_home") is True
+            emit("cant_get_home", "critical" if slack < 0 else "warning", gh_active,
+                 (f"Not enough range to get home — need ~{round(need)} km, "
+                  f"~{round(usable)} km usable")
+                 if slack < 0 else
+                 f"Range getting tight for the drive home — ~{round(slack)} km slack",
+                 {"homeKm": round(d_home), "usableKm": round(usable), "needKm": round(need)})
 
     return {"conditions": out, "meta": {"charging": _tri(s.get("charging"))}}

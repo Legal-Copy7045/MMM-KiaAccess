@@ -58,6 +58,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._announced: dict = {}
         self._first_alert_run = True
         self._home_unplugged_since: float | None = None
+        self._last_parked: dict | None = None
+        self._moved_since: float | None = None
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
@@ -346,28 +348,37 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._emit_alerts()
         return self.vehicle
 
-    def _at_home(self, state: dict) -> bool | None:
-        """Within zone.home's radius? None if the zone or a GPS fix is missing."""
-        zone = self.hass.states.get("zone.home")
-        lat = state.get("locationLat")
-        lon = state.get("locationLon")
-        if zone is None or lat is None or lon is None:
+    @staticmethod
+    def _haversine_km(a_lat, a_lon, b_lat, b_lon) -> float | None:
+        if None in (a_lat, a_lon, b_lat, b_lon):
             return None
-        hlat = zone.attributes.get("latitude")
-        hlon = zone.attributes.get("longitude")
-        radius_m = zone.attributes.get("radius", 100)
-        if hlat is None or hlon is None:
-            return None
-        # haversine, metres
-        r = 6371000.0
-        p = math.pi / 180.0
+        r, p = 6371.0, math.pi / 180.0
         a = (
             0.5
-            - math.cos((hlat - lat) * p) / 2
-            + math.cos(lat * p) * math.cos(hlat * p) * (1 - math.cos((hlon - lon) * p)) / 2
+            - math.cos((b_lat - a_lat) * p) / 2
+            + math.cos(a_lat * p) * math.cos(b_lat * p) * (1 - math.cos((b_lon - a_lon) * p)) / 2
         )
-        dist_m = 2 * r * math.asin(math.sqrt(a))
-        return dist_m <= float(radius_m)
+        return r * 2 * math.asin(math.sqrt(a))
+
+    def _home_point(self) -> tuple[float | None, float | None, float]:
+        zone = self.hass.states.get("zone.home")
+        if zone is None:
+            return None, None, 100.0
+        return (
+            zone.attributes.get("latitude"),
+            zone.attributes.get("longitude"),
+            float(zone.attributes.get("radius", 100)),
+        )
+
+    def _at_home(self, state: dict) -> bool | None:
+        """Within zone.home's radius? None if the zone or a GPS fix is missing."""
+        hlat, hlon, radius_m = self._home_point()
+        lat = state.get("locationLat")
+        lon = state.get("locationLon")
+        km = self._haversine_km(lat, lon, hlat, hlon)
+        if km is None:
+            return None
+        return km * 1000 <= radius_m
 
     def _emit_alerts(self) -> None:
         """Fire kia_access_alert events on edge-triggered condition changes,
@@ -392,6 +403,36 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             if self._home_unplugged_since is not None
             else None
         )
+
+        # distance car -> home for the "can't get home" check
+        hlat, hlon, _ = self._home_point()
+        state["homeDistanceKm"] = self._haversine_km(
+            state.get("locationLat"), state.get("locationLon"), hlat, hlon
+        )
+
+        # moved-while-parked (tow / theft): GPS shifted while the odometer stayed
+        # put and the car was off
+        lat, lon = state.get("locationLat"), state.get("locationLon")
+        odo = state.get("odometerKm")
+        p = self._last_parked
+        odo_stable = p is not None and odo is not None and abs(odo - p["odo"]) < 0.1
+        if odo_stable and state.get("carOn") is not True and lat is not None:
+            moved = self._haversine_km(p["lat"], p["lon"], lat, lon)
+            if moved is not None and moved >= 0.15:
+                if self._moved_since is None:
+                    self._moved_since = time.monotonic()
+                state["movedWhileParkedKm"] = moved
+                state["movedWhileParkedMin"] = (time.monotonic() - self._moved_since) / 60
+            else:
+                self._moved_since = None
+                state["movedWhileParkedKm"] = 0
+                state["movedWhileParkedMin"] = 0
+        else:
+            self._moved_since = None
+            if lat is not None and odo is not None:
+                self._last_parked = {"lat": lat, "lon": lon, "odo": odo}
+            state["movedWhileParkedKm"] = 0 if self._last_parked else None
+            state["movedWhileParkedMin"] = 0
 
         try:
             res = evaluate_conditions(state, cfg, self._prev_cond)

@@ -1,0 +1,17 @@
+{
+  "name": "GPS jitter while parked (no alarm) + plenty of range to get home",
+  "state": {
+    "carOn": false,
+    "movedWhileParkedKm": 0.12,
+    "movedWhileParkedMin": 40,
+    "atHome": false,
+    "homeDistanceKm": 35,
+    "rangeKm": 260
+  },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "unexpected_move": false,
+    "cant_get_home": false
+  }
+}
