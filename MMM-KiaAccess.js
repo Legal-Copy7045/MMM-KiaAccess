@@ -155,7 +155,10 @@ Module.register("MMM-KiaAccess", {
       },
       chargeCost: {
         enabled: false, // the "est. cost to the target" line while charging
-        pricePerKwh: 0, // your all-in marginal rate, e.g. 0.185
+        pricePerKwh: 0, // your all-in marginal home rate, e.g. 0.185
+        awayPricePerKwh: 0, // rate for sessions started away from home (public
+                            //   chargers). 0 = use the home rate. Needs
+                            //   visuals.location.homeLat/homeLon set.
         currency: "$",
         capacityKwh: null, // usable pack kWh; falls back to ev_battery_capacity then 99.8 (EV9)
         log: false, // a charge-session history widget (kWh + cost per session + monthly total)
@@ -449,8 +452,12 @@ Module.register("MMM-KiaAccess", {
       historyMinIntervalMinutes: c.historyMinIntervalMinutes,
       chargeLog: {
         pricePerKwh: ((c.visuals || {}).chargeCost || {}).pricePerKwh || 0,
+        awayPricePerKwh: ((c.visuals || {}).chargeCost || {}).awayPricePerKwh || 0,
         capacityKwh: ((c.visuals || {}).chargeCost || {}).capacityKwh || null,
-        retentionDays: ((c.visuals || {}).chargeCost || {}).logRetentionDays || 180
+        retentionDays: ((c.visuals || {}).chargeCost || {}).logRetentionDays || 180,
+        homeLat: ((c.visuals || {}).location || {}).homeLat,
+        homeLon: ((c.visuals || {}).location || {}).homeLon,
+        homeRadiusKm: ((c.visuals || {}).location || {}).homeRadiusKm || 0.2
       },
       tripLog: {
         minKm: ((c.visuals || {}).tripLog || {}).minKm,
@@ -1226,20 +1233,31 @@ Module.register("MMM-KiaAccess", {
       ? this.sessionLib.summary(list, months * 30)
       : { kwh: null, cost: null };
 
+    const anyAway = list.some((x) => x.location === "away") ||
+      (cc.awayPricePerKwh || 0) > 0;
+
     const el = document.createElement("div");
     el.className = "kiaaccess-batt-detail";
-    const rows = list.slice(0, cc.logRows || 4).map((x) =>
-      '<div><span class="kiaaccess-bd-label">' +
-      this.escape(this.agoText(new Date(x.endedAt))) +
-      '</span><span class="kiaaccess-bd-value">' + this.escape(val(x)) + "</span></div>"
-    ).join("");
-    const total =
-      '<div style="opacity:.85;border-top:1px solid rgba(255,255,255,.15);margin-top:3px;padding-top:3px">' +
-      '<span class="kiaaccess-bd-label">Last ' + months + ' mo</span>' +
+    const rows = list.slice(0, cc.logRows || 4).map((x) => {
+      const mark = anyAway ? (x.location === "away" ? "📍 " : "🏠 ") : "";
+      return '<div><span class="kiaaccess-bd-label">' + mark +
+        this.escape(this.agoText(new Date(x.endedAt))) +
+        '</span><span class="kiaaccess-bd-value">' + this.escape(val(x)) + "</span></div>";
+    }).join("");
+    const totLine = (label, o) =>
+      '<span class="kiaaccess-bd-label">' + label + '</span>' +
       '<span class="kiaaccess-bd-value">' + this.escape(
-        (sum.kwh != null ? kwh(sum.kwh) : "") +
-        (sum.cost != null ? " · " + cur(sum.cost) : "")
-      ) + "</span></div>";
+        (o && o.kwh != null ? kwh(o.kwh) : "—") +
+        (o && o.cost != null ? " · " + cur(o.cost) : "")
+      ) + "</span>";
+    let total =
+      '<div style="opacity:.85;border-top:1px solid rgba(255,255,255,.15);margin-top:3px;padding-top:3px">' +
+      totLine("Last " + months + " mo", sum) + "</div>";
+    if (anyAway && sum.home && sum.away && sum.away.count) {
+      total +=
+        '<div style="opacity:.7">' + totLine("· home", sum.home) + "</div>" +
+        '<div style="opacity:.7">' + totLine("· away", sum.away) + "</div>";
+    }
     el.innerHTML =
       '<div class="kiaaccess-bd-label" style="text-align:center;margin-bottom:2px">Charging log</div>' +
       rows + total;

@@ -67,4 +67,46 @@ sm = S.summary([
 ], 30)
 assert sm["count"] == 2 and sm["kwh"] == 65 and sm["cost"] == 12.03
 
+# --- home vs away rate ---
+ha = {"pricePerKwh": 0.185, "awayPricePerKwh": 0.55, "capacityKwh": 100}
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
+                    "chargeKw": 120, "atHome": False}, ha)["open"]
+assert o["atHome"] is False
+r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ha)
+assert r["closed"]["location"] == "away"
+assert r["closed"]["kwh"] == 40 and r["closed"]["cost"] == 22 and r["closed"]["pricePerKwh"] == 0.55
+
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
+                    "chargeKw": 7, "atHome": True}, ha)["open"]
+r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ha)
+assert r["closed"]["location"] == "home" and r["closed"]["cost"] == 7.4
+
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
+                    "chargeKw": 7, "atHome": None}, ha)["open"]
+r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ha)
+assert r["closed"]["location"] == "home" and r["closed"]["cost"] == 7.4
+
+# away rate unset -> away session uses the home rate
+noaway = {"pricePerKwh": 0.185, "capacityKwh": 100}
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
+                    "chargeKw": 50, "atHome": False}, noaway)["open"]
+r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, noaway)
+assert r["closed"]["location"] == "away" and r["closed"]["cost"] == 7.4
+
+# atHome learned on a later sample
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20, "chargeKw": 7}, ha)["open"]
+assert o["atHome"] is None
+o = S.update(o, {"t": t0 + 5 * MIN, "charging": True, "plugged": True, "batteryPct": 25,
+                 "chargeKw": 7, "atHome": False}, ha)["open"]
+assert o["atHome"] is False
+
+ms = S.summary([
+    {"endedAt": now - 1 * 864e5, "kwh": 40, "cost": 22, "location": "away"},
+    {"endedAt": now - 2 * 864e5, "kwh": 30, "cost": 5.55, "location": "home"},
+    {"endedAt": now - 3 * 864e5, "kwh": 10, "cost": 1.85},
+], 30)
+assert ms["count"] == 3
+assert ms["home"]["count"] == 2 and ms["home"]["kwh"] == 40
+assert ms["away"]["count"] == 1 and ms["away"]["cost"] == 22
+
 print("all sessions tests passed")

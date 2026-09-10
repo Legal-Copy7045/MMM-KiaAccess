@@ -15,6 +15,8 @@ except ImportError:  # pragma: no cover
 
 try:
     from homeassistant.helpers.selector import (
+        EntitySelector,
+        EntitySelectorConfig,
         NumberSelector,
         NumberSelectorConfig,
         NumberSelectorMode,
@@ -29,10 +31,16 @@ try:
 
     def _multiline():
         return TextSelector(TextSelectorConfig(multiline=True))
+
+    def _zone_entity():
+        return EntitySelector(EntitySelectorConfig(domain="zone"))
 except ImportError:  # pragma: no cover — very old HA
 
     def _number(lo, hi, step):
         return vol.All(vol.Coerce(float), vol.Range(min=lo, max=hi))
+
+    def _zone_entity():
+        return str
 
     def _multiline():
         return str
@@ -254,6 +262,16 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         "price_per_kwh",
                         default=float(opts.get("price_per_kwh") or 0),
                     ): _number(0, 10, 0.001),
+                    vol.Optional(
+                        "away_price_per_kwh",
+                        default=float(opts.get("away_price_per_kwh") or 0),
+                    ): _number(0, 10, 0.001),
+                    vol.Optional(
+                        "home_charge_zone",
+                        description={
+                            "suggested_value": opts.get("home_charge_zone", "")
+                        },
+                    ): _zone_entity(),
                     vol.Optional(
                         "capacity_kwh",
                         default=float(opts.get("capacity_kwh") or 0),

@@ -28,17 +28,26 @@
     return Math.round(n * f) / f;
   }
 
+  /** which per-kWh rate applies to a session, given where it charged */
+  function rateFor(atHome, opts) {
+    var home = num(opts.pricePerKwh) || 0;
+    var away = num(opts.awayPricePerKwh);
+    return atHome === false && away != null ? away : home;
+  }
+  function tri(v) { return v === true || v === false ? v : null; }
+
   /**
    * Fold one state sample into session tracking.
    * @param {object|null} open  session in progress, or null
-   * @param {object} cur   { t, charging, plugged, batteryPct, chargeKw }
-   * @param {object} opts  { pricePerKwh, capacityKwh, minKwh, gapMin }
+   * @param {object} cur   { t, charging, plugged, batteryPct, chargeKw, atHome }
+   *        atHome: true / false / null(unknown — no home zone set) — decides
+   *        which rate the session is costed at
+   * @param {object} opts  { pricePerKwh, awayPricePerKwh, capacityKwh, minKwh, gapMin }
    * @returns {{ open: (object|null), closed: (object|null) }}
    */
   function update(open, cur, opts) {
     opts = opts || {};
     var cap = num(opts.capacityKwh) || DEFAULT_CAPACITY_KWH;
-    var price = num(opts.pricePerKwh) || 0;
     var minKwh = num(opts.minKwh);
     if (minKwh == null) minKwh = MIN_KWH;
     var gapMs = (num(opts.gapMin) || GAP_MIN) * 60000;
@@ -54,7 +63,8 @@
       return {
         open: {
           startedAt: t, lastChargingAt: t,
-          startPct: pct, lastPct: pct, peakKw: kw || 0
+          startPct: pct, lastPct: pct, peakKw: kw || 0,
+          atHome: tri(cur.atHome)
         },
         closed: null
       };
@@ -64,6 +74,7 @@
     // running
     if (charging) {
       open.lastChargingAt = t;
+      if (open.atHome == null && tri(cur.atHome) != null) open.atHome = cur.atHome;
       if (pct != null) {
         open.lastPct = pct;
         if (open.startPct == null) open.startPct = pct;
@@ -85,6 +96,7 @@
       ? Math.max(0, endPct - open.startPct) : null;
     var kwh = gained != null ? (gained / 100) * cap : null;
     var mins = Math.max(0, Math.round((open.lastChargingAt - open.startedAt) / 60000));
+    var rate = rateFor(open.atHome, opts);
     var s = {
       startedAt: open.startedAt,
       endedAt: open.lastChargingAt || t,
@@ -93,10 +105,11 @@
       endPct: endPct,
       gainedPct: gained != null ? round(gained, 1) : null,
       kwh: kwh != null ? round(kwh, 2) : null,
-      cost: (kwh != null && price > 0) ? round(kwh * price, 2) : null,
+      cost: (kwh != null && rate > 0) ? round(kwh * rate, 2) : null,
       peakKw: round(open.peakKw, 1),
       avgKw: (kwh != null && mins > 0) ? round(kwh / (mins / 60), 1) : null,
-      pricePerKwh: price || null
+      pricePerKwh: rate || null,
+      location: open.atHome === false ? "away" : "home"
     };
     return { open: null, closed: (s.kwh != null && s.kwh >= minKwh) ? s : null };
   }
@@ -111,7 +124,7 @@
     if (!open) return null;
     opts = opts || {};
     var cap = num(opts.capacityKwh) || DEFAULT_CAPACITY_KWH;
-    var price = num(opts.pricePerKwh) || 0;
+    var price = rateFor(open.atHome, opts);
     var t = num(cur.t) || Date.now();
     var pct = num(cur.batteryPct);
     var lastPct = pct != null ? pct : open.lastPct;
@@ -130,21 +143,35 @@
     };
   }
 
-  /** totals over the last `days` (default 30) of a session list */
+  /** totals over the last `days` (default 30) of a session list, split
+   *  home / away */
   function summary(sessions, days) {
     var cutoff = Date.now() - (days || 30) * 864e5;
-    var kwh = 0, cost = 0, n = 0, haveCost = false;
+    var acc = {
+      all: { count: 0, kwh: 0, cost: 0, haveCost: false },
+      home: { count: 0, kwh: 0, cost: 0, haveCost: false },
+      away: { count: 0, kwh: 0, cost: 0, haveCost: false }
+    };
     (sessions || []).forEach(function (s) {
       if (!s || num(s.endedAt) == null || s.endedAt < cutoff) return;
-      n += 1;
-      if (s.kwh != null) kwh += s.kwh;
-      if (s.cost != null) { cost += s.cost; haveCost = true; }
+      var where = s.location === "away" ? "away" : "home";
+      [acc.all, acc[where]].forEach(function (a) {
+        a.count += 1;
+        if (s.kwh != null) a.kwh += s.kwh;
+        if (s.cost != null) { a.cost += s.cost; a.haveCost = true; }
+      });
     });
-    return {
-      count: n,
-      kwh: round(kwh, 1),
-      cost: haveCost ? round(cost, 2) : null
-    };
+    function out(a) {
+      return {
+        count: a.count,
+        kwh: round(a.kwh, 1),
+        cost: a.haveCost ? round(a.cost, 2) : null
+      };
+    }
+    var r = out(acc.all);
+    r.home = out(acc.home);
+    r.away = out(acc.away);
+    return r;
   }
 
   return {

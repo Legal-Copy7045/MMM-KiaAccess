@@ -334,7 +334,8 @@ class KiaAccessLastChargeSensor(KiaAccessEntity, SensorEntity):
         return self._log().get("last") is not None
 
     def _priced(self) -> bool:
-        return (self.coordinator.entry.options.get("price_per_kwh") or 0) > 0
+        o = self.coordinator.entry.options
+        return (o.get("price_per_kwh") or 0) > 0 or (o.get("away_price_per_kwh") or 0) > 0
 
     @property
     def native_value(self):
@@ -363,9 +364,14 @@ class KiaAccessLastChargeSensor(KiaAccessEntity, SensorEntity):
             "peak_kw": last.get("peakKw"),
             "avg_kw": last.get("avgKw"),
             "price_per_kwh": last.get("pricePerKwh"),
+            "location": last.get("location", "home"),
             "month_kwh": log["month"].get("kwh"),
             "month_cost": log["month"].get("cost"),
             "month_sessions": log["month"].get("count"),
+            "month_home_cost": (log["month"].get("home") or {}).get("cost"),
+            "month_away_cost": (log["month"].get("away") or {}).get("cost"),
+            "month_home_kwh": (log["month"].get("home") or {}).get("kwh"),
+            "month_away_kwh": (log["month"].get("away") or {}).get("kwh"),
             "last_3_months_kwh": log["last_3_months"].get("kwh"),
             "last_3_months_cost": log["last_3_months"].get("cost"),
             "sessions": log.get("recent"),
@@ -402,7 +408,8 @@ class KiaAccessChargeSessionSensor(KiaAccessEntity, SensorEntity):
             self.async_write_ha_state()
 
     def _priced(self) -> bool:
-        return (self.coordinator.entry.options.get("price_per_kwh") or 0) > 0
+        o = self.coordinator.entry.options
+        return (o.get("price_per_kwh") or 0) > 0 or (o.get("away_price_per_kwh") or 0) > 0
 
     def _progress(self):
         c = self.coordinator
