@@ -99,21 +99,31 @@ module.exports = NodeHelper.create({
   },
 
   cacheFile(id) {
+    // sha256 purely to get a fixed-length, filesystem-safe, non-cleartext
+    // name for a local (git-ignored) cache file — not a security boundary.
     const name = crypto.createHash("sha256").update(id).digest("hex").slice(0, 16);
     const file = path.join(CACHE_DIR, name + ".json");
-    // one-time migration: an earlier version named this file after a truncated
-    // SHA-1 of the same id — carry the existing session/trip history over
+    // one-time migration off the older filename so charge-session / trip
+    // history carries over on upgrade (see migrateLegacyCache)
     if (!fs.existsSync(file)) {
-      const legacy = path.join(
-        CACHE_DIR, crypto.createHash("sha1").update(id).digest("hex").slice(0, 16) + ".json"
-      );
       try {
-        if (fs.existsSync(legacy)) fs.renameSync(legacy, file);
+        this.migrateLegacyCache(id, file);
       } catch (e) {
         /* fall through to a fresh cache */
       }
     }
     return file;
+  },
+
+  // Pre-v2.43.1 the cache filename was a truncated SHA-1 of the same id.
+  // SHA-1 is used here ONLY to reconstruct that legacy path for a local
+  // rename — no security decision depends on it.
+  migrateLegacyCache(id, file) {
+    const legacy = path.join(
+      CACHE_DIR,
+      crypto.createHash("sha1").update(id).digest("hex").slice(0, 16) + ".json"
+    );
+    if (fs.existsSync(legacy)) fs.renameSync(legacy, file);
   },
 
   st(id) {
