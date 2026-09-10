@@ -5,13 +5,35 @@
 ## TL;DR
 
 **Your Kia / Hyundai / Genesis, on Home Assistant and/or MagicMirror², from one
-shared engine.** A HACS **Home Assistant integration** (sensors, remote
-control, GPS, `kia_access_alert` events, Lovelace cards) and a read-only
-**MagicMirror² module** (animated car diagram + a configurable data table +
-notifications). Every sensor, command and alert rule is defined once, so the
-two surfaces always agree. Works in every region
+shared engine.** A HACS **Home Assistant integration** and a read-only
+**MagicMirror² module**, both built from the same sensor / command / alert
+definitions so they always agree. Works in every region
 [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
 supports; built and tested on a Kia EV9 (Kia USA).
+
+**Headline features**
+
+- **Full state** — battery, range, charge, 12V, doors, windows, lock, plug,
+  climate, tyres, odometer, service, GPS — as HA entities and/or a
+  configurable table on the mirror.
+- **Animated top-down car diagram** — every door / window / light / charge /
+  climate / warning state at a glance, identical on both surfaces.
+- **Remote control** (HA) — lock, climate / preconditioning, charge start-stop
+  and limits, charge-port, flash / honk, as native `lock` / `climate` /
+  `number` / `switch` / `select` entities.
+- **Kinder to the 12V battery** — reads Kia's server-side cache by default;
+  live wake-ups are opt-in and time-boxed.
+- **Edge-triggered alerts** — left unlocked, door open, battery low, 12V drain,
+  charge complete / interrupted, tow / theft, "can't get home" — as
+  `kia_access_alert` events (HA) or on-screen notifications + webhook (mirror).
+- **Range & reachability** — how far you can drive now, which places are in
+  reach, arrival battery, and (with a routing key) real drive time + live
+  traffic delay for calendar destinations, on an interactive map.
+- **Charging & running costs** — per-session kWh + cost, an automatic trip log
+  with cost-per-mile, and a live "cost this charge" figure.
+- **`device_tracker`** for HA maps, zones and presence automations.
+- **Send-out** — MQTT (with HA MQTT-discovery), a per-event webhook, or
+  InfluxDB / Prometheus, straight from the mirror.
 
 ### Pick a mode
 
