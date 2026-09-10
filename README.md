@@ -535,7 +535,7 @@ depends on its brand, region and powertrain):
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map`, and a `reach:true` "how far can I drive" readout (`reachFactor` / `reachReservePct` / `reachRoundTrip` / `pois`) — see [Location](#location--map) |
 | `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180) |
 | `visuals.tripLog` | `{ enabled:false }` | auto-detected drives (odometer delta + SoC drop): distance, **mi/kWh**, and cost per trip + a rolling total (`days` 30, `rows` 4). Uses `chargeCost.pricePerKwh` / `capacityKwh` for the £/kWh maths. HA side: `sensor.<v>_last_trip` + `sensor.<v>_cost_per_mile` |
-| `visuals.drivingTimes` | `{ enabled:false }` | standalone **Driving times** panel — destination, live drive time, `via <roads>`, ETA coloured by traffic delay (`delayStops`), calendar time + arrival battery. `source: "homeassistant"` only; reads `sensor.<v>_range_reach`. `max` 6, `order` "soonest", `showVia`, `showConsumption` |
+| `visuals.drivingTimes` | `{ enabled:false }` | standalone **Driving times** panel — destination, live drive time, `via <roads>`, ETA coloured by traffic delay (`delayStops`), calendar time + arrival battery. `source: "homeassistant"` only; reads `sensor.<v>_range_reach`. `max` 8, `order` "grouped", `zones` (panel-only whitelist / `-exclude`), `showVia`, `showConsumption` |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
@@ -680,6 +680,8 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
     header: "Driving times",
     max: 8,
     order: "grouped",      // 📅 calendar (by time) → ⭐ static → 📍 zones (by distance) | "nearest"
+    zones: [],             // [] = every zone HA sent. ["Home", "Work"] whitelists;
+                           //   "-Grandma" excludes. Calendar + static always show.
     showVia: true,
     showConsumption: true, // "→78% ~14kWh"
     delayStops: [          // ETA colour by % slower than free-flow
@@ -689,6 +691,10 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
     ]
   }
   ```
+
+  `drivingTimes.zones` filters **only this panel** — Home Assistant still gets
+  every US zone (dashboard, `sensor.<v>_range_reach`). Use the integration's
+  **Zones to show** option instead if you want to narrow it everywhere.
 
   The **destinations** come from Home Assistant: your US `zone.*`, the
   integration's **Static destinations** (`Configure` → one `Name | address`
