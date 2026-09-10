@@ -98,6 +98,27 @@ assert _pcd(_mk({"poll_car_directly": False})) is False
 assert _pcd(_mk({"force_refresh_timeout": 45})) is True, "legacy: >0 -> poll"
 assert _pcd(_mk({"force_refresh_timeout": 0})) is False
 
+# _job() must NEVER let kia_client wake the car when cache-only is set:
+# both refresh:False AND forceRefreshTimeout:0 (either alone is sufficient)
+class _FakeCoord:
+    _poll_car_directly = co.KiaAccessCoordinator._poll_car_directly
+    _job = co.KiaAccessCoordinator._job
+
+    def __init__(self, opts):
+        self.entry = type(
+            "E", (), {"data": {"username": "u", "password": "p"}, "options": opts}
+        )()
+
+
+_cache_job = _FakeCoord({})._job()
+assert _cache_job["refresh"] is False, "cache-only: refresh must be False"
+assert _cache_job["forceRefreshTimeout"] == 0, "cache-only: no wake-up wait"
+_live_job = _FakeCoord({"poll_car_directly": True, "force_refresh_timeout": 30})._job()
+assert _live_job["refresh"] is True and _live_job["forceRefreshTimeout"] == 30
+# explicit poll off wins even with a stale legacy timeout
+_off_job = _FakeCoord({"poll_car_directly": False, "force_refresh_timeout": 60})._job()
+assert _off_job["refresh"] is False and _off_job["forceRefreshTimeout"] == 0
+
 _cln = co.KiaAccessCoordinator._clean_address
 assert _cln(["Oak Creek Drive", "Oak Creek, Sarver, PA", {"road": "x"}]) == "Oak Creek Drive"
 assert _cln({"road": "Main St", "city": "Pittsburgh"}) == "Main St"

@@ -1076,12 +1076,18 @@ Module.register("MMM-KiaAccess", {
             (this.fmtDist(alt) || "?") + ")" : "");
         let html =
           '<div><span class="kiaaccess-bd-value">' + this.escape(head) + "</span></div>";
+        const hm = (t) => {
+          if (t == null || !isFinite(t)) return "";
+          const h = Math.floor(t / 60);
+          return h ? (t % 60 ? h + "h " + (t % 60) + "m" : h + "h") : (t % 60) + "m";
+        };
         sum.pois.slice(0, Number(cfg.reachPois) || 4).forEach((p) => {
           const d = this.fmtDist(p.km) || "";
+          const dur = p.durationMin != null ? " · " + hm(p.durationMin) : "";
           const arr = p.arrivalPct != null ? " · arrive " + p.arrivalPct + "%" : "";
           const tail = p.reachable
-            ? d + arr
-            : d + " · " + (this.fmtDist(-p.marginKm) || "") + " short";
+            ? d + dur + arr
+            : d + dur + " · " + (this.fmtDist(-p.marginKm) || "") + " short";
           html +=
             '<div class="kiaaccess-reach-poi ' + (p.reachable ? "ok" : "no") +
             '"><span class="kiaaccess-bd-label">' +

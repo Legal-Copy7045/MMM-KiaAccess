@@ -249,7 +249,11 @@ module.exports = NodeHelper.create({
       vin: config.vin || "",
       refresh: config.refresh !== false,
       geocode: config.geocode === true,
-      forceRefreshTimeout: Number(config.forceRefreshTimeout) || 45
+      // honour an explicit 0 (cache-only) — don't let `|| 45` clobber it
+      forceRefreshTimeout:
+        config.forceRefreshTimeout == null || config.forceRefreshTimeout === ""
+          ? 45
+          : Number(config.forceRefreshTimeout) || 0
     };
 
     let stdout = "";

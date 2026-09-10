@@ -55,7 +55,7 @@ async def _register_frontend(hass: HomeAssistant) -> None:
     global _FRONTEND_REGISTERED
     if _FRONTEND_REGISTERED:
         return
-    if not os.path.exists(_CARD_PATH):
+    if not await hass.async_add_executor_job(os.path.exists, _CARD_PATH):
         _LOGGER.warning("Kia Access card bundle missing at %s", _CARD_PATH)
         return
     try:
