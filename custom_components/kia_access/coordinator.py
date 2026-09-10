@@ -16,6 +16,7 @@ from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from . import kia_client
 from . import range as drive_range
+from . import routing as drive_routing
 from . import sessions as charge_sessions
 from . import trips as drive_trips
 from .conditions import evaluate as evaluate_conditions
@@ -67,6 +68,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._cal_pois: list[dict] = []
         self._cal_pois_at: float = 0.0
         self._cal_status: dict = {}
+        # real drive-times from a routing provider, keyed by _poi_key(lat, lon)
+        self._route_out: dict = {}
+        self._route_at: float = 0.0
+        self._route_origin: tuple | None = None
+        self._route_status: dict = {}
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
@@ -340,6 +346,16 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             if self._cal_status["errors"] else "",
         )
 
+    @staticmethod
+    def _poi_key(lat, lon) -> str:
+        return f"{round(float(lat), 4)},{round(float(lon), 4)}"
+
+    def _reach_pois(self) -> list[dict]:
+        """Zone POIs + geocoded calendar POIs, de-duped by name (zone wins)."""
+        zones = self._zone_pois()
+        znames = {z["name"] for z in zones}
+        return zones + [p for p in self._cal_pois if p["name"] not in znames]
+
     @property
     def range_reach(self) -> dict | None:
         """How far the car can drive now + which zones are in reach."""
@@ -358,19 +374,111 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         if lat is None or lon is None or not rng:
             return None
         opts = self.entry.options
+        pct = _n(self.vehicle.get("ev_battery_percentage"))
         o = {
             "factor": opts.get("range_factor") or drive_range.DEFAULTS["factor"],
             "reservePct": opts.get("range_reserve_pct")
             if opts.get("range_reserve_pct") is not None
             else drive_range.DEFAULTS["reservePct"],
-            "batteryPct": _n(self.vehicle.get("ev_battery_percentage")),
+            "batteryPct": pct,
             "roadFactor": 1.3,
         }
-        pois = self._zone_pois() + [
-            p for p in self._cal_pois
-            if not any(z["name"] == p["name"] for z in self._zone_pois())
-        ]
-        return drive_range.summary(lat, lon, rng, pois, o)
+        out = drive_range.summary(lat, lon, rng, self._reach_pois(), o)
+
+        # overlay real road distance + drive time where the routing provider
+        # gave us a number (straight-line estimate is the fallback)
+        reach_km = out.get("reachKm")
+        for p in out.get("pois") or []:
+            rt = self._route_out.get(self._poi_key(p["lat"], p["lon"]))
+            if not rt:
+                continue
+            p["km"] = rt["distanceKm"]
+            p["durationMin"] = rt["durationMin"]
+            p["routed"] = True
+            if reach_km is not None:
+                p["reachable"] = rt["distanceKm"] <= reach_km
+                p["marginKm"] = reach_km - rt["distanceKm"]
+            if pct is not None and rng:
+                p["arrivalPct"] = round(max(0, pct * (1 - rt["distanceKm"] / rng)))
+        out["pois"] = sorted(out.get("pois") or [], key=lambda x: x["km"])
+        out["drive_time_source"] = (
+            self.entry.options.get("drive_time_provider") or "estimate"
+        )
+        return out
+
+    async def _refresh_drive_times(self) -> None:
+        """Ask the configured routing provider for real car -> POI drive times.
+
+        Throttled to 10 min, but also re-runs whenever the car has moved > 1 km
+        since the last matrix so the ETAs track the drive.
+        """
+        provider = (self.entry.options.get("drive_time_provider") or "estimate").strip()
+        key = (self.entry.options.get("routing_api_key") or "").strip()
+        self._route_status = {"provider": provider, "targets": 0, "routed": 0,
+                              "at": None, "error": None}
+        if provider not in drive_routing.PROVIDERS or not key:
+            self._route_out = {}
+            return
+
+        def _n(x):
+            try:
+                return None if x in (None, "") else float(x)
+            except (TypeError, ValueError):
+                return None
+
+        lat = _n(self.vehicle.get("location_latitude"))
+        lon = _n(self.vehicle.get("location_longitude"))
+        if lat is None or lon is None:
+            return
+        pois = self._reach_pois()
+        if not pois:
+            self._route_out = {}
+            return
+
+        moved = (
+            self._route_origin is None
+            or self._haversine_km(lat, lon, self._route_origin[0], self._route_origin[1])
+            > 1.0
+        )
+        if not moved and time.monotonic() - self._route_at < 600:
+            return
+
+        req = drive_routing.matrix_request(
+            provider, {"lat": lat, "lon": lon},
+            [{"lat": p["lat"], "lon": p["lon"]} for p in pois], key,
+            {"traffic": True},
+        )
+        self._route_status["targets"] = len(pois)
+        if not req:
+            return
+        try:
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+            session = async_get_clientsession(self.hass)
+            async with session.post(
+                req["url"], data=req["body"], headers=req["headers"],
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json(content_type=None)
+        except Exception as err:  # noqa: BLE001
+            self._route_status["error"] = str(err)
+            _LOGGER.warning("Kia Access: drive-time matrix (%s) failed: %s", provider, err)
+            return
+
+        rows = drive_routing.parse_matrix(provider, data, len(pois))
+        out: dict = {}
+        for p, row in zip(pois, rows):
+            if row:
+                out[self._poi_key(p["lat"], p["lon"])] = row
+        self._route_out = out
+        self._route_origin = (lat, lon)
+        self._route_at = time.monotonic()
+        self._route_status["routed"] = len(out)
+        self._route_status["at"] = dt_util.utcnow().isoformat()
+        _LOGGER.info(
+            "Kia Access drive times (%s): %s/%s destination(s) routed",
+            provider, len(out), len(pois),
+        )
 
     @staticmethod
     def _clean_address(v) -> str | None:
@@ -512,6 +620,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 await self.async_refresh_calendar_pois()
             except Exception:  # noqa: BLE001
                 _LOGGER.debug("calendar POI refresh failed", exc_info=True)
+        try:
+            await self._refresh_drive_times()
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("drive-time refresh failed", exc_info=True)
         self._emit_alerts()
         return self.vehicle
 
