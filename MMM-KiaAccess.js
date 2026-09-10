@@ -185,7 +185,11 @@ Module.register("MMM-KiaAccess", {
           { pctOver: 20, color: "#ff9900" }, // 20%+        -> orange
           { pctOver: 35, color: "#ff5555" } //  35%+        -> red
         ],
-        hideUnreachable: false // drop destinations beyond the car's range
+        hideUnreachable: false, // drop destinations beyond the car's range
+        // which HA zones to show here (calendar + static are always shown).
+        // [] = every zone HA sent. Names (or "zone.x"), case-insensitive;
+        // a "-Name" entry excludes that zone instead.
+        zones: []
       },
       // trip log — auto-detected drives (odometer delta + SoC drop): distance,
       // mi/kWh, and cost per trip, plus a rolling total. Uses
@@ -1344,6 +1348,22 @@ Module.register("MMM-KiaAccess", {
       }));
     }
     if (!rows.length) return null;
+
+    // zone filter (calendar + static always pass). "-Name" excludes; a plain
+    // list is a whitelist. Matches HA's `zone_entities` rule.
+    const zf = (Array.isArray(dt.zones) ? dt.zones : [])
+      .map((z) => String(z).trim().toLowerCase().replace(/^zone\./, "").replace(/_/g, " "))
+      .filter(Boolean);
+    if (zf.length) {
+      const inc = zf.filter((z) => z[0] !== "-" && z[0] !== "!");
+      const exc = zf.filter((z) => z[0] === "-" || z[0] === "!").map((z) => z.slice(1).trim());
+      rows = rows.filter((r) => {
+        if (r.source !== "zone") return true;
+        const n = String(r.name || "").toLowerCase();
+        if (exc.includes(n)) return false;
+        return inc.length === 0 || inc.includes(n);
+      });
+    }
 
     if (dt.hideUnreachable) rows = rows.filter((r) => r.reachable);
     if ((dt.order || "grouped") === "nearest") {
