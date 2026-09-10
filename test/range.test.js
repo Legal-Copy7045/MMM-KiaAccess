@@ -47,6 +47,10 @@ const st2 = R.poiStatus(car[0], car[1], pois, 120, { batteryPct: 80, rangeKm: 30
 assert.ok(st2[0].arrivalPct > 60 && st2[0].arrivalPct < 80, st2[0].arrivalPct);
 assert.strictEqual(st2[2].arrivalPct, 0, "shore is way out of range -> 0%");
 assert.ok(st2[0].arrivalPct > st2[1].arrivalPct, "nearer place = more charge left");
+assert.ok(st2[0].durationMin >= 0 && st2[0].durationMin < st2[1].durationMin, "duration grows with distance");
+assert.ok(st2.map((p) => p.durationMin).every((d) => typeof d === "number"));
+// Work ~33 km * 1.3 / 68 kmh * 60 ~= 38 min
+assert.ok(st2[0].durationMin > 25 && st2[0].durationMin < 55, st2[0].durationMin);
 
 // ---- circleRing: closed ring, right size ----
 const ring = R.circleRing(40.71374, -79.75464, 100, 32);

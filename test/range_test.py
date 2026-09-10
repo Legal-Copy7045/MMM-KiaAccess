@@ -47,6 +47,9 @@ st2 = R.poi_status(car[0], car[1], pois, 120,
 assert 60 < st2[0]["arrivalPct"] < 80, st2[0]["arrivalPct"]
 assert st2[2]["arrivalPct"] == 0
 assert st2[0]["arrivalPct"] > st2[1]["arrivalPct"]
+assert all(isinstance(p["durationMin"], (int, float)) for p in st2)
+assert st2[0]["durationMin"] < st2[1]["durationMin"], "duration grows with distance"
+assert 25 < st2[0]["durationMin"] < 55, st2[0]["durationMin"]
 
 # circle_ring
 ring = R.circle_ring(40.71374, -79.75464, 100, 32)

@@ -66,6 +66,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._geo_store = Store(hass, 1, f"{DOMAIN}_geocache_{entry.entry_id}")
         self._cal_pois: list[dict] = []
         self._cal_pois_at: float = 0.0
+        self._cal_status: dict = {}
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
@@ -263,27 +264,32 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         return out
 
     async def _geocode_cached(self, address: str):
-        """address -> (lat, lon) via Nominatim, cached in the prefs store."""
+        """address -> (lat, lon) via Nominatim. Successful lookups persist;
+        failures are NOT cached (so a transient rate-limit retries next time)."""
         key = " ".join(address.lower().split())[:200]
         if key in self._geo_cache:
             return self._geo_cache[key]
-        result = None
         try:
             lat, lon, _ = await self.hass.async_add_executor_job(
                 kia_client._geocode, address  # noqa: SLF001
             )
-            result = [lat, lon] if self._in_us(lat, lon) else None
-        except Exception:  # noqa: BLE001
-            result = None
-        self._geo_cache[key] = result
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Kia Access: could not geocode %r: %s", address, err)
+            return None
+        if not self._in_us(lat, lon):
+            _LOGGER.debug("Kia Access: %r geocoded outside the US, skipping", address)
+            return None
+        self._geo_cache[key] = [lat, lon]
         await self._geo_store.async_save({"geo": self._geo_cache})
-        return result
+        return [lat, lon]
 
     async def async_refresh_calendar_pois(self) -> None:
         """Pull locations off the configured calendars for the next N hours,
         geocode them (US only), and cache as POIs for the range-reach readout."""
         raw = self.entry.options.get("calendar_entities") or ""
         cals = [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
+        self._cal_status = {"calendars": cals, "events": 0, "with_location": 0,
+                            "geocoded": 0, "errors": []}
         if not cals:
             self._cal_pois = []
             return
@@ -293,6 +299,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         pois: list[dict] = []
         seen: set[str] = set()
         for cal in cals:
+            if self.hass.states.get(cal) is None:
+                self._cal_status["errors"].append(f"{cal}: no such entity")
+                continue
             try:
                 resp = await self.hass.services.async_call(
                     "calendar", "get_events",
@@ -300,19 +309,36 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                      "end_date_time": end.isoformat()},
                     blocking=True, return_response=True,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as err:  # noqa: BLE001
+                self._cal_status["errors"].append(f"{cal}: {err}")
                 continue
-            events = (resp or {}).get(cal, {}).get("events", []) if resp else []
+            # response shapes vary: {cal: {events: [...]}} or {events: [...]}
+            block = (resp or {}).get(cal) if isinstance(resp, dict) else None
+            events = (block or resp or {}).get("events", []) if isinstance(
+                block or resp or {}, dict) else []
+            self._cal_status["events"] += len(events)
             for ev in events:
                 loc = (ev.get("location") or "").strip()
                 summary = (ev.get("summary") or "Event").strip()
-                if not loc or loc.lower() in seen:
+                if not loc:
+                    continue
+                self._cal_status["with_location"] += 1
+                if loc.lower() in seen:
                     continue
                 seen.add(loc.lower())
                 ll = await self._geocode_cached(loc)
                 if ll:
+                    self._cal_status["geocoded"] += 1
                     pois.append({"name": summary[:40], "lat": ll[0], "lon": ll[1]})
         self._cal_pois = pois[:12]
+        _LOGGER.info(
+            "Kia Access calendar destinations: %s event(s), %s with a location, "
+            "%s geocoded%s",
+            self._cal_status["events"], self._cal_status["with_location"],
+            self._cal_status["geocoded"],
+            f" — {'; '.join(self._cal_status['errors'])}"
+            if self._cal_status["errors"] else "",
+        )
 
     @property
     def range_reach(self) -> dict | None:
