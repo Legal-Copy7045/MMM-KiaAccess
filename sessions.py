@@ -66,6 +66,8 @@ def update(open_s, cur, opts=None):
                 "startedAt": t, "lastChargingAt": t,
                 "startPct": pct, "lastPct": pct, "peakKw": kw or 0,
                 "atHome": _tri(cur.get("atHome")),
+                "rate": _num(cur.get("rate")),
+                "rateLabel": cur.get("rateLabel") or None,
             },
             "closed": None,
         }
@@ -76,6 +78,9 @@ def update(open_s, cur, opts=None):
         open_s["lastChargingAt"] = t
         if open_s.get("atHome") is None and _tri(cur.get("atHome")) is not None:
             open_s["atHome"] = cur.get("atHome")
+        if open_s.get("rate") is None and _num(cur.get("rate")) is not None:
+            open_s["rate"] = _num(cur.get("rate"))
+            open_s["rateLabel"] = cur.get("rateLabel") or open_s.get("rateLabel")
         if pct is not None:
             open_s["lastPct"] = pct
             if open_s.get("startPct") is None:
@@ -95,7 +100,8 @@ def update(open_s, cur, opts=None):
     gained = max(0, end_pct - start_pct) if (start_pct is not None and end_pct is not None) else None
     kwh = (gained / 100) * cap if gained is not None else None
     mins = max(0, round((open_s.get("lastChargingAt", t) - open_s["startedAt"]) / 60000))
-    rate = _rate_for(open_s.get("atHome"), opts)
+    rate = open_s["rate"] if open_s.get("rate") is not None else _rate_for(open_s.get("atHome"), opts)
+    where = open_s.get("rateLabel") or ("away" if open_s.get("atHome") is False else "home")
     s = {
         "startedAt": open_s["startedAt"],
         "endedAt": open_s.get("lastChargingAt") or t,
@@ -108,10 +114,27 @@ def update(open_s, cur, opts=None):
         "peakKw": _round(open_s["peakKw"], 1),
         "avgKw": _round(kwh / (mins / 60), 1) if (kwh is not None and mins > 0) else None,
         "pricePerKwh": rate or None,
-        "location": "away" if open_s.get("atHome") is False else "home",
+        "location": where,
+        "costSource": "rate" if (kwh is not None and rate > 0) else None,
     }
     closed = s if (s["kwh"] is not None and s["kwh"] >= min_kwh) else None
     return {"open": None, "closed": closed}
+
+
+def apply_cost(session, cost, source="external"):
+    """Replace a session's cost with a known figure (public-charging integration
+    or a hand-entered value); keeps the rate estimate as `estimatedCost`."""
+    if not session:
+        return session
+    out = dict(session)
+    c = _num(cost)
+    if c is None or c < 0:
+        return out
+    if out.get("estimatedCost") is None:
+        out["estimatedCost"] = out.get("cost")
+    out["cost"] = _round(c, 2)
+    out["costSource"] = source or "external"
+    return out
 
 
 def progress(open_s, cur, opts=None):
@@ -120,7 +143,7 @@ def progress(open_s, cur, opts=None):
         return None
     opts = opts or {}
     cap = _num(opts.get("capacityKwh")) or DEFAULT_CAPACITY_KWH
-    price = _rate_for(open_s.get("atHome"), opts)
+    price = open_s["rate"] if open_s.get("rate") is not None else _rate_for(open_s.get("atHome"), opts)
     t = _num(cur.get("t")) or (time.time() * 1000)
     pct = _num(cur.get("batteryPct"))
     last_pct = pct if pct is not None else open_s.get("lastPct")
@@ -153,7 +176,9 @@ def summary(sessions, days=30):
     for s in sessions or []:
         if not s or _num(s.get("endedAt")) is None or s["endedAt"] < cutoff:
             continue
-        where = "away" if s.get("location") == "away" else "home"
+        # "home" (or no location) -> home bucket; "away" or a specific
+        # public-charger zone name -> away bucket
+        where = "home" if s.get("location") in (None, "home") else "away"
         for a in (acc["all"], acc[where]):
             a["count"] += 1
             if s.get("kwh") is not None:

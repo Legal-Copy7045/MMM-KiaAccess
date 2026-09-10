@@ -142,6 +142,12 @@ assert _in_us(None, None) is False
 assert hasattr(co.KiaAccessCoordinator, "async_refresh_calendar_pois")
 assert hasattr(co.KiaAccessCoordinator, "_refresh_drive_times")
 assert hasattr(co.KiaAccessCoordinator, "_charge_at_home")
+assert hasattr(co.KiaAccessCoordinator, "_charge_rate")
+_pcr = co.KiaAccessCoordinator._parse_charge_rates
+assert _pcr("zone.work = 0.19\nHome = 0.185\n# note\n\nbad line") == [
+    ("zone.work", 0.19), ("zone.home", 0.185)
+]
+assert _pcr("") == [] and _pcr(None) == []
 _sess = importlib.import_module(f"{pkg}.sessions")
 _scl = _sess.update(None, {"t": 0, "charging": True, "batteryPct": 10, "atHome": False},
                     {"pricePerKwh": 0.2, "awayPricePerKwh": 0.6})["open"]
@@ -149,6 +155,12 @@ assert _scl["atHome"] is False
 _scc = _sess.update(_scl, {"t": 6e5, "charging": False, "plugged": False, "batteryPct": 20},
                     {"pricePerKwh": 0.2, "awayPricePerKwh": 0.6, "capacityKwh": 100})["closed"]
 assert _scc["location"] == "away" and _scc["pricePerKwh"] == 0.6
+assert _scc.get("costSource") == "rate"
+_ovr = _sess.apply_cost(_scc, 12.34, "external")
+assert _ovr["cost"] == 12.34 and _ovr["costSource"] == "external"
+assert _ovr["estimatedCost"] == _scc["cost"]
+assert hasattr(co.KiaAccessCoordinator, "set_charge_cost")
+assert hasattr(co.KiaAccessCoordinator, "_external_away_cost")
 _psd = co.KiaAccessCoordinator._parse_static_destinations
 assert _psd("Museum | 100 Main St\nAirport = 1 Terminal Rd\n\n123 Elm St, Town") == [
     ("Museum", "100 Main St"), ("Airport", "1 Terminal Rd"), ("123 Elm St", "123 Elm St, Town")

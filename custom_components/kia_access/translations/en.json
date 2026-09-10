@@ -62,7 +62,10 @@
           "zone_entities": "Zones to show on the MagicMirror panel",
           "block_automated_climate": "Block automated climate control",
           "away_price_per_kwh": "Away / public price per kWh",
-          "home_charge_zone": "Home-charging zone"
+          "home_charge_zone": "Home-charging zone",
+          "charge_rates": "Per-zone charging rates (optional)",
+          "away_cost_entity": "Away charge-cost sensor (optional)",
+          "away_cost_grace_min": "Away cost grace (minutes)"
         },
         "data_description": {
           "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
@@ -76,7 +79,10 @@
           "zone_entities": "Narrows which Home Assistant zones appear on the MagicMirror driving-times panel. One per line by entity id or name (“zone.home” / “Work”); a line starting with “-” excludes that zone. Blank = show every US zone. The dashboard and sensor always show every US zone.",
           "block_automated_climate": "Reject start_climate / stop_climate unless the call comes straight from a person (the card, the button, Developer Tools, a script you run by hand). Automations, scripts triggered by automations, scenes and the preconditioning blueprints are blocked. Does not touch the car's own scheduled climate set in the Kia app.",
           "away_price_per_kwh": "Rate for charge sessions that start outside the home-charging zone (public chargers). 0 = fall back to the home rate.",
-          "home_charge_zone": "The zone that counts as “home” for charging costs — e.g. zone.home, or a dedicated zone around your charger. Leave blank to cost every session at the home rate."
+          "home_charge_zone": "The zone that counts as “home” for charging costs — e.g. zone.home, or a dedicated zone around your charger. Leave blank to cost every session at the home rate.",
+          "charge_rates": "Different $/kWh per charging location, one per line as \"zone.work = 0.19\" (or \"Work = 0.19\"). When the car charges inside one of these zones that rate is used and the session is filed under that zone name; the first matching line wins. Zones not listed fall back to the away, then the home rate. A line for your home zone (labelled “home”) keeps that session in the home bucket.",
+          "away_cost_entity": "A sensor whose value is the cost of your latest public charge — e.g. from the ChargePoint or a Tesla HA integration. When an away session ends and this sensor reported a figure within its window, that becomes the session cost (the rate estimate is kept as estimated_cost). Otherwise the away $/kWh rate is used.",
+          "away_cost_grace_min": "How long after unplugging the away cost sensor may still update — public networks often bill a few minutes to an hour later."
         }
       }
     }

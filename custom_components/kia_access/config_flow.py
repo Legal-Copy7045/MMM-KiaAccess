@@ -34,12 +34,18 @@ try:
 
     def _zone_entity():
         return EntitySelector(EntitySelectorConfig(domain="zone"))
+
+    def _sensor_entity():
+        return EntitySelector(EntitySelectorConfig(domain=["sensor", "input_number"]))
 except ImportError:  # pragma: no cover — very old HA
 
     def _number(lo, hi, step):
         return vol.All(vol.Coerce(float), vol.Range(min=lo, max=hi))
 
     def _zone_entity():
+        return str
+
+    def _sensor_entity():
         return str
 
     def _multiline():
@@ -272,6 +278,23 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                             "suggested_value": opts.get("home_charge_zone", "")
                         },
                     ): _zone_entity(),
+                    vol.Optional(
+                        "charge_rates",
+                        default=opts.get("charge_rates", ""),
+                        description={
+                            "suggested_value": opts.get("charge_rates", "")
+                        },
+                    ): _multiline(),
+                    vol.Optional(
+                        "away_cost_entity",
+                        description={
+                            "suggested_value": opts.get("away_cost_entity", "")
+                        },
+                    ): _sensor_entity(),
+                    vol.Optional(
+                        "away_cost_grace_min",
+                        default=float(opts.get("away_cost_grace_min") or 90),
+                    ): _number(0, 720, 5),
                     vol.Optional(
                         "capacity_kwh",
                         default=float(opts.get("capacity_kwh") or 0),

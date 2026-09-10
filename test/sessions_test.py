@@ -109,4 +109,39 @@ assert ms["count"] == 3
 assert ms["home"]["count"] == 2 and ms["home"]["kwh"] == 40
 assert ms["away"]["count"] == 1 and ms["away"]["cost"] == 22
 
+# --- per-zone rate override (cur.rate / cur.rateLabel) ---
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
+                    "chargeKw": 50, "atHome": False, "rate": 0.31, "rateLabel": "Work"}, ha)["open"]
+assert o["rate"] == 0.31
+r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ha)
+assert r["closed"]["location"] == "Work"
+assert r["closed"]["cost"] == 12.4 and r["closed"]["pricePerKwh"] == 0.31
+
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
+                    "chargeKw": 7, "rate": 0.12, "rateLabel": "home"}, ha)["open"]
+r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ha)
+assert r["closed"]["location"] == "home" and r["closed"]["cost"] == 4.8
+
+o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20, "chargeKw": 7}, ha)["open"]
+o = S.update(o, {"t": t0 + 5 * MIN, "charging": True, "plugged": True, "batteryPct": 25,
+                 "chargeKw": 7, "rate": 0.4, "rateLabel": "Depot"}, ha)["open"]
+assert o["rate"] == 0.4 and o["rateLabel"] == "Depot"
+
+zs = S.summary([
+    {"endedAt": now - 1 * 864e5, "kwh": 40, "cost": 12.4, "location": "Work"},
+    {"endedAt": now - 2 * 864e5, "kwh": 30, "cost": 5.55, "location": "home"},
+], 30)
+assert zs["away"]["count"] == 1 and zs["away"]["cost"] == 12.4
+assert zs["home"]["count"] == 1
+
+# --- apply_cost ---
+est = {"startedAt": 1, "kwh": 30, "cost": 16.5, "costSource": "rate", "location": "away"}
+real = S.apply_cost(est, 24.99, "external")
+assert real["cost"] == 24.99 and real["costSource"] == "external"
+assert real["estimatedCost"] == 16.5 and est["cost"] == 16.5
+real2 = S.apply_cost(real, 20, "manual")
+assert real2["estimatedCost"] == 16.5 and real2["cost"] == 20
+assert S.apply_cost(est, "x", "external")["cost"] == 16.5
+assert S.apply_cost(None, 5, "external") is None
+
 print("all sessions tests passed")

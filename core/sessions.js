@@ -39,9 +39,13 @@
   /**
    * Fold one state sample into session tracking.
    * @param {object|null} open  session in progress, or null
-   * @param {object} cur   { t, charging, plugged, batteryPct, chargeKw, atHome }
-   *        atHome: true / false / null(unknown — no home zone set) — decides
-   *        which rate the session is costed at
+   * @param {object} cur   { t, charging, plugged, batteryPct, chargeKw,
+   *                          atHome, rate, rateLabel }
+   *        atHome: true / false / null — home vs away bucket + the fallback rate.
+   *        rate:   an explicit $/kWh for this session (from a per-zone rate) —
+   *                overrides pricePerKwh/awayPricePerKwh when set.
+   *        rateLabel: the `location` string for the session ("home" keeps it in
+   *                the home bucket; anything else is treated as public/away).
    * @param {object} opts  { pricePerKwh, awayPricePerKwh, capacityKwh, minKwh, gapMin }
    * @returns {{ open: (object|null), closed: (object|null) }}
    */
@@ -64,7 +68,9 @@
         open: {
           startedAt: t, lastChargingAt: t,
           startPct: pct, lastPct: pct, peakKw: kw || 0,
-          atHome: tri(cur.atHome)
+          atHome: tri(cur.atHome),
+          rate: num(cur.rate),
+          rateLabel: cur.rateLabel || null
         },
         closed: null
       };
@@ -75,6 +81,10 @@
     if (charging) {
       open.lastChargingAt = t;
       if (open.atHome == null && tri(cur.atHome) != null) open.atHome = cur.atHome;
+      if (open.rate == null && num(cur.rate) != null) {
+        open.rate = num(cur.rate);
+        open.rateLabel = cur.rateLabel || open.rateLabel;
+      }
       if (pct != null) {
         open.lastPct = pct;
         if (open.startPct == null) open.startPct = pct;
@@ -96,7 +106,8 @@
       ? Math.max(0, endPct - open.startPct) : null;
     var kwh = gained != null ? (gained / 100) * cap : null;
     var mins = Math.max(0, Math.round((open.lastChargingAt - open.startedAt) / 60000));
-    var rate = rateFor(open.atHome, opts);
+    var rate = open.rate != null ? open.rate : rateFor(open.atHome, opts);
+    var where = open.rateLabel || (open.atHome === false ? "away" : "home");
     var s = {
       startedAt: open.startedAt,
       endedAt: open.lastChargingAt || t,
@@ -109,9 +120,30 @@
       peakKw: round(open.peakKw, 1),
       avgKw: (kwh != null && mins > 0) ? round(kwh / (mins / 60), 1) : null,
       pricePerKwh: rate || null,
-      location: open.atHome === false ? "away" : "home"
+      location: where,
+      costSource: (kwh != null && rate > 0) ? "rate" : null
     };
     return { open: null, closed: (s.kwh != null && s.kwh >= minKwh) ? s : null };
+  }
+
+  /**
+   * Replace a session's cost with a known figure (from a public-charging
+   * integration, or entered by hand). Keeps the rate estimate as
+   * `estimatedCost`. Returns a new object.
+   * @param {object} session
+   * @param {number} cost
+   * @param {string} source  "external" | "manual"
+   */
+  function applyCost(session, cost, source) {
+    if (!session) return session;
+    var c = num(cost);
+    var out = {};
+    for (var k in session) if (Object.prototype.hasOwnProperty.call(session, k)) out[k] = session[k];
+    if (c == null || c < 0) return out;
+    if (out.estimatedCost == null) out.estimatedCost = out.cost;
+    out.cost = round(c, 2);
+    out.costSource = source || "external";
+    return out;
   }
 
   /**
@@ -124,7 +156,7 @@
     if (!open) return null;
     opts = opts || {};
     var cap = num(opts.capacityKwh) || DEFAULT_CAPACITY_KWH;
-    var price = rateFor(open.atHome, opts);
+    var price = open.rate != null ? open.rate : rateFor(open.atHome, opts);
     var t = num(cur.t) || Date.now();
     var pct = num(cur.batteryPct);
     var lastPct = pct != null ? pct : open.lastPct;
@@ -154,7 +186,9 @@
     };
     (sessions || []).forEach(function (s) {
       if (!s || num(s.endedAt) == null || s.endedAt < cutoff) return;
-      var where = s.location === "away" ? "away" : "home";
+      // "home" (or no location) is the home bucket; any other label — "away"
+      // or a specific public-charger zone name — is the away bucket
+      var where = (s.location == null || s.location === "home") ? "home" : "away";
       [acc.all, acc[where]].forEach(function (a) {
         a.count += 1;
         if (s.kwh != null) a.kwh += s.kwh;
@@ -178,6 +212,7 @@
     update: update,
     progress: progress,
     summary: summary,
+    applyCost: applyCost,
     DEFAULT_CAPACITY_KWH: DEFAULT_CAPACITY_KWH
   };
 });

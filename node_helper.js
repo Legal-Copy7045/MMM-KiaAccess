@@ -356,13 +356,30 @@ module.exports = NodeHelper.create({
       atHome = drange.haversineKm(cLat, cLon, Number(cl.homeLat), Number(cl.homeLon))
         <= (Number(cl.homeRadiusKm) || 0.2);
     }
+    // per-zone rates: first matching zone wins; its rate + label override the
+    // home/away rate for this session
+    let zoneRate = null;
+    let zoneLabel = null;
+    if (cLat != null && cLon != null && Array.isArray(cl.zoneRates)) {
+      for (const z of cl.zoneRates) {
+        if (!z || z.lat == null || z.lon == null || z.pricePerKwh == null) continue;
+        const km = drange.haversineKm(cLat, cLon, Number(z.lat), Number(z.lon));
+        if (km <= (Number(z.radiusKm) || 0.2)) {
+          zoneRate = Number(z.pricePerKwh);
+          zoneLabel = z.name || null;
+          break;
+        }
+      }
+    }
     const sess = sessions.update(s.openSession, {
       t: sample.t,
       charging: truthy(vehicle.ev_battery_is_charging),
       plugged: truthy(vehicle.ev_battery_is_plugged_in),
       batteryPct: numOrNull(vehicle.ev_battery_percentage),
       chargeKw: numOrNull(vehicle.ev_charging_power),
-      atHome: atHome
+      atHome: atHome,
+      rate: zoneRate,
+      rateLabel: zoneLabel
     }, {
       pricePerKwh: cl.pricePerKwh,
       awayPricePerKwh: cl.awayPricePerKwh || null,

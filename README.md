@@ -29,8 +29,9 @@ supports; built and tested on a Kia EV9 (Kia USA).
 - **Range & reachability** — how far you can drive now, which places are in
   reach, arrival battery, and (with a routing key) real drive time + live
   traffic delay for calendar destinations, on an interactive map.
-- **Charging & running costs** — per-session kWh + cost (separate home /
-  public $ rates by geofence), an automatic trip log
+- **Charging & running costs** — per-session kWh + cost: separate home /
+  public $ rates by geofence, or the real amount from a ChargePoint / Tesla
+  integration; plus an automatic trip log
   with cost-per-mile, and a live "cost this charge" figure.
 - **`device_tracker`** for HA maps, zones and presence automations.
 - **Send-out** — MQTT (with HA MQTT-discovery), a per-event webhook, or
@@ -199,8 +200,8 @@ API, not from Kia. So:
      call. Seat levels use `KiaUvoApiUSA` codes; other regions use the raw
      `start_climate` service.
    - `kia_access.send_to_car` (`name` + `address` or `latitude`/`longitude`),
-     `kia_access.set_charge_limits`, and `kia_access.refresh_calendar_destinations`
-     round out the services.
+     `kia_access.set_charge_limits`, `kia_access.refresh_calendar_destinations`
+     and `kia_access.set_charge_cost` round out the services.
    - Commands the car or region doesn't support return a clear error.
 4. **Add the dashboard card.** Edit a dashboard → **+ Add Card** → search “Kia
    Access”, or paste:
@@ -224,7 +225,8 @@ API, not from Kia. So:
 
 The integration's **Configure** dialog holds **Scan interval**, **Poll the car
 directly** (+ **Live wake-up wait**), **Price per kWh** / **Away price per kWh**
-/ **Home-charging zone** / **capacity**, **Range
+/ **Home-charging zone** / **Per-zone charging rates** / **Away charge-cost
+sensor** / **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
 (hours)** / **Static destinations** / **Zones to show on the MagicMirror
 panel**, and **Drive-time provider** / **Routing API key** / **Geocoding API
@@ -582,7 +584,7 @@ depends on its brand, region and powertrain):
 | `visuals.v12History` | `false` | 12V-battery-% sparkline (`visuals.v12HistoryDays`, default 14) — spot vampire drain |
 | `visuals.tripStats` | `false` | distance / consumption / regen from `month_trip_info` |
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map`, and a `reach:true` "how far can I drive" readout (`reachFactor` / `reachReservePct` / `reachRoundTrip` / `pois`) — see [Location](#location--map) |
-| `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180). `awayPricePerKwh` (with `location.homeLat/homeLon` set) costs sessions started away from home at a separate rate; the log marks 🏠 / 📍 and splits the total |
+| `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180). `awayPricePerKwh` (with `location.homeLat/homeLon` set) costs sessions started away from home at a separate rate; `zoneRates` (`[{name,lat,lon,radiusKm,pricePerKwh}]`) gives a per-charger rate checked first; the log marks 🏠 / 📍 and splits the total |
 | `visuals.tripLog` | `{ enabled:false }` | auto-detected drives (odometer delta + SoC drop): distance, **mi/kWh**, and cost per trip + a rolling total (`days` 30, `rows` 4). Uses `chargeCost.pricePerKwh` / `capacityKwh` for the £/kWh maths. HA side: `sensor.<v>_last_trip` + `sensor.<v>_cost_per_mile` |
 | `visuals.drivingTimes` | `{ enabled:false }` | standalone **Driving times** panel — destination, live drive time, `via <roads>`, ETA coloured by traffic delay (`delayStops`), calendar time + arrival battery. `source: "homeassistant"` only; reads `sensor.<v>_range_reach`. `max` 8, `order` "grouped", `zones` (panel-only whitelist / `-exclude`), `showVia`, `showConsumption` |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
@@ -717,6 +719,27 @@ Each is off by default and stacks under the car:
   the home rate. (HA: **Away price per kWh** + **Home-charging zone** options;
   `sensor.<v>_last_charge` gets a `location` attr and `month_home_cost` /
   `month_away_cost`.)
+  **Per-charger rates** — for a different price at each charger, set
+  `chargeCost.zoneRates` to a list of `{ name, lat, lon, radiusKm, pricePerKwh }`
+  (MM) or the **Per-zone charging rates** option — one `zone.work = 0.19` per
+  line (HA). A session that starts inside a listed zone is costed at that rate
+  and filed under the zone's name (first match wins); a line named `home` keeps
+  its sessions in the home bucket, anything else counts as away. Zones fall back
+  to the away rate, then the home rate.
+
+**Real public-charging costs (Home Assistant).** The away $/kWh rate is an
+estimate. To use what you actually paid:
+
+- **Auto** — set **Configure → Away charge-cost sensor** to any sensor whose
+  value is the cost of your latest public session (a **ChargePoint** or
+  **Tesla** HA integration exposes one). When an away session ends and that
+  sensor reported a figure within the session's window (+ **Away cost grace**,
+  90 min, for a bill that posts late), it becomes the session's `cost` — the
+  rate estimate is kept as `estimated_cost`, and `cost_source` reads
+  `external`. Nothing installed for that network? Add a `template` sensor.
+- **By hand** — `kia_access.set_charge_cost` with `cost:` (and optional
+  `started_at:` from `sensor.<v>_last_charge` → `started_at_ms`; omit for the
+  most recent). `cost_source` becomes `manual`.
 
 A **preconditioning schedule** is shown automatically whenever one is set on the
 car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 21°".

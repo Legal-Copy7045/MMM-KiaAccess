@@ -82,12 +82,32 @@ for (const c of commands) {
     yaml += indentSelector(sel, "        ");
   }
 }
-// hand-written, non-command service (registered in __init__.py)
+// hand-written, non-command services (registered in __init__.py)
 yaml +=
   "\nrefresh_calendar_destinations:\n" +
   '  name: "Refresh calendar destinations"\n' +
   '  description: "Re-read the configured calendars now and geocode any new event locations for the reachable-destinations list / range map."\n' +
   "  fields:\n" +
+  "    entry_id:\n" +
+  "      name: Account\n" +
+  "      description: Config entry id (only needed with multiple accounts).\n" +
+  "      required: false\n" +
+  "      selector:\n        config_entry:\n          integration: kia_access\n";
+yaml +=
+  "\nset_charge_cost:\n" +
+  '  name: "Set charge cost"\n' +
+  '  description: "Override the logged cost of a charge session with a known figure (a public-charging receipt)."\n' +
+  "  fields:\n" +
+  "    cost:\n" +
+  "      name: Cost\n" +
+  "      description: The actual amount paid.\n" +
+  "      required: true\n" +
+  "      selector:\n        number:\n          min: 0\n          max: 1000\n          step: 0.01\n          mode: box\n" +
+  "    started_at:\n" +
+  "      name: Session start (ms)\n" +
+  '      description: "startedAt of the session to change (from sensor.<v>_last_charge attributes). Omit for the most recent session."\n' +
+  "      required: false\n" +
+  "      selector:\n        number:\n          mode: box\n" +
   "    entry_id:\n" +
   "      name: Account\n" +
   "      description: Config entry id (only needed with multiple accounts).\n" +

@@ -291,3 +291,32 @@ refresh_calendar_destinations:
       selector:
         config_entry:
           integration: kia_access
+
+set_charge_cost:
+  name: "Set charge cost"
+  description: "Override the logged cost of a charge session with a known figure (a public-charging receipt)."
+  fields:
+    cost:
+      name: Cost
+      description: The actual amount paid.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 0.01
+          mode: box
+    started_at:
+      name: Session start (ms)
+      description: "startedAt of the session to change (from sensor.<v>_last_charge attributes). Omit for the most recent session."
+      required: false
+      selector:
+        number:
+          mode: box
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access

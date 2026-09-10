@@ -88,6 +88,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             for spec in COMMANDS:
                 hass.services.async_remove(DOMAIN, spec["key"])
             hass.services.async_remove(DOMAIN, "refresh_calendar_destinations")
+            hass.services.async_remove(DOMAIN, "set_charge_cost")
     return unload_ok
 
 
@@ -183,4 +184,24 @@ def _register_services(hass: HomeAssistant) -> None:
         "refresh_calendar_destinations",
         _refresh_calendar,
         schema=vol.Schema({vol.Optional("entry_id"): cv.string}),
+    )
+
+    async def _set_charge_cost(call: ServiceCall) -> None:
+        coordinator = _coordinator_for(hass, call)
+        try:
+            await coordinator.set_charge_cost(
+                float(call.data["cost"]), call.data.get("started_at")
+            )
+        except (ValueError, KeyError) as err:
+            raise HomeAssistantError(f"Kia Access set_charge_cost: {err}") from err
+
+    hass.services.async_register(
+        DOMAIN,
+        "set_charge_cost",
+        _set_charge_cost,
+        schema=vol.Schema({
+            vol.Required("cost"): vol.Coerce(float),
+            vol.Optional("started_at"): vol.Coerce(float),
+            vol.Optional("entry_id"): cv.string,
+        }),
     )
