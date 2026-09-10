@@ -68,15 +68,26 @@ def bearing_deg(lat1, lon1, lat2, lon2):
     return (math.atan2(y, x) / D2R + 360) % 360
 
 
-def poi_status(lat, lon, pois, reach_km):
-    """Which saved places are in reach, nearest first."""
+def poi_status(lat, lon, pois, reach_km, trip=None):
+    """Which saved places are in reach, nearest first.
+
+    trip {batteryPct, rangeKm, roadFactor} also estimates arrival SoC.
+    """
     if _num(lat) is None or _num(lon) is None or not isinstance(pois, list):
         return []
+    trip = trip or {}
+    pct = _num(trip.get("batteryPct"))
+    rng = _num(trip.get("rangeKm"))
+    road = _num(trip.get("roadFactor")) or 1.3
+    can_arrive = pct is not None and rng is not None and rng > 0
     out = []
     for p in pois:
         if not p or _num(p.get("lat")) is None or _num(p.get("lon")) is None:
             continue
         km = haversine_km(lat, lon, float(p["lat"]), float(p["lon"]))
+        arrival_pct = (
+            round(max(0, pct * (1 - (km * road) / rng))) if can_arrive else None
+        )
         out.append(
             {
                 "name": p.get("name") or "",
@@ -84,6 +95,7 @@ def poi_status(lat, lon, pois, reach_km):
                 "reachable": reach_km is not None and km <= reach_km,
                 "marginKm": (reach_km - km) if reach_km is not None else None,
                 "bearing": bearing_deg(lat, lon, float(p["lat"]), float(p["lon"])),
+                "arrivalPct": arrival_pct,
             }
         )
     out.sort(key=lambda x: x["km"])
@@ -107,12 +119,17 @@ def summary(car_lat, car_lon, range_km, pois=None, o=None):
     rnd = reach(range_km, {**o, "roundTrip": True})
     rt = bool(_opt(o, "roundTrip"))
     active = rnd if rt else one
+    trip = {
+        "batteryPct": o.get("batteryPct"),
+        "rangeKm": range_km,
+        "roadFactor": o.get("roadFactor"),
+    }
     return {
         "roundTrip": rt,
         "oneWayKm": one,
         "roundTripKm": rnd,
         "reachKm": active,
-        "pois": poi_status(car_lat, car_lon, pois or [], active),
+        "pois": poi_status(car_lat, car_lon, pois or [], active, trip),
         "circle": circle_ring(car_lat, car_lon, active)
         if _num(car_lat) is not None and active
         else None,

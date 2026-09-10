@@ -48,6 +48,7 @@ async def async_setup_entry(
     entities.append(KiaAccessRangeReachSensor(coordinator))
     entities.append(KiaAccessLastTripSensor(coordinator))
     entities.append(KiaAccessCostPerMileSensor(coordinator))
+    entities.append(KiaAccessParkedSensor(coordinator))
     entities += [
         KiaAccessSeatSensor(coordinator, key, name) for key, name in _SEATS.items()
     ]
@@ -176,6 +177,7 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
                     "margin_km": round(p["marginKm"], 1)
                     if p["marginKm"] is not None
                     else None,
+                    "arrival_pct": p.get("arrivalPct"),
                 }
                 for p in r.get("pois", [])
             ],
@@ -449,3 +451,34 @@ class KiaAccessCostPerMileSensor(KiaAccessEntity, SensorEntity):
             "miles_30d": log["last_30_days"].get("distanceMi"),
             "cost_30d": log["last_30_days"].get("cost"),
         }
+
+
+class KiaAccessParkedSensor(KiaAccessEntity, SensorEntity):
+    """Where the car was last seen parked. State is a short address (or
+    "lat, lon"); attributes carry map deep-links + distance from home."""
+
+    _attr_icon = "mdi:car-brake-parking"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "parked")
+        self._attr_name = "Parked"
+
+    def _p(self) -> dict | None:
+        return self.coordinator.parked_location
+
+    @property
+    def available(self) -> bool:
+        return self._p() is not None
+
+    @property
+    def native_value(self):
+        p = self._p()
+        if not p:
+            return None
+        if p.get("address"):
+            return str(p["address"])[:255]
+        return f"{round(p['latitude'], 5)}, {round(p['longitude'], 5)}"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self._p() or {}
