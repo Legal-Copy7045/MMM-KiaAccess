@@ -80,6 +80,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._route_status: dict = {}
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
+        self._ext_pending: dict | None = None  # away session awaiting a public cost
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
         self._trips: list[dict] = []
         self._open_trip: dict | None = None
@@ -93,6 +94,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         data = await self._sessions_store.async_load() or {}
         self._sessions = data.get("sessions") or []
         self._open_session = data.get("open") or None
+        self._ext_pending = data.get("ext_pending") or None
         tdata = await self._trips_store.async_load() or {}
         self._trips = tdata.get("trips") or []
         self._open_trip = tdata.get("open") or None
@@ -172,6 +174,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 return None
 
         opts = self.entry.options
+        zone_rate, zone_label = self._charge_rate()
         res = charge_sessions.update(
             self._open_session,
             {
@@ -181,6 +184,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "batteryPct": _num(v.get("ev_battery_percentage")),
                 "chargeKw": _num(v.get("ev_charging_power")),
                 "atHome": self._charge_at_home(),
+                "rate": zone_rate,
+                "rateLabel": zone_label,
             },
             {
                 "pricePerKwh": opts.get("price_per_kwh") or 0,
@@ -191,21 +196,110 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         changed = res["open"] != self._open_session
         self._open_session = res["open"]
         if res["closed"]:
-            self._sessions.append(res["closed"])
+            s = res["closed"]
+            if s.get("location") not in (None, "home"):
+                ext = self._external_away_cost(s)
+                if ext is not None:
+                    s = charge_sessions.apply_cost(s, ext, "external")
+                elif (opts.get("away_cost_entity") or "").strip():
+                    # cost usually posts a few min after unplug — keep watching
+                    self._ext_pending = {
+                        "startedAt": s["startedAt"],
+                        "until": (time.time() * 1000)
+                        + float(opts.get("away_cost_grace_min") or 90) * 60000,
+                    }
+            self._sessions.append(s)
             keep_after = (time.time() * 1000) - 180 * 864e5
             self._sessions = [
-                s for s in self._sessions if s and s.get("endedAt", 0) >= keep_after
+                x for x in self._sessions if x and x.get("endedAt", 0) >= keep_after
             ][-300:]
             changed = True
             _LOGGER.info(
-                "Kia Access charge session logged: %s kWh%s",
-                res["closed"].get("kwh"),
-                f" / {res['closed'].get('cost')}" if res["closed"].get("cost") else "",
+                "Kia Access charge session logged: %s kWh%s (%s)",
+                s.get("kwh"),
+                f" / {s.get('cost')}" if s.get("cost") else "",
+                s.get("costSource") or "no price",
             )
+
+        # a just-closed away session may still be waiting for its public cost
+        if self._ext_pending and self._resolve_ext_pending():
+            changed = True
+
         if changed:
             await self._sessions_store.async_save(
-                {"sessions": self._sessions, "open": self._open_session}
+                {"sessions": self._sessions, "open": self._open_session,
+                 "ext_pending": self._ext_pending}
             )
+
+    def _external_away_cost(self, session: dict) -> float | None:
+        """Cost from the configured `away_cost_entity`, if it reported a fresh
+        figure within this session's window (start - 10 min .. end + grace)."""
+        eid = (self.entry.options.get("away_cost_entity") or "").strip()
+        if not eid:
+            return None
+        st = self.hass.states.get(eid)
+        if st is None:
+            return None
+        try:
+            cost = float(st.state)
+        except (TypeError, ValueError):
+            return None
+        if cost <= 0:
+            return None
+        grace = float(self.entry.options.get("away_cost_grace_min") or 90) * 60000
+        changed_ms = (st.last_changed or dt_util.utcnow()).timestamp() * 1000
+        started = float(session.get("startedAt") or 0)
+        ended = float(session.get("endedAt") or started)
+        if started - 10 * 60000 <= changed_ms <= ended + grace:
+            return cost
+        return None
+
+    def _resolve_ext_pending(self) -> bool:
+        """Re-check the away-cost entity for a session we're still waiting on."""
+        pend = self._ext_pending
+        if not pend:
+            return False
+        if (time.time() * 1000) > pend.get("until", 0):
+            self._ext_pending = None
+            return False
+        target = next(
+            (x for x in self._sessions if x.get("startedAt") == pend["startedAt"]),
+            None,
+        )
+        if target is None or target.get("costSource") == "external":
+            self._ext_pending = None
+            return False
+        cost = self._external_away_cost(target)
+        if cost is None:
+            return False
+        idx = self._sessions.index(target)
+        self._sessions[idx] = charge_sessions.apply_cost(target, cost, "external")
+        self._ext_pending = None
+        _LOGGER.info("Kia Access: applied public charge cost %s to the %s session",
+                     cost, dt_util.utc_from_timestamp(pend["startedAt"] / 1000).isoformat())
+        return True
+
+    async def set_charge_cost(self, cost: float, started_at: float | None = None) -> None:
+        """Override a logged session's cost by hand (a public-charging receipt).
+        `started_at` picks a session by its startedAt ms; default = most recent."""
+        if not self._sessions:
+            raise ValueError("no charge sessions logged yet")
+        if started_at is not None:
+            target = next(
+                (s for s in self._sessions if s.get("startedAt") == started_at), None
+            )
+            if target is None:
+                raise ValueError(f"no session started at {started_at}")
+        else:
+            target = max(self._sessions, key=lambda s: s.get("endedAt", 0))
+        idx = self._sessions.index(target)
+        self._sessions[idx] = charge_sessions.apply_cost(target, cost, "manual")
+        self._ext_pending = None
+        await self._sessions_store.async_save(
+            {"sessions": self._sessions, "open": self._open_session,
+             "ext_pending": self._ext_pending}
+        )
+        self.async_update_listeners()
 
     async def _update_trips(self) -> None:
         v = self.vehicle
@@ -947,6 +1041,74 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         if km is None:
             return None
         return km * 1000 <= radius_m
+
+    @staticmethod
+    def _parse_charge_rates(raw) -> list[tuple[str, float]]:
+        """Parse the 'charge_rates' option — one `zone.x = 0.NN` per line — into
+        an ordered [(zone_entity_id, rate_per_kwh)] list. First match wins, so
+        order in the box is the priority order."""
+        out: list[tuple[str, float]] = []
+        for line in (raw or "").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for sep in ("=", "|", ":"):
+                if sep in line:
+                    name, _, val = line.partition(sep)
+                    break
+            else:
+                continue
+            zid = name.strip()
+            if "." not in zid:
+                zid = "zone." + zid.lower().replace(" ", "_")
+            try:
+                rate = float(str(val).strip().lstrip("$").strip())
+            except (TypeError, ValueError):
+                continue
+            if zid and rate >= 0:
+                out.append((zid, rate))
+        return out
+
+    def _charge_rate(self) -> tuple[float | None, str | None]:
+        """The per-kWh rate + location label for wherever the car is charging
+        now, from the 'charge_rates' zone list. (None, None) when nothing is
+        configured or the car isn't in any listed zone."""
+        entries = self._parse_charge_rates(self.entry.options.get("charge_rates"))
+        if not entries:
+            return None, None
+
+        def _n(x):
+            try:
+                return None if x in (None, "") else float(x)
+            except (TypeError, ValueError):
+                return None
+
+        car_lat = _n(self.vehicle.get("location_latitude"))
+        car_lon = _n(self.vehicle.get("location_longitude"))
+        if car_lat is None or car_lon is None:
+            return None, None
+
+        home_zid = (self.entry.options.get("home_charge_zone") or "").strip()
+        for zid, rate in entries:
+            st = self.hass.states.get(zid)
+            if st is None:
+                continue
+            try:
+                radius_m = float(st.attributes.get("radius", 100) or 100)
+            except (TypeError, ValueError):
+                radius_m = 100.0
+            km = self._haversine_km(
+                car_lat, car_lon,
+                st.attributes.get("latitude"), st.attributes.get("longitude"),
+            )
+            if km is None or km * 1000 > radius_m:
+                continue
+            is_home = zid == home_zid or (not home_zid and zid == "zone.home")
+            label = "home" if is_home else (
+                st.attributes.get("friendly_name") or zid.split(".", 1)[-1]
+            )
+            return rate, label
+        return None, None
 
     def _emit_alerts(self) -> None:
         """Fire kia_access_alert events on edge-triggered condition changes,

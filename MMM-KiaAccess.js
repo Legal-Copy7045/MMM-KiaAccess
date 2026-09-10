@@ -159,6 +159,10 @@ Module.register("MMM-KiaAccess", {
         awayPricePerKwh: 0, // rate for sessions started away from home (public
                             //   chargers). 0 = use the home rate. Needs
                             //   visuals.location.homeLat/homeLon set.
+        zoneRates: [], // per-charger rates, checked before home/away:
+                       //   [{ name: "Work", lat, lon, radiusKm: 0.1, pricePerKwh: 0.19 }]
+                       //   first match wins; a name of "home" keeps that
+                       //   session in the home bucket.
         currency: "$",
         capacityKwh: null, // usable pack kWh; falls back to ev_battery_capacity then 99.8 (EV9)
         log: false, // a charge-session history widget (kWh + cost per session + monthly total)
@@ -453,6 +457,7 @@ Module.register("MMM-KiaAccess", {
       chargeLog: {
         pricePerKwh: ((c.visuals || {}).chargeCost || {}).pricePerKwh || 0,
         awayPricePerKwh: ((c.visuals || {}).chargeCost || {}).awayPricePerKwh || 0,
+        zoneRates: ((c.visuals || {}).chargeCost || {}).zoneRates || [],
         capacityKwh: ((c.visuals || {}).chargeCost || {}).capacityKwh || null,
         retentionDays: ((c.visuals || {}).chargeCost || {}).logRetentionDays || 180,
         homeLat: ((c.visuals || {}).location || {}).homeLat,
@@ -1233,13 +1238,15 @@ Module.register("MMM-KiaAccess", {
       ? this.sessionLib.summary(list, months * 30)
       : { kwh: null, cost: null };
 
-    const anyAway = list.some((x) => x.location === "away") ||
-      (cc.awayPricePerKwh || 0) > 0;
+    const anyAway = list.some((x) => x.location != null && x.location !== "home") ||
+      (cc.awayPricePerKwh || 0) > 0 ||
+      (Array.isArray(cc.zoneRates) && cc.zoneRates.length > 0);
 
     const el = document.createElement("div");
     el.className = "kiaaccess-batt-detail";
     const rows = list.slice(0, cc.logRows || 4).map((x) => {
-      const mark = anyAway ? (x.location === "away" ? "📍 " : "🏠 ") : "";
+      const away = x.location != null && x.location !== "home";
+      const mark = anyAway ? (away ? "📍 " : "🏠 ") : "";
       return '<div><span class="kiaaccess-bd-label">' + mark +
         this.escape(this.agoText(new Date(x.endedAt))) +
         '</span><span class="kiaaccess-bd-value">' + this.escape(val(x)) + "</span></div>";

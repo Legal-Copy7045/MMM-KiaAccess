@@ -136,4 +136,51 @@ assert.strictEqual(ms.home.kwh, 40);
 assert.strictEqual(ms.away.count, 1);
 assert.strictEqual(ms.away.cost, 22);
 
+// --- per-zone rate override (cur.rate / cur.rateLabel) ---
+open = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 50,
+  atHome: false, rate: 0.31, rateLabel: "Work" }, haOpts).open;
+assert.strictEqual(open.rate, 0.31);
+r = S.update(open, { t: t0 + 30 * MIN, charging: false, plugged: false, batteryPct: 60 }, haOpts);
+assert.strictEqual(r.closed.location, "Work");
+assert.strictEqual(r.closed.cost, 12.4); // 40 * 0.31, not the 0.55 away rate
+assert.strictEqual(r.closed.pricePerKwh, 0.31);
+
+// a rate labelled "home" keeps the session in the home bucket
+open = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 7,
+  rate: 0.12, rateLabel: "home" }, haOpts).open;
+r = S.update(open, { t: t0 + 30 * MIN, charging: false, plugged: false, batteryPct: 60 }, haOpts);
+assert.strictEqual(r.closed.location, "home");
+assert.strictEqual(r.closed.cost, 4.8); // 40 * 0.12
+
+// rate learned on a later sample when the first was unknown
+open = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 7 }, haOpts).open;
+open = S.update(open, { t: t0 + 5 * MIN, charging: true, plugged: true, batteryPct: 25, chargeKw: 7,
+  rate: 0.4, rateLabel: "Depot" }, haOpts).open;
+assert.strictEqual(open.rate, 0.4);
+assert.strictEqual(open.rateLabel, "Depot");
+
+// summary files a zone-named session under away
+const zoned = S.summary([
+  { endedAt: Date.now() - 1 * 864e5, kwh: 40, cost: 12.4, location: "Work" },
+  { endedAt: Date.now() - 2 * 864e5, kwh: 30, cost: 5.55, location: "home" }
+], 30);
+assert.strictEqual(zoned.away.count, 1);
+assert.strictEqual(zoned.away.cost, 12.4);
+assert.strictEqual(zoned.home.count, 1);
+
+// --- applyCost: adopt a real / manual figure ---
+const est = { startedAt: 1, kwh: 30, cost: 16.5, costSource: "rate", location: "away" };
+const real = S.applyCost(est, 24.99, "external");
+assert.strictEqual(real.cost, 24.99);
+assert.strictEqual(real.costSource, "external");
+assert.strictEqual(real.estimatedCost, 16.5, "rate estimate kept");
+assert.strictEqual(est.cost, 16.5, "original untouched");
+// second override keeps the first estimate, not the override
+const real2 = S.applyCost(real, 20, "manual");
+assert.strictEqual(real2.estimatedCost, 16.5);
+assert.strictEqual(real2.cost, 20);
+// junk cost -> unchanged cost, still copied
+assert.strictEqual(S.applyCost(est, "x", "external").cost, 16.5);
+assert.strictEqual(S.applyCost(null, 5, "external"), null);
+
 console.log("all sessions tests passed");
