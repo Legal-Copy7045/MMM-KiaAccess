@@ -113,6 +113,7 @@ async function attachRangeReach(base, token, payload, summaryEntity, ha) {
       entity: id,
       oneWayKm: a.one_way_km != null ? a.one_way_km : null,
       driveTimeSource: a.drive_time_source || "estimate",
+      debug: a.driving_times_debug || null,
       pois: Array.isArray(a.pois) ? a.pois : []
     };
   } catch (e) {

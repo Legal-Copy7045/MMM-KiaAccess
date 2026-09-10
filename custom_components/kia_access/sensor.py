@@ -161,7 +161,8 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
     # POI coordinates + diagnostic blobs ride in the attributes — keep them
     # out of the recorder / history
     _unrecorded_attributes = frozenset(
-        {"pois", "in_reach", "calendar_status", "drive_time_status"}
+        {"pois", "in_reach", "calendar_status", "drive_time_status",
+         "driving_times_debug"}
     )
 
     def __init__(self, coordinator) -> None:
@@ -185,10 +186,30 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
         r = self._reach() or {}
         cal_names = {p["name"] for p in getattr(self.coordinator, "_cal_pois", [])}
         static_names = {p["name"] for p in getattr(self.coordinator, "_static_pois", [])}
+        opts = self.coordinator.entry.options
+        cs = getattr(self.coordinator, "_cal_status", {})
+        rs = getattr(self.coordinator, "_route_status", {})
+        pois_out = r.get("pois", [])
+        debug = {
+            "provider": opts.get("drive_time_provider") or "estimate",
+            "routing_key_set": bool(opts.get("routing_api_key")),
+            "geocoding_key_set": bool(opts.get("geocoding_api_key")),
+            "static_configured": bool((opts.get("static_destinations") or "").strip()),
+            "static_geocoded": cs.get("static_geocoded", 0),
+            "calendars_configured": bool((opts.get("calendar_entities") or "").strip()),
+            "calendar_geocoded": cs.get("geocoded", 0),
+            "routes_enabled": rs.get("routes_enabled"),
+            "with_roads": rs.get("with_roads", 0),
+            "routed_pois": sum(1 for p in pois_out if p.get("routed")),
+            "errors": (cs.get("geocode_errors", []) or [])[:3]
+            + ([rs["error"]] if rs.get("error") else [])
+            + ([rs["route_error"]] if rs.get("route_error") else []),
+        }
         return {
-            "calendar_status": getattr(self.coordinator, "_cal_status", {}),
+            "calendar_status": cs,
             "drive_time_source": r.get("drive_time_source", "estimate"),
-            "drive_time_status": getattr(self.coordinator, "_route_status", {}),
+            "drive_time_status": rs,
+            "driving_times_debug": debug,
             "one_way_km": r.get("oneWayKm"),
             "one_way_mi": round(r["oneWayKm"] * 0.621371, 1)
             if r.get("oneWayKm") is not None else None,
