@@ -180,9 +180,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "plugged": v.get("ev_battery_is_plugged_in"),
                 "batteryPct": _num(v.get("ev_battery_percentage")),
                 "chargeKw": _num(v.get("ev_charging_power")),
+                "atHome": self._charge_at_home(),
             },
             {
                 "pricePerKwh": opts.get("price_per_kwh") or 0,
+                "awayPricePerKwh": opts.get("away_price_per_kwh"),
                 "capacityKwh": opts.get("capacity_kwh") or _num(v.get("ev_battery_capacity")),
             },
         )
@@ -911,6 +913,37 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         lat = state.get("locationLat")
         lon = state.get("locationLon")
         km = self._haversine_km(lat, lon, hlat, hlon)
+        if km is None:
+            return None
+        return km * 1000 <= radius_m
+
+    def _charge_at_home(self) -> bool | None:
+        """Is the car in the 'home charging' zone right now? Used to pick the
+        home vs away per-kWh rate. None (= use the home rate) when no zone is
+        configured, the zone is missing, or there's no GPS fix."""
+        zid = (self.entry.options.get("home_charge_zone") or "").strip()
+        if not zid:
+            return None
+        st = self.hass.states.get(zid)
+        if st is None:
+            return None
+        try:
+            radius_m = float(st.attributes.get("radius", 100) or 100)
+        except (TypeError, ValueError):
+            radius_m = 100.0
+
+        def _n(x):
+            try:
+                return None if x in (None, "") else float(x)
+            except (TypeError, ValueError):
+                return None
+
+        km = self._haversine_km(
+            _n(self.vehicle.get("location_latitude")),
+            _n(self.vehicle.get("location_longitude")),
+            st.attributes.get("latitude"),
+            st.attributes.get("longitude"),
+        )
         if km is None:
             return None
         return km * 1000 <= radius_m

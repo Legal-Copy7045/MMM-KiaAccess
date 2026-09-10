@@ -347,14 +347,25 @@ module.exports = NodeHelper.create({
 
     // ---- charge-session log ----
     const cl = config.chargeLog || {};
+    // home vs away: is the car within homeRadiusKm of homeLat/homeLon? null
+    // (= home rate) when no home point is set or there's no GPS fix
+    let atHome = null;
+    const cLat = numOrNull(vehicle.location_latitude);
+    const cLon = numOrNull(vehicle.location_longitude);
+    if (cl.homeLat != null && cl.homeLon != null && cLat != null && cLon != null) {
+      atHome = drange.haversineKm(cLat, cLon, Number(cl.homeLat), Number(cl.homeLon))
+        <= (Number(cl.homeRadiusKm) || 0.2);
+    }
     const sess = sessions.update(s.openSession, {
       t: sample.t,
       charging: truthy(vehicle.ev_battery_is_charging),
       plugged: truthy(vehicle.ev_battery_is_plugged_in),
       batteryPct: numOrNull(vehicle.ev_battery_percentage),
-      chargeKw: numOrNull(vehicle.ev_charging_power)
+      chargeKw: numOrNull(vehicle.ev_charging_power),
+      atHome: atHome
     }, {
       pricePerKwh: cl.pricePerKwh,
+      awayPricePerKwh: cl.awayPricePerKwh || null,
       capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity)
     });
     let sessChanged = JSON.stringify(sess.open) !== JSON.stringify(s.openSession);

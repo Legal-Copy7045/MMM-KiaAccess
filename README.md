@@ -29,7 +29,8 @@ supports; built and tested on a Kia EV9 (Kia USA).
 - **Range & reachability** — how far you can drive now, which places are in
   reach, arrival battery, and (with a routing key) real drive time + live
   traffic delay for calendar destinations, on an interactive map.
-- **Charging & running costs** — per-session kWh + cost, an automatic trip log
+- **Charging & running costs** — per-session kWh + cost (separate home /
+  public $ rates by geofence), an automatic trip log
   with cost-per-mile, and a live "cost this charge" figure.
 - **`device_tracker`** for HA maps, zones and presence automations.
 - **Send-out** — MQTT (with HA MQTT-discovery), a per-event webhook, or
@@ -222,7 +223,8 @@ API, not from Kia. So:
    script or automation instead.
 
 The integration's **Configure** dialog holds **Scan interval**, **Poll the car
-directly** (+ **Live wake-up wait**), **Price per kWh** / **capacity**, **Range
+directly** (+ **Live wake-up wait**), **Price per kWh** / **Away price per kWh**
+/ **Home-charging zone** / **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
 (hours)** / **Static destinations** / **Zones to show on the MagicMirror
 panel**, and **Drive-time provider** / **Routing API key** / **Geocoding API
@@ -580,7 +582,7 @@ depends on its brand, region and powertrain):
 | `visuals.v12History` | `false` | 12V-battery-% sparkline (`visuals.v12HistoryDays`, default 14) — spot vampire drain |
 | `visuals.tripStats` | `false` | distance / consumption / regen from `month_trip_info` |
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map`, and a `reach:true` "how far can I drive" readout (`reachFactor` / `reachReservePct` / `reachRoundTrip` / `pois`) — see [Location](#location--map) |
-| `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180) |
+| `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180). `awayPricePerKwh` (with `location.homeLat/homeLon` set) costs sessions started away from home at a separate rate; the log marks 🏠 / 📍 and splits the total |
 | `visuals.tripLog` | `{ enabled:false }` | auto-detected drives (odometer delta + SoC drop): distance, **mi/kWh**, and cost per trip + a rolling total (`days` 30, `rows` 4). Uses `chargeCost.pricePerKwh` / `capacityKwh` for the £/kWh maths. HA side: `sensor.<v>_last_trip` + `sensor.<v>_cost_per_mile` |
 | `visuals.drivingTimes` | `{ enabled:false }` | standalone **Driving times** panel — destination, live drive time, `via <roads>`, ETA coloured by traffic delay (`delayStops`), calendar time + arrival battery. `source: "homeassistant"` only; reads `sensor.<v>_range_reach`. `max` 8, `order` "grouped", `zones` (panel-only whitelist / `-exclude`), `showVia`, `showConsumption` |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
@@ -705,9 +707,16 @@ Each is off by default and stacks under the car:
   `enabled: true` adds the one-line "Est. cost to 80%: $6.40" while charging.
   `log: true` adds a **charge-session history** widget — the last `logRows` (4)
   sessions with kWh + cost, and a rolling `logMonths` (3) total. Sessions are
-  detected from plug-in → unplug, stored on disk (`logRetentionDays`, 180), and
-  cost each session at `pricePerKwh`. `capacityKwh` falls back to
-  `ev_battery_capacity`, then 99.8 (EV9).
+  detected from plug-in → unplug, stored on disk (`logRetentionDays`, 180).
+  `capacityKwh` falls back to `ev_battery_capacity`, then 99.8 (EV9).
+  **Home vs public rates** — set `awayPricePerKwh` and, in
+  `visuals.location`, `homeLat` / `homeLon` (+ optional `homeRadiusKm`, 0.2):
+  a session that *starts* outside that radius is costed at the away rate and
+  marked 📍 in the log (home sessions 🏠), and the monthly total splits into
+  home / away lines. Leave `homeLat` / `homeLon` unset and every session uses
+  the home rate. (HA: **Away price per kWh** + **Home-charging zone** options;
+  `sensor.<v>_last_charge` gets a `location` attr and `month_home_cost` /
+  `month_away_cost`.)
 
 A **preconditioning schedule** is shown automatically whenever one is set on the
 car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 21°".
