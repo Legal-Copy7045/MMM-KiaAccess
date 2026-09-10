@@ -81,6 +81,17 @@ for (const c of commands) {
     yaml += indentSelector(sel, "        ");
   }
 }
+// hand-written, non-command service (registered in __init__.py)
+yaml +=
+  "\nrefresh_calendar_destinations:\n" +
+  '  name: "Refresh calendar destinations"\n' +
+  '  description: "Re-read the configured calendars now and geocode any new event locations for the reachable-destinations list / range map."\n' +
+  "  fields:\n" +
+  "    entry_id:\n" +
+  "      name: Account\n" +
+  "      description: Config entry id (only needed with multiple accounts).\n" +
+  "      required: false\n" +
+  "      selector:\n        config_entry:\n          integration: kia_access\n";
 outputs[path.join(HA, "services.yaml")] = yaml;
 
 function indentSelector(obj, pad) {

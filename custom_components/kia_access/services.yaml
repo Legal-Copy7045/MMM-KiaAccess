@@ -279,3 +279,15 @@ send_to_car:
           max: 180
           step: 0.000001
           mode: "box"
+
+refresh_calendar_destinations:
+  name: "Refresh calendar destinations"
+  description: "Re-read the configured calendars now and geocode any new event locations for the reachable-destinations list / range map."
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
