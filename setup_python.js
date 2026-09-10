@@ -196,7 +196,7 @@ async function fetchStandalone() {
     fs.rmSync(VENV, { recursive: true, force: true });
     console.log("[MMM-KiaAccess] Creating venv ...");
     if (!run(best.bin, ["-m", "venv", VENV])) {
-      console.log("[MMM-KiaAccess] venv creation failed. Debian/RPi OS: `sudo apt install python3-venv`.");
+      console.log("[MMM-KiaAccess] venv creation failed. Install your OS's python3-venv package (Debian/Ubuntu: `sudo apt install python3-venv`).");
       process.exit(1);
     }
   }

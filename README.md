@@ -280,31 +280,32 @@ Mode B needs two more things: a modern **Python** (auto-provisioned, below) and 
 
 #### Python version (mode B)
 
-`hyundai_kia_connect_api` now requires **Python ≥ 3.12** (`python_requires`).
-Older Python can only install ancient releases that **can no longer log in to
-Kia USA**. Raspberry Pi OS *Bullseye* ships Python 3.9 — too old.
+`hyundai_kia_connect_api` requires **Python ≥ 3.12**. Older Python can only
+install ancient releases that no longer log in to Kia. Many current OS
+distributions still ship 3.11 or older by default, so `setup_python.js` (run
+automatically by `npm install`) sorts it out:
 
-`setup_python.js` (run automatically by `npm install`) handles this:
-
-1. Looks for the newest `python3.x` ≥ 3.12 — system, `pyenv`, or a previous download.
-2. If none, on Linux it downloads a **self-contained CPython 3.12** from
+1. Uses the system `python3` if it's ≥ 3.12 (or an earlier download, or `pyenv`).
+2. Otherwise, **on Linux**, downloads a self-contained CPython 3.12 for your CPU
+   architecture from
    [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-   into `./python-standalone/` (no compiler, ~2 min; arm64 / armv7-hf / x86_64).
-3. Builds `./venv` from whichever it found and installs the library.
-
-So on a Pi 3.9 box you normally just run `npm install` and it sorts itself out.
+   into `./python-standalone/` — no compiler, ~2 min. On macOS / Windows without
+   a new-enough Python it stops with instructions instead of downloading.
+3. Builds `./venv` and installs the library.
 
 | Situation | Result |
 |---|---|
-| system Python ≥ 3.12 | latest library, used directly |
-| system Python ≤ 3.11 (Linux) | standalone CPython 3.12 downloaded automatically |
-| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`; install Python ≥ 3.12 yourself, then re-run |
+| system Python ≥ 3.12 | used directly |
+| Linux, system Python ≤ 3.11 | standalone CPython 3.12 downloaded automatically |
+| macOS / Windows, system Python ≤ 3.11 | install Python ≥ 3.12 yourself, then re-run `npm install` |
+| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`, install Python ≥ 3.12 yourself, re-run |
 
 Overrides (env vars): `MMM_KIA_PYTHON=/abs/path/python3` to force an interpreter,
-`MMM_KIA_PBS_RELEASE=<tag>` to pin a different standalone release.
-Or set `pythonBin` in the module config to an absolute path.
+`MMM_KIA_PBS_RELEASE=<tag>` to pin a different standalone release. Or set
+`pythonBin` in the module config to an absolute path.
 
-If venv creation fails on Debian/RPi OS: `sudo apt install python3-venv`.
+If venv creation fails, install your OS's `python3-venv` package (on
+Debian / Ubuntu: `sudo apt install python3-venv`).
 
 #### One-time OTP enrollment (mode B, Kia USA / Canada)
 
@@ -1080,7 +1081,7 @@ exporter: {
     org: "home", bucket: "vehicles", token: "…",
     measurement: "kia_vehicle"
   },
-  prometheus: { enabled: true, port: 9110 }   // then scrape http://<pi>:9110/metrics
+  prometheus: { enabled: true, port: 9110 }   // then scrape http://<host>:9110/metrics
 }
 ```
 
