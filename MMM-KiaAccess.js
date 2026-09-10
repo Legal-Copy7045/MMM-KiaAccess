@@ -526,7 +526,8 @@ Module.register("MMM-KiaAccess", {
       const sig = JSON.stringify(data.payload.vehicle || {}) +
         "|" + this.stale + "|" + (this.errorMessage || "") + "|" + (this.staleNote || "") +
         "|" + (((this.config.visuals || {}).drivingTimes || {}).enabled
-          ? JSON.stringify((data.payload.rangeReach || {}).pois || []) : "");
+          ? JSON.stringify((data.payload.rangeReach || {}).pois || []) +
+            "|" + ((data.payload.rangeReach || {}).mmZones || "") : "");
       if (sig !== this._lastSig) {
         this._lastSig = sig;
         this.rebuildView();
@@ -1350,8 +1351,13 @@ Module.register("MMM-KiaAccess", {
     if (!rows.length) return null;
 
     // zone filter (calendar + static always pass). "-Name" excludes; a plain
-    // list is a whitelist. Matches HA's `zone_entities` rule.
-    const zf = (Array.isArray(dt.zones) ? dt.zones : [])
+    // list is a whitelist. HA's `mm_zone_entities` option wins over config;
+    // matches HA's `zone_entities` rule.
+    const haZones = (this.rangeReach && this.rangeReach.mmZones) || "";
+    const zfRaw = haZones.trim()
+      ? haZones.split(/[\n,]/)
+      : (Array.isArray(dt.zones) ? dt.zones : []);
+    const zf = zfRaw
       .map((z) => String(z).trim().toLowerCase().replace(/^zone\./, "").replace(/_/g, " "))
       .filter(Boolean);
     if (zf.length) {

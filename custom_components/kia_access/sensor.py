@@ -220,6 +220,8 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
             "drive_time_source": r.get("drive_time_source", "estimate"),
             "drive_time_status": rs,
             "driving_times_debug": debug,
+            # the MM reads this to filter its own panel (HA keeps every zone)
+            "mm_zone_filter": (opts.get("mm_zone_entities") or "").strip(),
             "one_way_km": r.get("oneWayKm"),
             "one_way_mi": round(r["oneWayKm"] * 0.621371, 1)
             if r.get("oneWayKm") is not None else None,

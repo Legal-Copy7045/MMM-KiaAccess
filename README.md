@@ -192,9 +192,9 @@ Lovelace card. No MagicMirror required.
 The integration's **Configure** dialog holds **Scan interval**, **Poll the car
 directly** (+ **Live wake-up wait**), **Price per kWh** / **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
-(hours)** / **Static destinations** / **Zones to show**, and **Drive-time
-provider** / **Routing API key** / **Geocoding API key** / **Per-destination
-routes**. Leave **Poll the
+(hours)** / **Static destinations** / **Zones to show** / **MagicMirror: zones
+to show**, and **Drive-time provider** / **Routing API key** / **Geocoding API
+key** / **Per-destination routes**. Leave **Poll the
 car directly** off (the default) to only ever read Kia's cached data and never
 wake the car — with it off, every update sends both `refresh: false` **and**
 `forceRefreshTimeout: 0`, either of which alone stops the wake (see the note at
@@ -693,8 +693,15 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
   ```
 
   `drivingTimes.zones` filters **only this panel** — Home Assistant still gets
-  every US zone (dashboard, `sensor.<v>_range_reach`). Use the integration's
-  **Zones to show** option instead if you want to narrow it everywhere.
+  every US zone (dashboard, `sensor.<v>_range_reach`). Three ways to control it,
+  in order of precedence:
+
+  1. **`MagicMirror: zones to show`** — an integration **Configure** option
+     that filters the mirror panel only (dashboard keeps every zone). Set it
+     here and you never touch `config.js`.
+  2. `drivingTimes.zones` in `config.js` (this list).
+  3. The integration's **Zones to show** option — narrows *everything*
+     (dashboard + sensor + mirror).
 
   The **destinations** come from Home Assistant: your US `zone.*`, the
   integration's **Static destinations** (`Configure` → one `Name | address`
