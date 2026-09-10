@@ -153,6 +153,45 @@
   opacity: 0.9;
 }
 
+/* "Driving times" panel */
+.kiaaccess-drivetimes {
+  text-align: left;
+  margin-top: 9px;
+}
+.kiaaccess-dt-header {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: calc(11px * var(--kia-scale, 1));
+  opacity: 0.55;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  padding-bottom: 3px;
+  margin-bottom: 5px;
+}
+.kiaaccess-dt-row {
+  white-space: normal;
+  margin: 5px 0;
+}
+.kiaaccess-dt-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.kiaaccess-dt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kiaaccess-dt-time {
+  font-weight: 700;
+  flex: none;
+}
+.kiaaccess-dt-sub {
+  opacity: 0.6;
+  font-size: calc(11.5px * var(--kia-scale, 1));
+  line-height: 1.35;
+}
+
 .kiaaccess-footer {
   margin-top: 4px;
   text-align: right;

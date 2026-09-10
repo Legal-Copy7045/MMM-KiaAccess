@@ -67,6 +67,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._geo_cache: dict = {}
         self._geo_store = Store(hass, 1, f"{DOMAIN}_geocache_{entry.entry_id}")
         self._cal_pois: list[dict] = []
+        self._static_pois: list[dict] = []
         self._cal_pois_at: float = 0.0
         self._cal_status: dict = {}
         # real drive-times from a routing provider, keyed by _poi_key(lat, lon)
@@ -292,13 +293,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         req = drive_routing.geocode_request(provider, address, key)
         if not req:
             raise RuntimeError("no geocode request")
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
-        session = async_get_clientsession(self.hass)
-        async with asyncio.timeout(15), session.get(req["url"]) as resp:
-            resp.raise_for_status()
-            data = await resp.json(content_type=None)
-        hit = drive_routing.parse_geocode(provider, data)
+        hit = drive_routing.parse_geocode(provider, await self._http_json(req))
         if not hit:
             raise RuntimeError("no match")
         return hit["lat"], hit["lon"]
@@ -369,6 +364,37 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         )
         return [lat, lon]
 
+    @staticmethod
+    def _parse_static_destinations(raw: str) -> list[tuple[str, str]]:
+        """'Nana | 5 Foo St\\nAirport = 700 Bar Rd' -> [(name, address), ...]"""
+        out = []
+        for line in (raw or "").replace(";", "\n").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            for sep in ("|", "="):
+                if sep in line:
+                    name, addr = line.split(sep, 1)
+                    out.append((name.strip(), addr.strip()))
+                    break
+            else:
+                out.append((line.split(",")[0].strip(), line))
+        return [(n, a) for n, a in out if a]
+
+    async def _refresh_static_pois(self) -> None:
+        """Geocode the fixed 'static_destinations' addresses (cached)."""
+        pairs = self._parse_static_destinations(
+            self.entry.options.get("static_destinations") or ""
+        )
+        pois: list[dict] = []
+        for name, addr in pairs[:12]:
+            ll = await self._geocode_cached(addr)
+            if ll:
+                pois.append({"name": name[:40], "lat": ll[0], "lon": ll[1]})
+        self._static_pois = pois
+        if pairs:
+            self._cal_status["static"] = [p["name"] for p in pois]
+
     async def async_refresh_calendar_pois(self) -> None:
         """Pull locations off the configured calendars for the next N hours,
         geocode them (US only), and cache as POIs for the range-reach readout."""
@@ -376,12 +402,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         cals = [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
         self._cal_status = {"calendars": cals, "events": 0, "with_location": 0,
                             "geocoded": 0, "errors": [], "seen": []}
+        await self._refresh_static_pois()
         if not cals:
             self._cal_pois = []
-            self._cal_status["errors"].append(
-                "no calendars configured (Settings -> Devices -> Kia Access -> "
-                "Configure -> 'Calendar entities for trip destinations')"
-            )
+            if not self._static_pois:
+                self._cal_status["errors"].append(
+                    "no calendars or static_destinations configured (Settings -> "
+                    "Devices -> Kia Access -> Configure)"
+                )
             return
         hours = float(self.entry.options.get("calendar_lookahead_hours") or 72)
         start = dt_util.now()
@@ -415,6 +443,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             for ev in events:
                 loc = (ev.get("location") or "").strip()
                 summary = (ev.get("summary") or "Event").strip()
+                when = ev.get("start") or ev.get("start_time") or None
                 if not loc:
                     self._cal_status["seen"].append(
                         {"summary": summary[:40], "location": None, "result": "no location"}
@@ -431,7 +460,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                         {"summary": summary[:40], "location": loc,
                          "result": f"ok -> {round(ll[0], 4)},{round(ll[1], 4)}"}
                     )
-                    pois.append({"name": summary[:40], "lat": ll[0], "lon": ll[1]})
+                    pois.append({"name": summary[:40], "lat": ll[0],
+                                 "lon": ll[1], "when": when})
                 else:
                     self._cal_status["seen"].append(
                         {"summary": summary[:40], "location": loc,
@@ -456,10 +486,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         return f"{round(float(lat), 4)},{round(float(lon), 4)}"
 
     def _reach_pois(self) -> list[dict]:
-        """Zone POIs + geocoded calendar POIs, de-duped by name (zone wins)."""
-        zones = self._zone_pois()
-        znames = {z["name"] for z in zones}
-        return zones + [p for p in self._cal_pois if p["name"] not in znames]
+        """Zone + static + calendar POIs, de-duped by name (earlier list wins)."""
+        out = self._zone_pois() + self._static_pois
+        seen = {p["name"] for p in out}
+        for p in self._cal_pois:
+            if p["name"] not in seen:
+                out.append(p)
+                seen.add(p["name"])
+        return out
 
     @property
     def range_reach(self) -> dict | None:
@@ -492,14 +526,22 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
         # overlay real road distance + drive time where the routing provider
         # gave us a number (straight-line estimate is the fallback)
+        cal_when = {c["name"]: c.get("when") for c in self._cal_pois}
         reach_km = out.get("reachKm")
         for p in out.get("pois") or []:
+            if p["name"] in cal_when and cal_when[p["name"]]:
+                p["when"] = cal_when[p["name"]]
             rt = self._route_out.get(self._poi_key(p["lat"], p["lon"]))
             if not rt:
                 continue
             p["km"] = rt["distanceKm"]
             p["durationMin"] = rt["durationMin"]
             p["routed"] = True
+            if rt.get("typicalMin") is not None:
+                p["typicalMin"] = rt["typicalMin"]
+                p["delayMin"] = rt.get("delayMin")
+            if rt.get("via"):
+                p["via"] = rt["via"]
             if reach_km is not None:
                 p["reachable"] = rt["distanceKm"] <= reach_km
                 p["marginKm"] = reach_km - rt["distanceKm"]
@@ -548,42 +590,81 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         if not moved and time.monotonic() - self._route_at < 600:
             return
 
-        req = drive_routing.matrix_request(
-            provider, {"lat": lat, "lon": lon},
-            [{"lat": p["lat"], "lon": p["lon"]} for p in pois], key,
-            {"traffic": True},
-        )
         self._route_status["targets"] = len(pois)
-        if not req:
-            return
-        try:
-            from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
-            session = async_get_clientsession(self.hass)
-            async with asyncio.timeout(20), session.post(
-                req["url"], data=req["body"], headers=req["headers"],
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.json(content_type=None)
-        except Exception as err:  # noqa: BLE001
-            self._route_status["error"] = str(err)
-            _LOGGER.warning("Kia Access: drive-time matrix (%s) failed: %s", provider, err)
-            return
-
-        rows = drive_routing.parse_matrix(provider, data, len(pois))
+        origin = {"lat": lat, "lon": lon}
         out: dict = {}
-        for p, row in zip(pois, rows):
-            if row:
-                out[self._poi_key(p["lat"], p["lon"])] = row
+
+        # 1) one matrix call for a fast baseline (time + distance for all)
+        req = drive_routing.matrix_request(
+            provider, origin, [{"lat": p["lat"], "lon": p["lon"]} for p in pois],
+            key, {"traffic": True},
+        )
+        if req:
+            try:
+                data = await self._http_json(req)
+                for p, row in zip(
+                    pois, drive_routing.parse_matrix(provider, data, len(pois))
+                ):
+                    if row:
+                        out[self._poi_key(p["lat"], p["lon"])] = dict(row)
+            except Exception as err:  # noqa: BLE001
+                self._route_status["error"] = f"matrix: {err}"
+                _LOGGER.warning("Kia Access: drive-time matrix (%s) failed: %s",
+                                provider, err)
+
+        # 2) per-destination route calls enrich with the road breakdown + the
+        #    free-flow time (for the traffic-delay colouring). TomTom only, and
+        #    only when `drive_time_routes` isn't turned off.
+        do_routes = (
+            provider == "tomtom"
+            and self.entry.options.get("drive_time_routes", True)
+        )
+        n_routed = 0
+        if do_routes:
+            for p in pois:
+                rreq = drive_routing.route_request(
+                    provider, origin, {"lat": p["lat"], "lon": p["lon"]}, key,
+                    {"traffic": True},
+                )
+                if not rreq:
+                    continue
+                try:
+                    rdata = await self._http_json(rreq)
+                    parsed = drive_routing.parse_route(provider, rdata)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("route call failed for %s: %s", p["name"], err)
+                    continue
+                if parsed:
+                    out.setdefault(self._poi_key(p["lat"], p["lon"]), {}).update(parsed)
+                    n_routed += 1
+
         self._route_out = out
         self._route_origin = (lat, lon)
         self._route_at = time.monotonic()
         self._route_status["routed"] = len(out)
+        self._route_status["with_roads"] = n_routed
         self._route_status["at"] = dt_util.utcnow().isoformat()
         _LOGGER.info(
-            "Kia Access drive times (%s): %s/%s destination(s) routed",
-            provider, len(out), len(pois),
+            "Kia Access drive times (%s): %s/%s routed, %s with road detail",
+            provider, len(out), len(pois), n_routed,
         )
+
+    async def _http_json(self, req: dict):
+        """GET/POST a routing request dict and return parsed JSON."""
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        session = async_get_clientsession(self.hass)
+        method = (req.get("method") or "GET").upper()
+        async with asyncio.timeout(20):
+            if method == "POST":
+                ctx = session.post(
+                    req["url"], data=req.get("body"), headers=req.get("headers"),
+                )
+            else:
+                ctx = session.get(req["url"])
+            async with ctx as resp:
+                resp.raise_for_status()
+                return await resp.json(content_type=None)
 
     @staticmethod
     def _clean_address(v) -> str | None:

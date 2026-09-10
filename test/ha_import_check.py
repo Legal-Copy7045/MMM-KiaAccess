@@ -75,6 +75,16 @@ _rm = rt.parse_matrix("geoapify",
                       {"sources_to_targets": [[{"target_index": 0,
                                                 "distance": 1000, "time": 120}]]}, 1)
 assert _rm[0]["durationMin"] == 2 and abs(_rm[0]["distanceKm"] - 1) < 1e-6
+_rt = rt.parse_route("tomtom", {"routes": [{"summary": {
+    "lengthInMeters": 12000, "travelTimeInSeconds": 900,
+    "noTrafficTravelTimeInSeconds": 780}, "guidance": {"instructions": [
+    {"routeOffsetInMeters": 0, "roadNumbers": ["US 1"]},
+    {"routeOffsetInMeters": 12000}]}}]})
+assert _rt["delayMin"] == 2 and _rt["typicalMin"] == 13 and _rt["via"] == "US 1"
+_wl = _sen._when_local
+assert isinstance(_wl("2026-09-11T09:00:00-04:00"), str)
+assert isinstance(_wl("2026-09-11"), str)
+assert _wl(None) is None and _wl("") is None
 
 cf = importlib.import_module(f"{pkg}.config_flow")
 assert hasattr(cf, "KiaAccessConfigFlow")
@@ -131,6 +141,11 @@ assert _in_us(51.5, -0.12) is False       # London
 assert _in_us(None, None) is False
 assert hasattr(co.KiaAccessCoordinator, "async_refresh_calendar_pois")
 assert hasattr(co.KiaAccessCoordinator, "_refresh_drive_times")
+_psd = co.KiaAccessCoordinator._parse_static_destinations
+assert _psd("Nana | 5 Foo St\nAirport = 700 Bar Rd\n\n123 Main St, Town") == [
+    ("Nana", "5 Foo St"), ("Airport", "700 Bar Rd"), ("123 Main St", "123 Main St, Town")
+]
+assert _psd("") == [] and _psd(None) == []
 assert co.KiaAccessCoordinator._poi_key(40.712345, -79.754321) == "40.7123,-79.7543"
 
 # diagnostics must redact the GPS (incl. the combined "location" string) + keys

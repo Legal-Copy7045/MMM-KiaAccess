@@ -192,7 +192,8 @@ Lovelace card. No MagicMirror required.
 The integration's **Configure** dialog holds **Scan interval**, **Poll the car
 directly** (+ **Live wake-up wait**), **Price per kWh** / **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
-(hours)**, and **Drive-time provider** / **Routing API key**. Leave **Poll the
+(hours)** / **Static destinations**, and **Drive-time provider** / **Routing
+API key** / **Per-destination routes**. Leave **Poll the
 car directly** off (the default) to only ever read Kia's cached data and never
 wake the car — with it off, every update sends both `refresh: false` **and**
 `forceRefreshTimeout: 0`, either of which alone stops the wake (see the note at
@@ -533,6 +534,7 @@ depends on its brand, region and powertrain):
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map`, and a `reach:true` "how far can I drive" readout (`reachFactor` / `reachReservePct` / `reachRoundTrip` / `pois`) — see [Location](#location--map) |
 | `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180) |
 | `visuals.tripLog` | `{ enabled:false }` | auto-detected drives (odometer delta + SoC drop): distance, **mi/kWh**, and cost per trip + a rolling total (`days` 30, `rows` 4). Uses `chargeCost.pricePerKwh` / `capacityKwh` for the £/kWh maths. HA side: `sensor.<v>_last_trip` + `sensor.<v>_cost_per_mile` |
+| `visuals.drivingTimes` | `{ enabled:false }` | standalone **Driving times** panel — destination, live drive time, `via <roads>`, ETA coloured by traffic delay (`delayStops`), calendar time + arrival battery. `source: "homeassistant"` only; reads `sensor.<v>_range_reach`. `max` 6, `order` "soonest", `showVia`, `showConsumption` |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |
 | `notifications.enabled` | `false` | emit edge-triggered `KIA_ACCESS_STATE_CHANGED` / `alert` on state changes — see [Notifications](#notifications-state-changes) |
@@ -663,6 +665,37 @@ Each is off by default and stacks under the car:
 A **preconditioning schedule** is shown automatically whenever one is set on the
 car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 21°".
 
+- **`drivingTimes`** — a standalone **Driving times** panel: each destination
+  with its live drive time, the route (`via PA 28 · Greensburg Rd`), an ETA
+  **coloured by traffic delay**, the calendar event time, and the battery
+  you'd **arrive with**. Needs `source: "homeassistant"` and the integration's
+  **Calendar entities** / **Static destinations** / **Drive-time provider**
+  (TomTom) set up — the mirror just renders `sensor.<v>_range_reach`. Without
+  routed data it falls back to a straight-line estimate over `location.pois`.
+
+  ```js
+  drivingTimes: {
+    enabled: true,
+    header: "Driving times",
+    max: 6,
+    order: "soonest",      // calendar time, then distance | "nearest"
+    showVia: true,
+    showConsumption: true, // "· arrive 78% · ~14 kWh"
+    delayStops: [          // ETA colour by % slower than free-flow
+      { pctOver: 10, color: "#ffff00" },
+      { pctOver: 20, color: "#ff9900" },
+      { pctOver: 35, color: "#ff5555" }
+    ]
+  }
+  ```
+
+  The **destinations** come from Home Assistant: your US `zone.*`, the
+  integration's **Static destinations** (`Configure` → one `Name | address`
+  per line — always shown), and **Calendar** event locations in the look-ahead
+  window. TomTom (`Drive-time provider` + `Routing API key`, **Per-destination
+  routes** on) supplies the road breakdown and the free-flow time behind the
+  delay colour; Geoapify gives road names only; `estimate` gives neither.
+
 #### Location & map
 
 ```js
@@ -706,23 +739,29 @@ location: {
 Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 (state = one-way distance; `pois` attribute lists reachable places with
 `one_way_reachable` / `round_trip_reachable`, `arrival_pct`, `mi`, `duration` /
-`duration_min`, `routed`, and lat/lon). `Range reach factor` and `… reserve %`
-are in the **Configure** dialog.
+`duration_min`, `typical_min` / `delay_min` / `delay_pct`, `via`, `when` /
+`when_local`, `routed`, `source` and lat/lon). `Range reach factor` and
+`… reserve %` are in the **Configure** dialog.
 
-**Destinations** are your **US** `zone.*` entities plus — if you set **Calendar
-entities** + **Calendar look-ahead (hours)** in the **Configure** dialog — any
-event with a location in the next N hours, geocoded (US only, cached). Call
-**`kia_access.refresh_calendar_destinations`** to re-read the calendars now
-instead of waiting for the ~30-min cycle; `calendar_status` on the sensor shows
-what was found / geocoded.
+**Destinations** are your **US** `zone.*` entities, plus (from the **Configure**
+dialog):
 
-**Drive time.** By default the `duration` is a straight-line estimate. Set
-**Drive-time provider** = `geoapify` or `tomtom` and a **Routing API key** in
-the **Configure** dialog and `duration` / `mi` / `arrival_pct` become **real
-road distance + live-traffic drive time** (one matrix call per poll, free
-tiers are plenty). A **Geoapify** key is also used to geocode calendar
-locations even when the provider is left on `estimate` — Home Assistant's
-built-in Nominatim geocoder is increasingly blocked.
+- **Static destinations** — one `Name | address` per line, always shown
+  (geocoded once, cached). Good for "Nana | 5025 Hialeah Dr, Pittsburgh PA".
+- **Calendar entities** + **Calendar look-ahead (hours)** — any event with a
+  location in the next N hours, geocoded (US only, cached). Call
+  **`kia_access.refresh_calendar_destinations`** to re-read now instead of
+  waiting for the ~30-min cycle; `calendar_status` shows what was found.
+
+**Drive time + route.** By default `duration` is a straight-line estimate. Set
+**Drive-time provider** = `geoapify` or `tomtom` + a **Routing API key** and
+`duration` / `mi` / `arrival_pct` become **real road distance + live-traffic
+drive time**. With `tomtom` and **Per-destination routes** on, each destination
+also gets `via` (the main roads) and `typical_min` / `delay_min` / `delay_pct`
+(vs the free-flow time) — that's what the mirror's Driving-times panel colours
+the ETA by. A **Geoapify** key is also used to geocode calendar / static
+locations even when the provider is `estimate` — HA's built-in Nominatim
+geocoder is increasingly blocked.
 
 **Reachable-area map.** A map of how far you can drive, shaded, with your saved
 places pinned. Two providers, both free:

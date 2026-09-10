@@ -87,4 +87,47 @@ assert.deepStrictEqual(R.parseGeocode("tomtom", tgResp),
 assert.strictEqual(R.parseGeocode("geoapify", { features: [] }), null);
 assert.strictEqual(R.parseGeocode("tomtom", null), null);
 
+// ---- routeRequest / parseRoute ----
+const rr = R.routeRequest("tomtom", origin, targets[0], "K");
+assert.strictEqual(rr.method, "GET");
+assert.ok(rr.url.includes("/calculateRoute/40.71374,-79.75464:40.4406,-79.9959/json"));
+assert.ok(rr.url.includes("computeTravelTimeFor=all") && rr.url.includes("traffic=true"));
+assert.strictEqual(R.routeRequest("tomtom", origin, { lat: null, lon: 1 }, "K"), null);
+assert.strictEqual(R.routeRequest("nope", origin, targets[0], "K"), null);
+const gr = R.routeRequest("geoapify", origin, targets[0], "K");
+assert.ok(gr.url.includes("routing?waypoints=40.71374,-79.75464|40.4406,-79.9959"));
+
+const ttRoute = {
+  routes: [{
+    summary: {
+      lengthInMeters: 34000, travelTimeInSeconds: 2040,
+      noTrafficTravelTimeInSeconds: 1800, trafficDelayInSeconds: 240
+    },
+    guidance: {
+      instructions: [
+        { routeOffsetInMeters: 0, roadNumbers: ["PA 28"], street: "" },
+        { routeOffsetInMeters: 22000, roadNumbers: [], street: "Greensburg Rd" },
+        { routeOffsetInMeters: 33900, roadNumbers: [], street: "Twin Oaks Dr" },
+        { routeOffsetInMeters: 34000 }
+      ]
+    }
+  }]
+};
+const pr = R.parseRoute("tomtom", ttRoute);
+assert.strictEqual(pr.durationMin, 34);
+assert.strictEqual(pr.typicalMin, 30);
+assert.strictEqual(pr.delayMin, 4);
+assert.ok(Math.abs(pr.distanceKm - 34) < 0.001);
+assert.strictEqual(pr.via, "PA 28 · Greensburg Rd", "roads >300m only, route order");
+
+// no traffic model + junk
+assert.strictEqual(R.parseRoute("tomtom", { routes: [] }), null);
+assert.strictEqual(R.parseRoute("geoapify", null), null);
+const gpRoute = { features: [{ properties: { time: 600, distance: 8000,
+  legs: [{ steps: [{ name: "Main St", distance: 5000 }, { name: "", distance: 100 }] }] } }] };
+const gpr = R.parseRoute("geoapify", gpRoute);
+assert.strictEqual(gpr.durationMin, 10);
+assert.strictEqual(gpr.typicalMin, null);
+assert.strictEqual(gpr.via, "Main St");
+
 console.log("all routing tests passed");

@@ -40,6 +40,17 @@ def _hm(minutes) -> str | None:
     return f"{m // 60}h {m % 60:02d}m" if m >= 60 else f"{m}m"
 
 
+def _when_local(iso) -> str | None:
+    """ISO datetime / date -> a short local label: 'Tue 9:00 AM' / 'Tue'."""
+    if not iso:
+        return None
+    dt = dt_util.parse_datetime(str(iso))
+    if dt is None:
+        d = dt_util.parse_date(str(iso))
+        return d.strftime("%a %d %b").replace(" 0", " ") if d else None
+    return dt_util.as_local(dt).strftime("%a %I:%M %p").replace(" 0", " ")
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -173,6 +184,7 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         r = self._reach() or {}
         cal_names = {p["name"] for p in getattr(self.coordinator, "_cal_pois", [])}
+        static_names = {p["name"] for p in getattr(self.coordinator, "_static_pois", [])}
         return {
             "calendar_status": getattr(self.coordinator, "_cal_status", {}),
             "drive_time_source": r.get("drive_time_source", "estimate"),
@@ -204,8 +216,22 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
                     "arrival_pct": p.get("arrivalPct"),
                     "duration_min": p.get("durationMin"),
                     "duration": _hm(p.get("durationMin")),
+                    "typical_min": p.get("typicalMin"),
+                    "delay_min": p.get("delayMin"),
+                    "delay_pct": (
+                        round(p["delayMin"] / p["typicalMin"] * 100)
+                        if p.get("typicalMin") and p.get("delayMin") is not None
+                        else None
+                    ),
+                    "via": p.get("via"),
+                    "when": p.get("when"),
+                    "when_local": _when_local(p.get("when")),
                     "routed": bool(p.get("routed")),
-                    "source": "calendar" if p["name"] in cal_names else "zone",
+                    "source": (
+                        "calendar" if p["name"] in cal_names
+                        else "static" if p["name"] in static_names
+                        else "zone"
+                    ),
                 }
                 for p in r.get("pois", [])
             ],

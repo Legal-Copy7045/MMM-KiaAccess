@@ -163,6 +163,30 @@ Module.register("MMM-KiaAccess", {
         logRows: 4, // most recent sessions to list
         logRetentionDays: 180 // sessions kept on disk
       },
+      // "Driving times" panel — a standalone list of destinations with live
+      // drive time, the route ("via …"), an ETA coloured by traffic delay, and
+      // the battery you'd arrive with. Needs source: "homeassistant" and the
+      // Kia Access integration's Calendar / Drive-time provider set up (the MM
+      // just renders sensor.<v>_range_reach). Falls back to a straight-line
+      // estimate over `location.pois` when HA hasn't sent routed data.
+      drivingTimes: {
+        enabled: false,
+        header: "Driving times",
+        max: 6, // rows to show
+        order: "soonest", // "soonest" (calendar time, then distance) | "nearest"
+        showVia: true, // the "via <roads>" subline
+        showConsumption: true, // "· arrive 78% · ~14 kWh"
+        packKwh: null, // usable kWh for the kWh estimate (falls back to chargeCost.capacityKwh, then 99.8)
+        // ETA colour by traffic delay — % slower than the free-flow time.
+        // The highest stop whose `pctOver` the delay reaches wins; null = the
+        // normal text colour. Matches MMM-Traffic's typicalGradientStops.
+        delayStops: [
+          { pctOver: 10, color: "#ffff00" }, // 10%+ slower -> yellow
+          { pctOver: 20, color: "#ff9900" }, // 20%+        -> orange
+          { pctOver: 35, color: "#ff5555" } //  35%+        -> red
+        ],
+        hideUnreachable: false // drop destinations beyond the car's range
+      },
       // trip log — auto-detected drives (odometer delta + SoC drop): distance,
       // mi/kWh, and cost per trip, plus a rolling total. Uses
       // chargeCost.pricePerKwh / capacityKwh for the £ and kWh maths.
@@ -330,6 +354,7 @@ Module.register("MMM-KiaAccess", {
     );
     this.config.visuals.chargeCost = merge(this.defaults.visuals.chargeCost, this.config.visuals.chargeCost);
     this.config.visuals.tripLog = merge(this.defaults.visuals.tripLog, this.config.visuals.tripLog);
+    this.config.visuals.drivingTimes = merge(this.defaults.visuals.drivingTimes, this.config.visuals.drivingTimes);
     this.config.icons = merge(this.defaults.icons, this.config.icons);
     this.config.homeassistant = merge(this.defaults.homeassistant, this.config.homeassistant);
     this.config.notifications = merge(this.defaults.notifications, this.config.notifications);
@@ -484,6 +509,7 @@ Module.register("MMM-KiaAccess", {
       this.trips = data.payload.trips || [];
       this.openTrip = data.payload.openTrip || null;
       if (data.payload.rangeMap) this.rangeMap = data.payload.rangeMap;
+      if (data.payload.rangeReach) this.rangeReach = data.payload.rangeReach;
       this.liveChargeTimer(); // start/stop the "cost this charge" refresh
       this.stale = !!m.stale;
       this.staleNote = m.note || null;
@@ -493,7 +519,9 @@ Module.register("MMM-KiaAccess", {
       // with a short poll interval (mode C) most fetches return identical data —
       // only rebuild / re-render / re-check conditions when something changed
       const sig = JSON.stringify(data.payload.vehicle || {}) +
-        "|" + this.stale + "|" + (this.errorMessage || "") + "|" + (this.staleNote || "");
+        "|" + this.stale + "|" + (this.errorMessage || "") + "|" + (this.staleNote || "") +
+        "|" + (((this.config.visuals || {}).drivingTimes || {}).enabled
+          ? JSON.stringify((data.payload.rangeReach || {}).pois || []) : "");
       if (sig !== this._lastSig) {
         this._lastSig = sig;
         this.rebuildView();
@@ -1260,6 +1288,127 @@ Module.register("MMM-KiaAccess", {
     return el;
   },
 
+  // "Driving times" — a standalone destinations panel (drive time + route +
+  // traffic-delay colour + arrival battery). Prefers HA's routed data
+  // (this.rangeReach from sensor.<v>_range_reach); falls back to a local
+  // straight-line estimate over location.pois.
+  drivingTimesEl() {
+    const dt = (this.config.visuals || {}).drivingTimes || {};
+    if (!dt.enabled) return null;
+
+    const hm = (t) => {
+      if (t == null || !isFinite(t)) return "";
+      t = Math.round(t);
+      const h = Math.floor(t / 60);
+      return h ? (t % 60 ? h + "h " + (t % 60) + "m" : h + "h") : t + "m";
+    };
+
+    let rows = [];
+    const rr = this.rangeReach && Array.isArray(this.rangeReach.pois)
+      ? this.rangeReach.pois : null;
+    if (rr && rr.length) {
+      rows = rr.map((p) => ({
+        name: p.name,
+        source: p.source || "zone",
+        km: Number(p.km),
+        durationMin: p.duration_min != null ? Number(p.duration_min) : null,
+        delayMin: p.delay_min != null ? Number(p.delay_min) : null,
+        delayPct: p.delay_pct != null ? Number(p.delay_pct) : null,
+        via: p.via || null,
+        whenLocal: p.when_local || null,
+        when: p.when || null,
+        arrivalPct: p.arrival_pct != null ? Number(p.arrival_pct) : null,
+        reachable: p.reachable !== false,
+        routed: !!p.routed
+      }));
+    } else if (typeof KiaAccessRange !== "undefined") {
+      // local fallback: no calendar, no traffic, estimated times
+      const st = this.visualState();
+      const loc = (this.config.visuals || {}).location || {};
+      const pois = (loc.pois || []).slice();
+      if (loc.homeLat != null && loc.homeLon != null &&
+          !pois.some((p) => /^home$/i.test((p && p.name) || "")))
+        pois.unshift({ name: "Home", lat: Number(loc.homeLat), lon: Number(loc.homeLon) });
+      if (st.locationLat == null || st.locationLon == null || st.rangeKm == null) return null;
+      const sum = KiaAccessRange.summary(st.locationLat, st.locationLon, st.rangeKm, pois, {
+        factor: loc.reachFactor, reservePct: loc.reachReservePct,
+        batteryPct: st.batteryPct, roadFactor: loc.reachRoadFactor || 1.3
+      });
+      rows = (sum.pois || []).map((p) => ({
+        name: p.name, source: "zone", km: Number(p.km),
+        durationMin: p.durationMin != null ? Number(p.durationMin) : null,
+        delayMin: null, delayPct: null, via: null, whenLocal: null, when: null,
+        arrivalPct: p.arrivalPct != null ? Number(p.arrivalPct) : null,
+        reachable: p.reachable !== false, routed: false
+      }));
+    }
+    if (!rows.length) return null;
+
+    if (dt.hideUnreachable) rows = rows.filter((r) => r.reachable);
+    if ((dt.order || "soonest") === "soonest") {
+      const cal = rows.filter((r) => r.source === "calendar")
+        .sort((a, b) => String(a.when || "").localeCompare(String(b.when || "")));
+      const zone = rows.filter((r) => r.source !== "calendar")
+        .sort((a, b) => a.km - b.km);
+      rows = cal.concat(zone);
+    } else {
+      rows.sort((a, b) => a.km - b.km);
+    }
+    rows = rows.slice(0, Number(dt.max) || 6);
+
+    const stops = (Array.isArray(dt.delayStops) ? dt.delayStops : [])
+      .filter((s) => s && isFinite(s.pctOver))
+      .sort((a, b) => a.pctOver - b.pctOver);
+    const delayColor = (r) => {
+      if (r.delayPct == null) return null;
+      let col = null;
+      stops.forEach((s) => { if (r.delayPct >= s.pctOver) col = s.color || null; });
+      return col;
+    };
+
+    const pack = Number(dt.packKwh) ||
+      Number(((this.config.visuals || {}).chargeCost || {}).capacityKwh) ||
+      Number((this.rawPayload && this.rawPayload.vehicle || {}).ev_battery_capacity) || 99.8;
+    const battPct = this.visualState().batteryPct;
+
+    const el = document.createElement("div");
+    el.className = "kiaaccess-batt-detail kiaaccess-drivetimes";
+    let html =
+      '<div class="kiaaccess-dt-header">' + this.escape(dt.header || "Driving times") + "</div>";
+    rows.forEach((r) => {
+      const icon = r.source === "calendar" ? "📅" : "📍";
+      const col = delayColor(r);
+      const timeTxt = r.durationMin != null ? hm(r.durationMin) : "—";
+      const delayTxt = r.delayMin ? " +" + hm(r.delayMin) : "";
+      const subBits = [];
+      if (dt.showVia !== false && r.via) subBits.push(this.escape(r.via));
+      if (r.whenLocal) subBits.push(this.escape(r.whenLocal));
+      if (dt.showConsumption !== false && r.arrivalPct != null) {
+        let c = "arrive " + r.arrivalPct + "%";
+        if (battPct != null && pack) {
+          const kwh = Math.max(0, (battPct - r.arrivalPct) / 100 * pack);
+          if (kwh >= 0.5) c += " · ~" + kwh.toFixed(0) + " kWh";
+        }
+        subBits.push(c);
+      } else if (dt.showConsumption !== false && !r.reachable) {
+        subBits.push("out of range");
+      }
+      html +=
+        '<div class="kiaaccess-dt-row">' +
+          '<div class="kiaaccess-dt-line">' +
+            '<span class="kiaaccess-dt-name">' + icon + " " + this.escape(r.name || "?") + "</span>" +
+            '<span class="kiaaccess-dt-time"' + (col ? ' style="color:' + col + '"' : "") + ">" +
+              this.escape(timeTxt + delayTxt) + "</span>" +
+          "</div>" +
+          (subBits.length
+            ? '<div class="kiaaccess-dt-sub">' + subBits.join(" · ") + "</div>"
+            : "") +
+        "</div>";
+    });
+    el.innerHTML = html;
+    return el;
+  },
+
   preconditionEl() {
     const f = this.flatMap || {};
     const on = f["vehicle.ev_first_departure_enabled"];
@@ -1453,6 +1602,7 @@ Module.register("MMM-KiaAccess", {
         this.chargeLogEl(),
         this.tripLogEl(),
         this.tripStatsEl(),
+        this.drivingTimesEl(),
         this.locationEl()
       ].forEach((el) => el && wrapper.appendChild(el));
     }

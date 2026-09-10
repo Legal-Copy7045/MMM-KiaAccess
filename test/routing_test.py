@@ -84,4 +84,45 @@ assert R.parse_geocode("tomtom", tg_resp) == {"lat": 40.71, "lon": -79.75, "name
 assert R.parse_geocode("geoapify", {"features": []}) is None
 assert R.parse_geocode("tomtom", None) is None
 
+# route_request / parse_route
+rr = R.route_request("tomtom", origin, targets[0], "K")
+assert rr["method"] == "GET"
+assert "/calculateRoute/40.71374,-79.75464:40.4406,-79.9959/json" in rr["url"]
+assert "computeTravelTimeFor=all" in rr["url"] and "traffic=true" in rr["url"]
+assert R.route_request("tomtom", origin, {"lat": None, "lon": 1}, "K") is None
+assert R.route_request("nope", origin, targets[0], "K") is None
+gr = R.route_request("geoapify", origin, targets[0], "K")
+assert "routing?waypoints=40.71374,-79.75464|40.4406,-79.9959" in gr["url"]
+
+tt_route = {
+    "routes": [{
+        "summary": {
+            "lengthInMeters": 34000, "travelTimeInSeconds": 2040,
+            "noTrafficTravelTimeInSeconds": 1800, "trafficDelayInSeconds": 240,
+        },
+        "guidance": {"instructions": [
+            {"routeOffsetInMeters": 0, "roadNumbers": ["PA 28"], "street": ""},
+            {"routeOffsetInMeters": 22000, "roadNumbers": [], "street": "Greensburg Rd"},
+            {"routeOffsetInMeters": 33900, "roadNumbers": [], "street": "Twin Oaks Dr"},
+            {"routeOffsetInMeters": 34000},
+        ]},
+    }]
+}
+pr = R.parse_route("tomtom", tt_route)
+assert pr["durationMin"] == 34
+assert pr["typicalMin"] == 30
+assert pr["delayMin"] == 4
+assert abs(pr["distanceKm"] - 34) < 0.001
+assert pr["via"] == "PA 28 · Greensburg Rd", pr["via"]
+
+assert R.parse_route("tomtom", {"routes": []}) is None
+assert R.parse_route("geoapify", None) is None
+gp_route = {"features": [{"properties": {"time": 600, "distance": 8000,
+    "legs": [{"steps": [{"name": "Main St", "distance": 5000},
+                        {"name": "", "distance": 100}]}]}}]}
+gpr = R.parse_route("geoapify", gp_route)
+assert gpr["durationMin"] == 10
+assert gpr["typicalMin"] is None
+assert gpr["via"] == "Main St"
+
 print("all routing tests passed")

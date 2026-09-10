@@ -160,11 +160,121 @@
     return null;
   }
 
+  /**
+   * Build a single origin -> destination route request. Richer than the
+   * matrix: the response carries the road-name breakdown and (TomTom) the
+   * free-flow time so the caller can show "via <roads>" and a traffic delay.
+   * @returns {{url, method:"GET"}|null}
+   */
+  function routeRequest(provider, origin, dest, apiKey, o) {
+    o = o || {};
+    var s = _pt(origin), d = _pt(dest);
+    if (!apiKey || !_ok(s) || !_ok(d)) return null;
+    var traffic = o.traffic !== false;
+
+    if (provider === "tomtom") {
+      var mode = o.mode === "truck" ? "truck" : "car";
+      return {
+        url: "https://api.tomtom.com/routing/1/calculateRoute/" +
+          s.lat + "," + s.lon + ":" + d.lat + "," + d.lon + "/json" +
+          "?key=" + encodeURIComponent(apiKey) +
+          "&travelMode=" + mode +
+          "&traffic=" + (traffic ? "true" : "false") +
+          "&computeTravelTimeFor=all" +
+          "&instructionsType=text&sectionType=street&routeRepresentation=summaryOnly",
+        method: "GET"
+      };
+    }
+    if (provider === "geoapify") {
+      return {
+        url: "https://api.geoapify.com/v1/routing?waypoints=" +
+          s.lat + "," + s.lon + "|" + d.lat + "," + d.lon +
+          "&mode=" + (o.mode || "drive") +
+          "&details=instruction_details&apiKey=" + encodeURIComponent(apiKey),
+        method: "GET"
+      };
+    }
+    return null;
+  }
+
+  /** top `n` distinct road labels by distance covered, in route order */
+  function _topRoads(pairs, n) {
+    var order = [], meters = {};
+    pairs.forEach(function (p) {
+      var road = (p.road || "").trim();
+      if (!road) return;
+      if (meters[road] == null) { meters[road] = 0; order.push(road); }
+      meters[road] += Math.max(0, Number(p.m) || 0);
+    });
+    return order
+      .filter(function (r) { return meters[r] > 300; })
+      .sort(function (a, b) { return meters[b] - meters[a]; })
+      .slice(0, n || 3)
+      .sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
+  }
+
+  /**
+   * Parse a single-route response.
+   * @returns {{ durationMin, distanceKm, typicalMin, delayMin, via }|null}
+   *   typicalMin / delayMin are null when the provider has no traffic model.
+   *   via is a short "Rte 28 · Greensburg Rd" string, or null.
+   */
+  function parseRoute(provider, json) {
+    if (!json) return null;
+
+    if (provider === "tomtom") {
+      var route = (json.routes || [])[0];
+      if (!route) return null;
+      var sum = route.summary || {};
+      if (sum.travelTimeInSeconds == null || sum.lengthInMeters == null) return null;
+      var live = Number(sum.travelTimeInSeconds);
+      var free = sum.noTrafficTravelTimeInSeconds != null
+        ? Number(sum.noTrafficTravelTimeInSeconds)
+        : (sum.trafficDelayInSeconds != null ? live - Number(sum.trafficDelayInSeconds) : null);
+      var instr = ((route.guidance || {}).instructions) || [];
+      var pairs = instr.map(function (ins, i) {
+        var next = instr[i + 1];
+        var m = next && next.routeOffsetInMeters != null && ins.routeOffsetInMeters != null
+          ? next.routeOffsetInMeters - ins.routeOffsetInMeters : 0;
+        var road = (ins.roadNumbers && ins.roadNumbers[0]) || ins.street || "";
+        return { road: road, m: m };
+      });
+      return {
+        durationMin: Math.round(live / 60),
+        distanceKm: Number(sum.lengthInMeters) / 1000,
+        typicalMin: free != null ? Math.round(free / 60) : null,
+        delayMin: free != null ? Math.max(0, Math.round((live - free) / 60)) : null,
+        via: _topRoads(pairs, 3).join(" · ") || null
+      };
+    }
+    if (provider === "geoapify") {
+      var f = (json.features || [])[0];
+      var pr = f && f.properties;
+      if (!pr || pr.time == null || pr.distance == null) return null;
+      var gp = [];
+      (pr.legs || []).forEach(function (leg) {
+        (leg.steps || []).forEach(function (st) {
+          gp.push({ road: st.name || "", m: Number(st.distance) || 0 });
+        });
+      });
+      return {
+        durationMin: Math.round(Number(pr.time) / 60),
+        distanceKm: Number(pr.distance) / 1000,
+        typicalMin: null,
+        delayMin: null,
+        via: _topRoads(gp, 3).join(" · ") || null
+      };
+    }
+    return null;
+  }
+
   return {
     PROVIDERS: PROVIDERS,
     matrixRequest: matrixRequest,
     parseMatrix: parseMatrix,
     geocodeRequest: geocodeRequest,
-    parseGeocode: parseGeocode
+    parseGeocode: parseGeocode,
+    routeRequest: routeRequest,
+    parseRoute: parseRoute
   };
 });
