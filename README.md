@@ -2,37 +2,29 @@
 
 [![CI](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml/badge.svg)](https://github.com/Legal-Copy7045/MMM-KiaAccess/actions/workflows/ci.yml)
 
-**Kia Connect / Bluelink vehicle data and controls, defined once and delivered on
-two surfaces.** One engine (`core/`) turns the
+**Kia Connect / Bluelink vehicle data and controls for Home Assistant and
+MagicMirror², from one shared engine.** The
 [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api)
-vehicle model into:
+vehicle model becomes a **Home Assistant integration** (HACS — sensors, native
+control entities, a `device_tracker`, `kia_access_alert` events and a Lovelace
+card) and a read-only **MagicMirror² module** (an animated car diagram + a
+configurable data table, with notifications and MQTT). Every sensor, command,
+alert rule and the diagram come from the same files, so both surfaces always
+agree. Run either alone, or run both with the mirror reading from HA so the car
+is woken only once.
 
-- a **Home Assistant integration** (HACS) — sensors and binary sensors, **native
-  control entities** (`lock`, `climate`, `number`, `switch`, `select`) plus
-  services, a `device_tracker` for the car's GPS, `kia_access_alert` events for
-  automations, and a bundled **Lovelace card** with a top-down car diagram +
-  climate panel;
-- a **MagicMirror² module** — a configurable `key → value` table plus the same
-  animated car diagram, with edge-triggered notifications and optional MQTT
-  publishing. Read-only.
+See [**What you get**](#what-you-get) for the feature list per surface.
 
-Every entity, command, alert rule and the diagram itself come from the **same
-shared files**, so the two surfaces always show the same data and behave the same
-way. Run either on its own — or run both and have the mirror read from Home
-Assistant, so the car is only ever woken once.
-
-> **Fresh readings vs. the 12V battery — your choice.** Each poll can either
-> **wake the car** for live data, or read the **cached values Kia / Hyundai
-> already hold on their servers** (which costs the car nothing). Repeatedly
-> waking a parked car is the main way an app flattens its 12V battery in cold
-> weather, so cached reads are the safe choice for frequent updates — and the
-> live wake-up is time-boxed anyway, falling back to the cached copy if the car
-> doesn't answer in time.
-> - **MagicMirror** — `refresh: true` wakes the car, `refresh: false` uses the
->   cache. `forceRefreshTimeout` bounds the wake-up.
-> - **Home Assistant** — **Configure → Poll the car directly**: off (the
->   default) reads only Kia's server cache; on wakes the car every poll, bounded
->   by **Live wake-up wait**. Poll frequency is the **Scan interval** next to it.
+> **Fresh readings vs. the 12V battery — your choice.** Each poll either **wakes
+> the car** for live data or reads the **cached values Kia / Hyundai already hold
+> on their servers** (which costs the car nothing). Repeatedly waking a parked
+> car is how an app flattens its 12V battery in the cold, so cached reads are the
+> safe default for frequent updates; the live wake-up is time-boxed and falls
+> back to the cache if the car doesn't answer.
+> - **Home Assistant** — **Configure → Poll the car directly**: off (default) =
+>   cache only; on = wake every poll, bounded by **Live wake-up wait**.
+> - **MagicMirror (mode B)** — `refresh: false` = cache, `refresh: true` = wake
+>   (bounded by `forceRefreshTimeout`). Mode C leaves this to HA.
 
 ## Supported vehicles
 
@@ -51,20 +43,15 @@ models go through the same library but are less battle-tested —
 something looks wrong.
 
 > **Region notes**
-> - **Kia USA / Canada** require a **one-time OTP** (an SMS / email code) the
->   first time a new client logs in. Home Assistant asks for it in the config
->   flow; the mirror has a one-time `enroll.py`.
-> - The Kia US / CA API reports **°F** and **miles** — the engine normalises
->   everything to °C / km at the source, then the formatters render back to the
->   units you pick.
-> - The climate set-point for **USA** is sent in **°F (62–82)**; EU and other
->   regions use **°C (16–30)**.
-
-> **Why a Python library, not a Node one?**
-> Kia USA sits behind Cloudflare bot protection that returns **HTTP 403** to the
-> Node `bluelinky` library. `hyundai_kia_connect_api` — the library behind Home
-> Assistant's official Kia/Hyundai integration — handles it and is actively
-> maintained. Both surfaces call it through the shared `kia_client.py`.
+> - **Kia USA / Canada** need a **one-time OTP** (SMS / email code) the first
+>   time a new client logs in — HA asks in the config flow, the mirror has
+>   `enroll.py`.
+> - The Kia US / CA API reports °F and miles; the engine normalises to °C / km,
+>   then formatters render your chosen units. Climate set-point is sent in
+>   **°F (62–82)** for USA, **°C (16–30)** elsewhere.
+> - Both surfaces use the Python `hyundai_kia_connect_api` (the same library as
+>   HA's official Kia/Hyundai integration) — the Node `bluelinky` library is
+>   blocked by Kia USA's bot protection.
 
 ---
 
@@ -81,34 +68,88 @@ something looks wrong.
 - **Both** → **C**: HA polls the car once, the mirror reads it locally — no
   Python, no OTP and no second wake-up on the mirror.
 
----
-
-## How the data flows
-
-Every option reaches the car through the same shared client
-(`hyundai_kia_connect_api` → `kia_client.py`); each poll either wakes the car for
-live data or reads the cached copy Kia / Hyundai already hold. From there the
-three options diverge:
-
 ![Data flow for options A, B and C](docs/data-flow.svg)
 
-The [Mermaid source](docs/data-flow.mmd) is the editable original.
+---
 
-**Getting the data elsewhere** — with Home Assistant (A / C) you have entities,
-the `kia_access_alert` event bus and the `sensor.<vehicle>_status` payload, so
-anything HA integrates with is already covered. A MagicMirror-only mirror (B)
-can push out over **[MQTT](#mqtt-state-publishing)** (full state, retained
-topics + HA discovery) or a **[webhook](#webhook-http-post-per-event)** (an HTTP
-`POST` per state-change event, for Discord / Slack / IFTTT / a cloud function).
+## What you get
+
+### In Home Assistant (mode A / C)
+
+- **Sensors & binary sensors** — battery %, range, charge rate / target, 12V,
+  odometer, doors, lock, plug, climate, tyre warnings, next-service distance,
+  battery health, valet mode, per-seat status, and everything else the car
+  reports.
+- **Native controls** — `lock`, `climate` (an HVAC entity), `number` (charge
+  limits, climate run-time), `switch` (charging, defrost), `select` (seat / wheel
+  heat), one-tap `button`s (lock / unlock, flash, charge port, start / stop
+  charge) and services (`start_climate` with seats, `set_charge_limits`,
+  `send_to_car`).
+- **`device_tracker.<v>_location`** — the car's GPS, so HA's map, zones and
+  presence automations work natively.
+- **Derived sensors**
+  - **`Range reach`** — how far you can drive now (one-way / round-trip), which
+    `zone.*` — plus calendar events and fixed addresses — are in reach, and the
+    charge / kWh you'd arrive with. With a routing key: real road drive time, the
+    roads taken, and a live traffic-delay figure.
+  - **`Last trip`** / **`Cost per mile`** — from an automatic odometer-anchored
+    trip log.
+  - **`Last charge`** / **`Charge session`** — kWh + cost per session, the live
+    one climbing while charging.
+  - **`Parked`** — where the car last parked, with map deep-links and distance
+    from home.
+- **`kia_access_alert` events** on the bus for every edge-triggered condition
+  (battery low, unlocked, door open, charge complete / interrupted, 12V drain,
+  tow / theft, can't-get-home, …) — for your automations.
+- **Lovelace** — `custom:kia-access-card` (top-down car diagram + climate panel)
+  and `custom:kia-range-map-card` (interactive reachable-area map).
+- **Optional** — a drop-in ownership package (efficiency, seasonal range, lease
+  tracker, maintenance countdown) and automation blueprints (calendar / weather
+  preconditioning, phone alerts).
+
+### On MagicMirror — standalone (mode B)
+
+The mirror polls Kia directly through a bundled Python bridge. **Read-only** —
+car control lives in the Home Assistant integration.
+
+- The **animated car diagram** — every door / window / frunk / liftgate /
+  sunroof / light / climate element / charge state / tyre warning, plus a
+  warning triangle with reasons. The same SVG the HA card uses.
+- A configurable **`key → value` table** — any attribute the car reports, with
+  your own labels, units, formatters and order.
+- **Widgets** (each opt-in) — battery gauge, charge-progress bar with "full at
+  HH:MM" and a live running cost, SoC / 12V sparklines, range ring, trip stats,
+  an auto trip log, a "how far can I drive" readout, a location map + a
+  reachable-area image.
+- **Edge-triggered notifications** — the same rules as HA's alerts, popped
+  through MagicMirror's `alert` module and broadcast to other modules.
+- **Push-out** — full state over **MQTT** (retained topics, optional HA
+  discovery), a **webhook** (`POST` per event → Discord / Slack / a function), or
+  **InfluxDB / Prometheus** export.
+
+### On MagicMirror — fed by Home Assistant (mode C)
+
+Everything in mode B — same diagram, table, widgets, notifications, MQTT /
+webhook / exporter — but the data comes from your HA instance over the local
+API, not from Kia. So:
+
+- **Dropped** — Kia credentials, the Python bridge, the OTP enrollment, and the
+  `refresh` / `forceRefreshTimeout` wake-vs-cache controls (HA owns that choice).
+  The car is only ever woken by HA.
+- **Added** — `source: "homeassistant"` plus a HA URL and long-lived token.
+  `mode: "push"` streams state changes over a WebSocket the instant they happen.
+- **Gained** — the **Driving-times panel**: your calendar destinations, fixed
+  addresses and chosen zones, each with a live routed drive time, the roads, an
+  ETA coloured by traffic delay, and the battery you'd arrive with. (Standalone
+  mode only has a straight-line estimate over hard-coded `pois`.)
+- **Not needed** — MQTT HA-discovery (you already have real entities) and the
+  `otpExpiring` warning (no OTP on the mirror).
 
 ---
 
 ## Install
 
 ### A · Home Assistant
-
-A native integration — sensors and binary sensors, **plus control**, plus a
-Lovelace card. No MagicMirror required.
 
 1. **Install the integration.** HACS → ⋮ → **Custom repositories** → add
    `https://github.com/Legal-Copy7045/MMM-KiaAccess`, category **Integration** →
@@ -118,57 +159,20 @@ Lovelace card. No MagicMirror required.
 2. **Add it.** **Settings → Devices & Services → + Add Integration → “Kia
    Access”**. Enter your Kia Connect / Hyundai Bluelink email / password / PIN
    and pick the region; enter the SMS or email **OTP** when prompted (Kia
-   USA / CA). Tick *Reverse-geocode the parked location* if you want a location.
-3. You now have one **device per vehicle**:
-   - sensors + binary sensors (battery, range, charge power, doors, lock, plug,
-     climate, tyre warning, next-service distance, valet mode, battery
-     preconditioning, …), generated from `core/entities.json`
-   - **`device_tracker.<vehicle>_location`** — the car's GPS position (with the
-     EV battery % as `battery_level`), so HA's map card, zones, presence and
-     "left home / arrived at work" automations work natively. Needs a GPS fix
-     from the car; enable *Reverse-geocode* at setup for a street address too.
-   - **`Last charge`** — cost (or kWh) of the most recent completed charge, with
-     the session detail + a 30-/90-day total in its attributes
-   - **`Charge session`** — a live figure that climbs while charging (ticks
-     every 60 s on its own). Both need a price: **Settings → Devices &
-     Services → Kia Access → Configure → Price per kWh** (and optional pack
-     kWh). Sessions run plug-in → unplug and persist across restarts.
-   - **`lock.<vehicle>_doors`** — a real HA lock (HomeKit / Google / Alexa,
-     the lock card, `lock.lock` automations)
-   - **`climate.<vehicle>_climate`** — remote climate as an HVAC entity
-     (thermostat card, "set the car to 72", generic climate automations).
-     `HEAT_COOL` / `OFF`; target temperature in °F for USA & Canada, °C
-     elsewhere; current temperature from the car
-   - **numbers** — `AC charge limit` / `DC charge limit` (dashboard sliders,
-     50–100 %) and `Climate run time` (1–30 min)
-   - **switches** — `Charging` (start/stop, shown only while plugged in),
-     `Front defrost with climate`, `Rear defrost with climate`
-   - **selects** — `Steering wheel heat with climate` and per-seat
-     `… seat with climate` (Off / Heat · Cool low–high). These are *desired*
-     settings folded into the next climate start
-   - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
-     car), `open` / `close charge port`, `start` / `stop charge`
-   - **sensors** — fuel level & range, charge current, per-seat status, a
-     `Remote action` diagnostic, **`Range reach`** (derated drive distance now;
-     the `pois` attribute flags every `zone.*` one-way / round-trip and the
-     **state-of-charge you'd arrive with**), `Last trip` + `Cost per mile`
-     (from the auto trip log), and **`Parked`** — where the car was last seen
-     parked, with Google / Apple / OSM map deep-links and distance from home
-   - **services**: the no-arg buttons above, plus `kia_access.start_climate`
-     (`set_temp` — **°F, 62–82** for the USA region — `duration`, `climate`,
-     `defrost`, `heating`, `steering_wheel`, `front_left_seat` …
-     `rear_right_seat`), `kia_access.stop_climate`,
-     `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`),
-     `kia_access.send_to_car` (`name` + `address`, or `latitude` / `longitude`)
-     — see [Send to car](#send-to-car) — and
-     `kia_access.refresh_calendar_destinations` (re-read the calendars for the
-     reachable-destinations list / range map now)
-   - *(commands the car or region doesn't support just return a clear error
-     when pressed)*
-   - **`kia_access_alert`** events on the event bus for the same edge-triggered
-     conditions the mirror notifies on (battery low, left unlocked, door open,
-     charge complete / interrupted, 12V drain, OTP expiry) — use them in
-     automations
+   USA / CA). Tick *Reverse-geocode the parked location* if you want a street
+   address for the car's position.
+3. You now have one **device per vehicle** with all the entities, controls and
+   events listed under [**What you get**](#what-you-get). A few notes:
+   - `Last charge` / `Charge session` need a price — **Configure → Price per kWh**.
+   - The **seat / wheel-heat `select`s and `Climate run time` are stored
+     preferences**: there's no API to set them alone, so `climate.turn_on` and
+     the `start_climate` button/service fold whatever they're set to into one
+     call. Seat levels use `KiaUvoApiUSA` codes; other regions use the raw
+     `start_climate` service.
+   - `kia_access.send_to_car` (`name` + `address` or `latitude`/`longitude`),
+     `kia_access.set_charge_limits`, and `kia_access.refresh_calendar_destinations`
+     round out the services.
+   - Commands the car or region doesn't support return a clear error.
 4. **Add the dashboard card.** Edit a dashboard → **+ Add Card** → search “Kia
    Access”, or paste:
    ```yaml
@@ -367,9 +371,9 @@ values may be `null` until the car's first Kia sync — that only means the
 connection works. A `FAIL:` line gives the exact reason (bad token, wrong URL,
 entity not found).
 
-From here the module is identical to mode B — same diagram, table, sparklines,
-history, notifications and optional MQTT re-publishing — it just gets its data
-from Home Assistant.
+From here the module behaves as in mode B — see
+[What you get → fed by Home Assistant](#on-magicmirror--fed-by-home-assistant-mode-c)
+for the short list of differences.
 
 **How it stays current** — `homeassistant.mode`:
 
@@ -412,7 +416,7 @@ cache when the data actually changed, so a fast rate costs almost nothing.
     fetchTimeout: 90,        // seconds before the bridge is killed
 
     // --- polling ---
-    updateInterval: 30 * 60 * 1000,  // 30 min — see "Battery" note
+    updateInterval: 30 * 60 * 1000,  // 30 min (mode C default: 5 min / push)
     retryInterval: 5 * 60 * 1000,
     refresh: true,           // true = poll the car; false = Kia's cached copy
     units: "imperial",       // imperial | metric
@@ -651,8 +655,7 @@ Every diagram state and every optional widget:
 ![Car diagram states and widgets](docs/car-states.png)
 
 Open [`docs/car-states.html`](docs/car-states.html) for the same gallery with the
-animations playing. Regenerate it from the current `core/visuals.js` with
-`node docs/build-gallery.js` (the PNG is a screenshot of that page).
+animations playing.
 
 #### Extra widgets
 
@@ -1110,68 +1113,16 @@ current.
 
 ## Notes
 
-- **12V battery:** every `refresh: true` poll wakes the car. Kia's own app polls roughly
-  every 30–60 min. Lower risks draining the 12V battery in cold weather. Use
-  `refresh: false` for frequent updates from Kia's cache.
-- The MagicMirror module is **read-only**. Car control (lock / unlock / climate /
-  charging) is in the Home Assistant integration — see mode A.
-- Test the bridge directly:
-  ```bash
-  echo '{"username":"you@example.com","password":"pw","pin":"1234","region":"USA","brand":"KIA","refresh":false}' | python3 kia_bridge.py
-  ```
-- Trigger an immediate refresh from another module with
+- The MagicMirror module is **read-only**. Car control is in the Home Assistant
+  integration (mode A).
+- Home Assistant and the mirror share one engine (`core/`), so the sensors,
+  commands, alert rules and the car diagram are identical on every surface. New
+  attributes from `hyundai_kia_connect_api` show up automatically after an
+  `npm install` (mode B) or a HACS redownload (mode A / C).
+- Trigger an immediate mirror refresh from another module with
   `this.sendNotification("MMM_KIA_ACCESS_REFRESH")`.
-
-## Tests
-
-```bash
-npm test
-```
-
-## How it's built — one definition, every surface
-
-**Define a feature once.** This is the point of the project: the shared engine
-lives in `core/` and at the repo root, and every surface — the MagicMirror
-module, the Home Assistant integration and the Lovelace card — is generated from
-it. Add a sensor or a command in one place and it appears everywhere.
-
-| file | purpose |
-| --- | --- |
-| `core/entities.json` | canonical catalogue of vehicle entities — MQTT discovery, HA sensors/binary-sensors and the card's table all generate from this |
-| `core/commands.json` | canonical control commands — HA services, HA buttons and the card's action buttons generate from this |
-| `core/state.js` / `vehicle_state.py` | `buildState(flat)` — flat payload → normalised diagram/condition state (JS + Python ports) |
-| `core/conditions.js` / `conditions.py` | edge-triggered alert rules `evaluate(state, cfg, prev)` (JS + Python ports) |
-| `core/visuals.js` | SVG car diagram, battery, sparkline, range ring, charge bar |
-| `core/flatten.js` | flatten / glob-select / format helpers |
-| `core/ha-discovery.js` | Home Assistant MQTT discovery, built from `entities.json` |
-| `kia_client.py` | shared Kia client (auth, token, fetch, control) — used by the MM bridge and the HA integration |
-| `card/kia-access-card.src.js` | the Lovelace card class |
-
-`fixtures/*.json` are scenarios run through **both** the JS and Python engines
-in CI (`test/contract.test.js`, `test/contract_test.py`) — any drift between the
-ports fails the build.
-
-`scripts/sync-core.js` vendors the shared files into
-`custom_components/kia_access/`, generates its `services.yaml`, and bundles the
-card (`frontend/kia-access-card.js` = catalogues + `core/{state,visuals,
-conditions}.js` + the card class). `npm test` / CI fail if anything is stale —
-run `npm run sync` after editing `core/`.
-
-The MagicMirror front end (`MMM-KiaAccess.js`), `node_helper.js` and the Python
-bridge (`kia_bridge.py`) stay at the repo root as MagicMirror requires.
-
-### Tracking `hyundai_kia_connect_api`
-
-The whole data layer is [`hyundai_kia_connect_api`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api).
-`npm install` (mode B) and a HACS redownload (mode A/C) both pull the current
-release, so:
-
-- **new `Vehicle` attributes** appear automatically — the bridge dumps every one,
-  `include: []` shows them on the mirror, and mode A/C carries them in the
-  summary sensor.
-- **new HA sensors / buttons / services** need a one-line addition to
-  `core/entities.json` or `core/commands.json` (then `npm run sync`).
-- unsupported commands for a given car/region just return a clear error.
+- Contributing / running the tests: `npm test`; run `npm run sync` after editing
+  anything in `core/`.
 
 ## Send to car
 
