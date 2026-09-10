@@ -78,6 +78,11 @@ assert _pcd(_mk({"poll_car_directly": False})) is False
 assert _pcd(_mk({"force_refresh_timeout": 45})) is True, "legacy: >0 -> poll"
 assert _pcd(_mk({"force_refresh_timeout": 0})) is False
 
+# diagnostics must redact the GPS (incl. the combined "location" string) + keys
+diag = importlib.import_module(f"{pkg}.diagnostics")
+assert {"location", "location_latitude", "location_longitude", "token",
+        "password", "pin", "key"} <= diag._REDACT
+
 init = importlib.import_module(pkg)
 assert hasattr(init, "_register_frontend")
 assert os.path.exists(

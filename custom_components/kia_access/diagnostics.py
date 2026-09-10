@@ -16,11 +16,13 @@ _REDACT = {
     "token",
     "VIN",
     "vin",
+    "location",           # combined "lon, lat" string on the summary sensor
     "location_latitude",
     "location_longitude",
     "latitude",
     "longitude",
     "geocode",
+    "key",                # per-vehicle API key/uuid
 }
 
 
@@ -36,7 +38,7 @@ async def async_get_config_entry_diagnostics(
             "data": async_redact_data(dict(entry.data), _REDACT),
             "options": dict(entry.options),
         },
-        "meta": getattr(coordinator, "meta", {}),
+        "meta": async_redact_data(dict(getattr(coordinator, "meta", {}) or {}), _REDACT),
         "last_action": getattr(coordinator, "last_action", None),
         "climate_prefs": getattr(coordinator, "climate_prefs", None),
         "vehicle": async_redact_data(vehicle, _REDACT),

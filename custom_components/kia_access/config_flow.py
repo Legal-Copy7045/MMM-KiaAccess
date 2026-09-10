@@ -232,10 +232,12 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                     ): bool,
                     vol.Optional(
                         "force_refresh_timeout",
+                        # min 0: pre-toggle installs stored 0 here to mean
+                        # "cached only" and must still be able to save the form
                         default=opts.get(
                             "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
                         ),
-                    ): _number(10, 180, 1),
+                    ): _number(0, 180, 1),
                     vol.Optional(
                         "price_per_kwh",
                         default=float(opts.get("price_per_kwh") or 0),

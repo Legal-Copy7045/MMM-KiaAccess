@@ -124,17 +124,23 @@ module.exports = NodeHelper.create({
   persist(id) {
     var s = this.state[id];
     if (!s) return;
+    var file = this.cacheFile(id);
+    var tmp = file + ".tmp";
     try {
+      // write-then-rename so a power cut mid-write can't corrupt the cache
+      // (a truncated file would take out the history + charge log)
       fs.writeFileSync(
-        this.cacheFile(id),
+        tmp,
         JSON.stringify({
           lastGood: s.lastGood, history: s.history,
           sessions: s.sessions, openSession: s.openSession,
           rangeMap: s.rangeMap
         })
       );
+      fs.renameSync(tmp, file);
     } catch (e) {
       Log.warn("[MMM-KiaAccess] could not write cache: " + e.message);
+      try { fs.unlinkSync(tmp); } catch (e2) { /* ignore */ }
     }
   },
 
@@ -270,6 +276,9 @@ module.exports = NodeHelper.create({
         return this.fail(id, config, `bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`);
       }
       if (!result.ok) return this.fail(id, config, result.error || "unknown bridge error");
+      if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
+        return this.fail(id, config, "bridge returned no vehicles");
+      }
 
       const vehicle = result.vehicles[0];
       const payload = {
@@ -282,8 +291,14 @@ module.exports = NodeHelper.create({
       this.onPayload(id, config, payload);
     });
 
-    child.stdin.write(JSON.stringify(job));
-    child.stdin.end();
+    // a broken pipe (child died before reading stdin) must not crash the helper
+    child.stdin.on("error", () => {});
+    try {
+      child.stdin.write(JSON.stringify(job));
+      child.stdin.end();
+    } catch (e) {
+      /* 'error' handler + child.on('close'/'error') take it from here */
+    }
   },
 
   /** common success path: record history, cache, emit, publish. */
