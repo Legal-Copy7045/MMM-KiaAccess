@@ -87,6 +87,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data.get(DOMAIN):
             for spec in COMMANDS:
                 hass.services.async_remove(DOMAIN, spec["key"])
+            hass.services.async_remove(DOMAIN, "refresh_calendar_destinations")
     return unload_ok
 
 
@@ -155,3 +156,16 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(
             DOMAIN, spec["key"], _make_handler(spec["key"]), schema=vol.Schema(opt_schema)
         )
+
+    async def _refresh_calendar(call: ServiceCall) -> None:
+        coordinator = _coordinator_for(hass, call)
+        coordinator._cal_pois_at = 0.0  # noqa: SLF001 — clear the throttle
+        await coordinator.async_refresh_calendar_pois()
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "refresh_calendar_destinations",
+        _refresh_calendar,
+        schema=vol.Schema({vol.Optional("entry_id"): cv.string}),
+    )
