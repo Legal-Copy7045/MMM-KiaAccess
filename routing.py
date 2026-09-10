@@ -10,6 +10,7 @@ response. The caller (coordinator) does the HTTP and the caching.
 from __future__ import annotations
 
 import json as _json
+import urllib.parse as _up
 
 PROVIDERS = ["geoapify", "tomtom"]
 
@@ -127,3 +128,48 @@ def parse_matrix(provider, data, target_count):
             }
         return out
     return out
+
+
+def geocode_request(provider, text, api_key):
+    """Forward-geocode request (address -> lat/lon), US-biased.
+
+    Returns {"url", "method": "GET"} or None.
+    """
+    if not api_key or not text:
+        return None
+    q = _up.quote(str(text), safe="")
+    if provider == "geoapify":
+        return {
+            "url": "https://api.geoapify.com/v1/geocode/search?text=" + q
+            + "&limit=1&filter=countrycode:us&apiKey=" + str(api_key),
+            "method": "GET",
+        }
+    if provider == "tomtom":
+        return {
+            "url": "https://api.tomtom.com/search/2/geocode/" + q
+            + ".json?limit=1&countrySet=US&key=" + str(api_key),
+            "method": "GET",
+        }
+    return None
+
+
+def parse_geocode(provider, data):
+    """Parse a forward-geocode response. Returns {"lat","lon","name"} or None."""
+    if not data:
+        return None
+    if provider == "geoapify":
+        feats = data.get("features") or []
+        p = (feats[0] or {}).get("properties") if feats else None
+        if not p or p.get("lat") is None or p.get("lon") is None:
+            return None
+        return {"lat": float(p["lat"]), "lon": float(p["lon"]),
+                "name": p.get("formatted") or p.get("address_line1") or ""}
+    if provider == "tomtom":
+        res = data.get("results") or []
+        pos = (res[0] or {}).get("position") if res else None
+        if not pos or pos.get("lat") is None or pos.get("lon") is None:
+            return None
+        addr = (res[0] or {}).get("address") or {}
+        return {"lat": float(pos["lat"]), "lon": float(pos["lon"]),
+                "name": addr.get("freeformAddress") or ""}
+    return None

@@ -66,4 +66,22 @@ assert R.parse_matrix("geoapify", None, 2) == [None, None]
 assert R.parse_matrix("tomtom", {}, 1) == [None]
 assert R.parse_matrix("nope", t_resp, 2) == [None, None]
 
+# geocode_request / parse_geocode
+gg = R.geocode_request("geoapify", "100 Main St, Hillcrest", "K")
+assert gg["method"] == "GET"
+assert "geocode/search?text=409%20Hillcrest" in gg["url"]
+assert "countrycode:us" in gg["url"] and "apiKey=K" in gg["url"]
+tg = R.geocode_request("tomtom", "100 Main St", "K2")
+assert "/geocode/409%20Hillcrest%20Rd.json" in tg["url"] and "countrySet=US" in tg["url"]
+assert R.geocode_request("geoapify", "", "K") is None
+assert R.geocode_request("nope", "x", "K") is None
+
+gg_resp = {"features": [{"properties": {"lat": 40.71, "lon": -111.75, "formatted": "Hillcrest, PA"}}]}
+assert R.parse_geocode("geoapify", gg_resp) == {"lat": 40.71, "lon": -111.75, "name": "Hillcrest, PA"}
+tg_resp = {"results": [{"position": {"lat": 40.71, "lon": -111.75},
+                        "address": {"freeformAddress": "Hillcrest, PA"}}]}
+assert R.parse_geocode("tomtom", tg_resp) == {"lat": 40.71, "lon": -111.75, "name": "Hillcrest, PA"}
+assert R.parse_geocode("geoapify", {"features": []}) is None
+assert R.parse_geocode("tomtom", None) is None
+
 print("all routing tests passed")

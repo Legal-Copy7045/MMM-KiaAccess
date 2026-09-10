@@ -116,9 +116,55 @@
     return out;
   }
 
+  /**
+   * Build a forward-geocode request (address string -> lat/lon), US-biased.
+   * @returns {{url, method:"GET"}|null}
+   */
+  function geocodeRequest(provider, text, apiKey) {
+    if (!apiKey || !text) return null;
+    var q = encodeURIComponent(String(text));
+    if (provider === "geoapify") {
+      return {
+        url: "https://api.geoapify.com/v1/geocode/search?text=" + q +
+          "&limit=1&filter=countrycode:us&apiKey=" + encodeURIComponent(apiKey),
+        method: "GET"
+      };
+    }
+    if (provider === "tomtom") {
+      return {
+        url: "https://api.tomtom.com/search/2/geocode/" + q +
+          ".json?limit=1&countrySet=US&key=" + encodeURIComponent(apiKey),
+        method: "GET"
+      };
+    }
+    return null;
+  }
+
+  /** Parse a forward-geocode response. @returns {{lat,lon,name}|null} */
+  function parseGeocode(provider, json) {
+    if (!json) return null;
+    if (provider === "geoapify") {
+      var f = (json.features || [])[0];
+      var p = f && f.properties;
+      if (!p || p.lat == null || p.lon == null) return null;
+      return { lat: Number(p.lat), lon: Number(p.lon),
+               name: p.formatted || p.address_line1 || "" };
+    }
+    if (provider === "tomtom") {
+      var r = (json.results || [])[0];
+      var pos = r && r.position;
+      if (!pos || pos.lat == null || pos.lon == null) return null;
+      return { lat: Number(pos.lat), lon: Number(pos.lon),
+               name: (r.address && r.address.freeformAddress) || "" };
+    }
+    return null;
+  }
+
   return {
     PROVIDERS: PROVIDERS,
     matrixRequest: matrixRequest,
-    parseMatrix: parseMatrix
+    parseMatrix: parseMatrix,
+    geocodeRequest: geocodeRequest,
+    parseGeocode: parseGeocode
   };
 });

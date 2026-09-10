@@ -67,4 +67,24 @@ assert.deepStrictEqual(R.parseMatrix("geoapify", null, 2), [null, null]);
 assert.deepStrictEqual(R.parseMatrix("tomtom", {}, 1), [null]);
 assert.deepStrictEqual(R.parseMatrix("nope", tResp, 2), [null, null]);
 
+// ---- geocodeRequest / parseGeocode ----
+const gg = R.geocodeRequest("geoapify", "100 Main St, Hillcrest", "K");
+assert.strictEqual(gg.method, "GET");
+assert.ok(gg.url.includes("geocode/search?text=409%20Hillcrest"));
+assert.ok(gg.url.includes("countrycode:us") && gg.url.includes("apiKey=K"));
+const tg = R.geocodeRequest("tomtom", "100 Main St", "K2");
+assert.ok(tg.url.includes("/geocode/409%20Hillcrest%20Rd.json") && tg.url.includes("countrySet=US"));
+assert.strictEqual(R.geocodeRequest("geoapify", "", "K"), null);
+assert.strictEqual(R.geocodeRequest("nope", "x", "K"), null);
+
+const ggResp = { features: [{ properties: { lat: 40.71, lon: -111.75, formatted: "Hillcrest, PA" } }] };
+assert.deepStrictEqual(R.parseGeocode("geoapify", ggResp),
+  { lat: 40.71, lon: -111.75, name: "Hillcrest, PA" });
+const tgResp = { results: [{ position: { lat: 40.71, lon: -111.75 },
+  address: { freeformAddress: "Hillcrest, PA" } }] };
+assert.deepStrictEqual(R.parseGeocode("tomtom", tgResp),
+  { lat: 40.71, lon: -111.75, name: "Hillcrest, PA" });
+assert.strictEqual(R.parseGeocode("geoapify", { features: [] }), null);
+assert.strictEqual(R.parseGeocode("tomtom", null), null);
+
 console.log("all routing tests passed");
