@@ -161,11 +161,17 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for(hass, call)
         coordinator._cal_pois_at = 0.0  # noqa: SLF001 — clear the throttle
         coordinator._route_at = 0.0  # noqa: SLF001 — re-route the new POIs too
-        await coordinator.async_refresh_calendar_pois()
+        try:
+            await coordinator.async_refresh_calendar_pois()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.exception("Kia Access calendar refresh failed")
+            raise HomeAssistantError(
+                f"Kia Access calendar refresh failed: {err}"
+            ) from err
         try:
             await coordinator._refresh_drive_times()  # noqa: SLF001
         except Exception:  # noqa: BLE001
-            pass
+            _LOGGER.debug("drive-time refresh failed", exc_info=True)
         coordinator.async_update_listeners()
 
     hass.services.async_register(
