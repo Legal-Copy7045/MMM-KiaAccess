@@ -342,6 +342,7 @@ Module.register("MMM-KiaAccess", {
     this.firstConditionRun = true;
     this.diagramAlerts = []; // [{level,label}] under the diagram's warning triangle
     this.rangeMap = null; // { oneWayUrl, roundTripUrl, … } from node_helper
+    this.rangeReach = null; // { pois, oneWayKm, driveTimeSource } from HA (mode C)
 
     // MagicMirror merges `config` shallowly, so a user-supplied nested block
     // replaces the default wholesale — re-apply the defaults for any missing keys
