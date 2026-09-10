@@ -577,6 +577,10 @@ module.exports = NodeHelper.create({
     payload.sessions = s.sessions.slice(-60);
     payload.openSession = s.openSession || null;
     payload.rangeMap = s.rangeMap || null;
+    // driving times come from HA (mode C); keep the last known set if a poll
+    // couldn't fetch them
+    if (payload.rangeReach) s.rangeReach = payload.rangeReach;
+    else if (s.rangeReach) payload.rangeReach = s.rangeReach;
     payload.trips = s.trips.slice(-60);
     payload.openTrip = s.openTrip || null;
     // note: `config` (credentials / token) is deliberately NOT echoed back

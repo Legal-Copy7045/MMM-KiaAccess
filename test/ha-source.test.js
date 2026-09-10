@@ -31,12 +31,22 @@ function mockFetch(routes) {
         is_locked: "true",
         note: "cached"
       }
+    },
+    "/api/states/sensor.kia_ev9_range_reach": {
+      entity_id: "sensor.kia_ev9_range_reach",
+      state: "180",
+      attributes: {
+        one_way_km: 180, drive_time_source: "tomtom",
+        pois: [{ name: "Work", km: 21, duration_min: 34, source: "zone" }]
+      }
     }
   });
 
   const out = await fetchFromHA({ url: "http://ha.local:8123/", token: "T" });
   assert.strictEqual(out.vehicle.ev_battery_percentage, 63);
   assert.strictEqual(out.vehicle.is_locked, "true");
+  assert.strictEqual(out.rangeReach.driveTimeSource, "tomtom", "range_reach attached");
+  assert.strictEqual(out.rangeReach.pois[0].name, "Work");
   assert.ok(!("friendly_name" in out.vehicle), "cosmetic attrs stripped");
   assert.ok(!("kia_access_raw" in out.vehicle));
   assert.strictEqual(out._meta.source, "homeassistant");
@@ -50,6 +60,25 @@ function mockFetch(routes) {
     entity: "sensor.kia_ev9_status"
   });
   assert.strictEqual(out2.vehicle.ev_battery_percentage, 63);
+
+  // range_reach fetch failing must not break the payload
+  global.fetch = mockFetch({
+    "/api/states/sensor.kia_ev9_status": { attributes: { kia_access_raw: true, ev_battery_percentage: 50 } }
+  });
+  const out3 = await fetchFromHA({ url: "http://ha.local:8123", token: "T", entity: "sensor.kia_ev9_status" });
+  assert.strictEqual(out3.vehicle.ev_battery_percentage, 50);
+  assert.ok(!("rangeReach" in out3), "no rangeReach when the sensor 404s");
+  global.fetch = mockFetch({
+    "/api/states": [
+      { entity_id: "sensor.other", attributes: {} },
+      { entity_id: "sensor.kia_ev9_status", attributes: { kia_access_raw: true, ev_battery_percentage: 63 } }
+    ],
+    "/api/states/sensor.kia_ev9_status": {
+      state: "2026-09-07T10:00:00+00:00",
+      attributes: { kia_access_raw: true, ev_battery_percentage: 41 }
+    },
+    "/api/states/sensor.kia_ev9_range_reach": { attributes: { pois: [] } }
+  });
 
   // missing config
   await assert.rejects(() => fetchFromHA({ url: "", token: "" }), /needs homeassistant/);
@@ -111,6 +140,7 @@ function mockFetch(routes) {
       attributes: { kia_access_raw: true, ev_battery_percentage: 44, is_locked: "false" }
     } } } }
   });
+  await new Promise((r) => setTimeout(r, 10)); // _emit awaits the range_reach fetch
   const last = payloads[payloads.length - 1];
   assert.strictEqual(last.vehicle.ev_battery_percentage, 44);
   assert.strictEqual(last.vehicle.is_locked, "false");

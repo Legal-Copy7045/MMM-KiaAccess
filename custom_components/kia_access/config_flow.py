@@ -18,16 +18,24 @@ try:
         NumberSelector,
         NumberSelectorConfig,
         NumberSelectorMode,
+        TextSelector,
+        TextSelectorConfig,
     )
 
     def _number(lo, hi, step):
         return NumberSelector(
             NumberSelectorConfig(min=lo, max=hi, step=step, mode=NumberSelectorMode.BOX)
         )
+
+    def _multiline():
+        return TextSelector(TextSelectorConfig(multiline=True))
 except ImportError:  # pragma: no cover — very old HA
 
     def _number(lo, hi, step):
         return vol.All(vol.Coerce(float), vol.Range(min=lo, max=hi))
+
+    def _multiline():
+        return str
 
 from . import kia_client
 from .const import (
@@ -266,6 +274,13 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         default=float(opts.get("calendar_lookahead_hours") or 72),
                     ): _number(6, 336, 1),
                     vol.Optional(
+                        "static_destinations",
+                        default=opts.get("static_destinations", ""),
+                        description={
+                            "suggested_value": opts.get("static_destinations", "")
+                        },
+                    ): _multiline(),
+                    vol.Optional(
                         "drive_time_provider",
                         default=opts.get("drive_time_provider", "estimate"),
                     ): vol.In(["estimate", "geoapify", "tomtom"]),
@@ -276,6 +291,10 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                             "suggested_value": opts.get("routing_api_key", "")
                         },
                     ): str,
+                    vol.Optional(
+                        "drive_time_routes",
+                        default=opts.get("drive_time_routes", True),
+                    ): bool,
                 }
             ),
         )

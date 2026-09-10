@@ -91,9 +91,39 @@ function payloadFromState(state, entity, via) {
   return { vehicle, _meta: meta };
 }
 
+/** the reachable-destinations sensor id, from config or derived from the
+ *  summary entity (`sensor.<v>_status` -> `sensor.<v>_range_reach`) */
+function rangeReachEntity(ha, summaryEntity) {
+  if (ha && ha.rangeReachEntity) return ha.rangeReachEntity;
+  if (!summaryEntity) return null;
+  return /_status$/.test(summaryEntity)
+    ? summaryEntity.replace(/_status$/, "_range_reach")
+    : null;
+}
+
+/** best-effort: fetch the range_reach sensor and hang its driving-times data
+ *  off the payload as `payload.rangeReach` (never throws) */
+async function attachRangeReach(base, token, payload, summaryEntity, ha) {
+  const id = rangeReachEntity(ha, summaryEntity);
+  if (!id) return payload;
+  try {
+    const st = await haGet(base, token, "/api/states/" + encodeURIComponent(id));
+    const a = (st && st.attributes) || {};
+    payload.rangeReach = {
+      entity: id,
+      oneWayKm: a.one_way_km != null ? a.one_way_km : null,
+      driveTimeSource: a.drive_time_source || "estimate",
+      pois: Array.isArray(a.pois) ? a.pois : []
+    };
+  } catch (e) {
+    /* leave payload.rangeReach undefined — the module falls back to local calc */
+  }
+  return payload;
+}
+
 /**
- * @param {object} ha  { url, token, entity? }
- * @returns {Promise<{vehicle: object, _meta: object}>}
+ * @param {object} ha  { url, token, entity?, rangeReachEntity? }
+ * @returns {Promise<{vehicle: object, _meta: object, rangeReach?: object}>}
  */
 async function fetchFromHA(ha) {
   if (!ha || !ha.url || !ha.token) {
@@ -102,7 +132,8 @@ async function fetchFromHA(ha) {
   const base = String(ha.url).replace(/\/+$/, "");
   const entity = await findSummaryEntity(base, ha.token, ha.entity);
   const state = await haGet(base, ha.token, "/api/states/" + encodeURIComponent(entity));
-  return payloadFromState(state, entity, "rest");
+  const payload = payloadFromState(state, entity, "rest");
+  return attachRangeReach(base, ha.token, payload, entity, ha);
 }
 
 /* ---------------------------------------------------------------------------
@@ -261,10 +292,15 @@ class HaLiveClient {
         msg.event.variables &&
         msg.event.variables.trigger &&
         msg.event.variables.trigger.to_state;
-      if (to && typeof this.cb.onPayload === "function") {
-        this.cb.onPayload(payloadFromState(to, this._entity, "push"));
-      }
+      if (to) this._emit(to);
     }
+  }
+
+  async _emit(state) {
+    if (typeof this.cb.onPayload !== "function") return;
+    const payload = payloadFromState(state, this._entity, "push");
+    await attachRangeReach(this.base, this.ha.token, payload, this._entity, this.ha);
+    this.cb.onPayload(payload);
   }
 
   async _primeInitial() {
@@ -274,9 +310,7 @@ class HaLiveClient {
         this.ha.token,
         "/api/states/" + encodeURIComponent(this._entity)
       );
-      if (typeof this.cb.onPayload === "function") {
-        this.cb.onPayload(payloadFromState(state, this._entity, "push"));
-      }
+      await this._emit(state);
     } catch (e) {
       /* the periodic fallback poll in node_helper will cover this */
     }

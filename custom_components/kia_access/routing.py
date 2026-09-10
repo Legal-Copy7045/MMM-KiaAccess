@@ -173,3 +173,115 @@ def parse_geocode(provider, data):
         return {"lat": float(pos["lat"]), "lon": float(pos["lon"]),
                 "name": addr.get("freeformAddress") or ""}
     return None
+
+
+def route_request(provider, origin, dest, api_key, o=None):
+    """Single origin -> destination route (road breakdown + free-flow time).
+
+    Returns {"url", "method": "GET"} or None.
+    """
+    o = o or {}
+    s, d = _pt(origin), _pt(dest)
+    if not api_key or not _ok(s) or not _ok(d):
+        return None
+    traffic = o.get("traffic") is not False
+    if provider == "tomtom":
+        mode = "truck" if o.get("mode") == "truck" else "car"
+        return {
+            "url": "https://api.tomtom.com/routing/1/calculateRoute/"
+            + f"{s[0]},{s[1]}:{d[0]},{d[1]}/json"
+            + "?key=" + str(api_key)
+            + "&travelMode=" + mode
+            + "&traffic=" + ("true" if traffic else "false")
+            + "&computeTravelTimeFor=all"
+            + "&instructionsType=text&sectionType=street&routeRepresentation=summaryOnly",
+            "method": "GET",
+        }
+    if provider == "geoapify":
+        return {
+            "url": "https://api.geoapify.com/v1/routing?waypoints="
+            + f"{s[0]},{s[1]}|{d[0]},{d[1]}"
+            + "&mode=" + (o.get("mode") or "drive")
+            + "&details=instruction_details&apiKey=" + str(api_key),
+            "method": "GET",
+        }
+    return None
+
+
+def _top_roads(pairs, n=3):
+    """top `n` distinct road labels by metres covered, in route order"""
+    order, meters = [], {}
+    for road, m in pairs:
+        road = (road or "").strip()
+        if not road:
+            continue
+        if road not in meters:
+            meters[road] = 0.0
+            order.append(road)
+        meters[road] += max(0.0, float(m or 0))
+    picked = sorted(
+        (r for r in order if meters[r] > 300),
+        key=lambda r: meters[r],
+        reverse=True,
+    )[:n]
+    return sorted(picked, key=order.index)
+
+
+def parse_route(provider, data):
+    """Parse a single-route response.
+
+    Returns {durationMin, distanceKm, typicalMin, delayMin, via} or None.
+    typicalMin / delayMin are None when the provider has no traffic model.
+    """
+    if not data:
+        return None
+    if provider == "tomtom":
+        routes = data.get("routes") or []
+        route = routes[0] if routes else None
+        if not route:
+            return None
+        summ = route.get("summary") or {}
+        if summ.get("travelTimeInSeconds") is None or summ.get("lengthInMeters") is None:
+            return None
+        live = float(summ["travelTimeInSeconds"])
+        if summ.get("noTrafficTravelTimeInSeconds") is not None:
+            free = float(summ["noTrafficTravelTimeInSeconds"])
+        elif summ.get("trafficDelayInSeconds") is not None:
+            free = live - float(summ["trafficDelayInSeconds"])
+        else:
+            free = None
+        instr = (route.get("guidance") or {}).get("instructions") or []
+        pairs = []
+        for i, ins in enumerate(instr):
+            nxt = instr[i + 1] if i + 1 < len(instr) else None
+            m = 0
+            if nxt and nxt.get("routeOffsetInMeters") is not None and ins.get(
+                "routeOffsetInMeters"
+            ) is not None:
+                m = nxt["routeOffsetInMeters"] - ins["routeOffsetInMeters"]
+            road = (ins.get("roadNumbers") or [None])[0] or ins.get("street") or ""
+            pairs.append((road, m))
+        return {
+            "durationMin": round(live / 60),
+            "distanceKm": float(summ["lengthInMeters"]) / 1000,
+            "typicalMin": round(free / 60) if free is not None else None,
+            "delayMin": max(0, round((live - free) / 60)) if free is not None else None,
+            "via": " · ".join(_top_roads(pairs, 3)) or None,
+        }
+    if provider == "geoapify":
+        feats = data.get("features") or []
+        pr = (feats[0] or {}).get("properties") if feats else None
+        if not pr or pr.get("time") is None or pr.get("distance") is None:
+            return None
+        gp = []
+        for leg in pr.get("legs") or []:
+            for stp in leg.get("steps") or []:
+                gp.append((stp.get("name") or "", float(stp.get("distance") or 0)))
+        return {
+            "durationMin": round(float(pr["time"]) / 60),
+            "distanceKm": float(pr["distance"]) / 1000,
+            "typicalMin": None,
+            "delayMin": None,
+            "via": " · ".join(_top_roads(gp, 3)) or None,
+        }
+    return None
