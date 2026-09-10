@@ -92,10 +92,26 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._trips = tdata.get("trips") or []
         self._open_trip = tdata.get("open") or None
 
+    @staticmethod
+    def _valid_ll(v) -> bool:
+        return (
+            isinstance(v, (list, tuple))
+            and len(v) >= 2
+            and isinstance(v[0], (int, float))
+            and isinstance(v[1], (int, float))
+        )
+
     async def async_load_prefs(self) -> None:
         data = await self._prefs_store.async_load() or {}
         self.climate_prefs = {**DEFAULT_CLIMATE_PREFS, **data}
-        self._geo_cache = (await self._geo_store.async_load() or {}).get("geo", {})
+        raw = (await self._geo_store.async_load() or {}).get("geo", {})
+        # older versions cached `None` (or a 3-tuple) on a failed geocode, which
+        # then stuck forever — keep only clean [lat, lon] pairs
+        self._geo_cache = {
+            k: [v[0], v[1]] for k, v in raw.items() if self._valid_ll(v)
+        }
+        if len(self._geo_cache) != len(raw):
+            await self._geo_store.async_save({"geo": self._geo_cache})
 
     async def async_set_pref(self, key: str, value) -> None:
         self.climate_prefs[key] = value
@@ -294,11 +310,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         key = " ".join(address.lower().split())[:200]
         if key in self._geo_cache:
             ll = self._geo_cache[key]
-            self._cal_status.setdefault("geocoded_ok", []).append(
-                {"address": address, "lat": round(ll[0], 4), "lon": round(ll[1], 4),
-                 "via": "cache"}
-            )
-            return ll
+            if self._valid_ll(ll):
+                self._cal_status.setdefault("geocoded_ok", []).append(
+                    {"address": address, "lat": round(ll[0], 4),
+                     "lon": round(ll[1], 4), "via": "cache"}
+                )
+                return [ll[0], ll[1]]
+            self._geo_cache.pop(key, None)  # stale bad entry — fall through
 
         provider = (self.entry.options.get("drive_time_provider") or "").strip()
         rkey = (self.entry.options.get("routing_api_key") or "").strip()
