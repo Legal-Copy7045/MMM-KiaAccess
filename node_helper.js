@@ -27,6 +27,7 @@ const trips = require("./core/trips.js");
 const drange = require("./core/range.js");
 const isoline = require("./core/isoline.js");
 const webhook = require("./webhook.js");
+const exporter = require("./exporter.js");
 
 const CACHE_DIR = path.join(__dirname, "cache");
 
@@ -45,6 +46,7 @@ module.exports = NodeHelper.create({
   start() {
     this.inFlight = {};
     this.mqttClients = {};
+    this.promServers = {}; // key -> exporter.PromServer
     this.haLive = {}; // id -> HaLiveClient (source: "homeassistant", mode: "push")
     this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
     try {
@@ -400,7 +402,46 @@ module.exports = NodeHelper.create({
 
     this.emitData(id, config, payload);
     this.publishMqtt(config, payload);
+    this.runExporters(config, payload);
     this.maybeRangeMap(id, config, payload);
+  },
+
+  // ---- optional time-series exporters (InfluxDB push + Prometheus /metrics) ----
+  runExporters(config, payload) {
+    const ex = config && config.exporter;
+    if (!ex) return;
+    const flat = flatten(payload.vehicle || {});
+    const meta = payload._meta || {};
+    const vin =
+      (payload.vehicle && (payload.vehicle.VIN || payload.vehicle.vin)) || null;
+    const tags = Object.assign(vin ? { vin } : {}, ex.tags || {});
+
+    if (ex.influx && ex.influx.url && ex.influx.bucket) {
+      exporter
+        .pushInflux(ex.influx, flat, meta)
+        .then((code) => {
+          if (code < 200 || code >= 300)
+            Log.warn("[MMM-KiaAccess] influx write -> HTTP " + code);
+        })
+        .catch((e) => Log.warn("[MMM-KiaAccess] influx write failed: " + e.message));
+    }
+
+    if (ex.prometheus && ex.prometheus.enabled !== false) {
+      const port = Number(ex.prometheus.port) || 9110;
+      let srv = this.promServers[port];
+      if (!srv) {
+        srv = new exporter.PromServer({
+          port,
+          path: ex.prometheus.path,
+          prefix: ex.prometheus.prefix || "kia",
+          labels: tags
+        });
+        srv.start();
+        this.promServers[port] = srv;
+        Log.info("[MMM-KiaAccess] Prometheus /metrics on :" + port);
+      }
+      srv.setSnapshot(flat, meta);
+    }
   },
 
   // ---- optional road-network reachable-area image ----

@@ -256,6 +256,26 @@ Module.register("MMM-KiaAccess", {
         discoveryPrefix: "homeassistant",
         device: {} // extra fields merged into the HA `device` block
       }
+    },
+
+    // ---- optional time-series exporters (node_helper) ----
+    // Every numeric / boolean vehicle.* value after each fetch.
+    exporter: {
+      tags: {}, // extra labels/tags on every point (vin is added automatically)
+      influx: {
+        url: "", // e.g. "http://192.168.1.8:8086" (InfluxDB v2 or v1.8)
+        org: "",
+        bucket: "", // required to enable
+        token: "",
+        measurement: "kia_vehicle",
+        timeoutMs: 8000
+      },
+      prometheus: {
+        enabled: false, // true = serve /metrics
+        port: 9110,
+        path: "/metrics",
+        prefix: "kia"
+      }
     }
   },
 
@@ -318,6 +338,11 @@ Module.register("MMM-KiaAccess", {
       this.config.notifications.webhook
     );
     this.config.mqtt = merge(this.defaults.mqtt, this.config.mqtt);
+    this.config.exporter = merge(this.defaults.exporter, this.config.exporter);
+    this.config.exporter.influx = merge(
+      this.defaults.exporter.influx, this.config.exporter.influx);
+    this.config.exporter.prometheus = merge(
+      this.defaults.exporter.prometheus, this.config.exporter.prometheus);
     this.config.mqtt.homeAssistant = merge(
       this.defaults.mqtt.homeAssistant,
       this.config.mqtt.homeAssistant
@@ -403,11 +428,24 @@ Module.register("MMM-KiaAccess", {
         retentionDays: ((c.visuals || {}).tripLog || {}).retentionDays || 365
       },
       mqtt: c.mqtt && c.mqtt.enabled && c.mqtt.url ? c.mqtt : null,
+      exporter: this.exporterConfig(),
       rangeMap: this.rangeMapConfig()
     };
   },
 
   // config the node_helper needs to fetch + build the range-map image
+  exporterConfig() {
+    const ex = this.config.exporter || {};
+    const influxOn = ex.influx && ex.influx.url && ex.influx.bucket;
+    const promOn = ex.prometheus && ex.prometheus.enabled;
+    if (!influxOn && !promOn) return null;
+    return {
+      tags: ex.tags || {},
+      influx: influxOn ? ex.influx : null,
+      prometheus: promOn ? ex.prometheus : null
+    };
+  },
+
   rangeMapConfig() {
     const loc = ((this.config.visuals || {}).location) || {};
     const rm = loc.rangeMap || {};
