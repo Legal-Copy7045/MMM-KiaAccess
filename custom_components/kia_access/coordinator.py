@@ -297,14 +297,20 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
         provider = (self.entry.options.get("drive_time_provider") or "").strip()
         rkey = (self.entry.options.get("routing_api_key") or "").strip()
+        # use the routing key for geocoding whenever one is set — even if the
+        # drive-time provider is left on "estimate". Geoapify is the default
+        # geocoder (generous free tier); TomTom only if that's the provider.
+        gc_provider = provider if provider in drive_routing.PROVIDERS else (
+            "geoapify" if rkey else ""
+        )
         attempts: list[str] = []
         latlon = None
 
-        if provider in drive_routing.PROVIDERS and rkey:
+        if gc_provider and rkey:
             try:
-                latlon = await self._geocode_provider(provider, rkey, address)
+                latlon = await self._geocode_provider(gc_provider, rkey, address)
             except Exception as err:  # noqa: BLE001
-                attempts.append(f"{provider}: {err}")
+                attempts.append(f"{gc_provider}: {err}")
 
         if latlon is None:
             try:
