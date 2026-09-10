@@ -1,13 +1,19 @@
 {
   "domain": "kia_access",
   "name": "Kia Access",
-  "codeowners": ["@Legal-Copy7045"],
+  "codeowners": [
+    "@Legal-Copy7045"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/Legal-Copy7045/MMM-KiaAccess",
   "integration_type": "device",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Legal-Copy7045/MMM-KiaAccess/issues",
-  "loggers": ["hyundai_kia_connect_api"],
-  "requirements": ["hyundai_kia_connect_api>=4.25.3"],
-  "version": "2.43.0"
+  "loggers": [
+    "hyundai_kia_connect_api"
+  ],
+  "requirements": [
+    "hyundai_kia_connect_api>=4.25.3"
+  ],
+  "version": "2.43.1"
 }

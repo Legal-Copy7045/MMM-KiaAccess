@@ -281,6 +281,11 @@ g.KiaAccessCommands={
     heat: "#ff7043"
   };
 
+  // Monotonic counter for namespacing SVG element ids so multiple diagrams on
+  // one page don't collide. Not security-sensitive — just needs to be unique
+  // within the document (was Math.random, which CodeQL flags).
+  var _uidSeq = 0;
+
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -683,7 +688,7 @@ g.KiaAccessCommands={
       return s["tyre" + which] === true || s.tyreAny === true;
     };
 
-    var uid = "k" + Math.random().toString(36).slice(2, 8);
+    var uid = "k" + (++_uidSeq).toString(36);
     var exporting = s.v2l === true || s.v2x === true;
     var plugged = s.charging === true || s.plugged === true || exporting;
     var flow =

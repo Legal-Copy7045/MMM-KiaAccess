@@ -38,7 +38,9 @@ function numericFields(flat) {
 }
 
 function escTag(s) {
-  return String(s).replace(/[ ,=]/g, "\\$&");
+  // Influx line-protocol escaping for measurement / tag keys / tag values.
+  // Backslash first so an existing "\" in the input isn't left ambiguous.
+  return String(s).replace(/\\/g, "\\\\").replace(/[ ,=]/g, "\\$&");
 }
 
 /** InfluxDB line protocol for one sample. `ts` in ns (optional). */
