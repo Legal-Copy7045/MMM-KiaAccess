@@ -269,21 +269,64 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             )
         return out
 
+    async def _geocode_provider(self, provider: str, key: str, address: str):
+        """Forward-geocode via the routing provider (Geoapify / TomTom). Raises
+        on any failure so the caller can record the reason."""
+        req = drive_routing.geocode_request(provider, address, key)
+        if not req:
+            raise RuntimeError("no geocode request")
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        session = async_get_clientsession(self.hass)
+        async with session.get(req["url"]) as resp:
+            resp.raise_for_status()
+            data = await resp.json(content_type=None)
+        hit = drive_routing.parse_geocode(provider, data)
+        if not hit:
+            raise RuntimeError("no match")
+        return hit["lat"], hit["lon"]
+
     async def _geocode_cached(self, address: str):
-        """address -> (lat, lon) via Nominatim. Successful lookups persist;
-        failures are NOT cached (so a transient rate-limit retries next time)."""
+        """address -> (lat, lon). Tries the routing provider's geocoder first
+        (Nominatim increasingly blocks generic clients), then Nominatim.
+        Successful lookups persist; failures are NOT cached and the reason is
+        stashed on _cal_status. Returns [lat, lon] or None."""
         key = " ".join(address.lower().split())[:200]
         if key in self._geo_cache:
             return self._geo_cache[key]
-        try:
-            lat, lon, _ = await self.hass.async_add_executor_job(
-                kia_client._geocode, address  # noqa: SLF001
-            )
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("Kia Access: could not geocode %r: %s", address, err)
+
+        provider = (self.entry.options.get("drive_time_provider") or "").strip()
+        rkey = (self.entry.options.get("routing_api_key") or "").strip()
+        attempts: list[str] = []
+        latlon = None
+
+        if provider in drive_routing.PROVIDERS and rkey:
+            try:
+                latlon = await self._geocode_provider(provider, rkey, address)
+            except Exception as err:  # noqa: BLE001
+                attempts.append(f"{provider}: {err}")
+
+        if latlon is None:
+            try:
+                lat, lon, _ = await self.hass.async_add_executor_job(
+                    kia_client._geocode, address  # noqa: SLF001
+                )
+                latlon = (lat, lon)
+            except Exception as err:  # noqa: BLE001
+                attempts.append(f"nominatim: {err}")
+
+        if latlon is None:
+            msg = f"{address!r}: " + "; ".join(attempts)
+            _LOGGER.warning("Kia Access: could not geocode %s", msg)
+            self._cal_status.setdefault("geocode_errors", []).append(msg)
             return None
+
+        lat, lon = latlon
         if not self._in_us(lat, lon):
             _LOGGER.debug("Kia Access: %r geocoded outside the US, skipping", address)
+            self._cal_status.setdefault("geocode_errors", []).append(
+                f"{address!r}: outside US ({round(lat, 3)},{round(lon, 3)})"
+            )
             return None
         self._geo_cache[key] = [lat, lon]
         await self._geo_store.async_save({"geo": self._geo_cache})
@@ -295,9 +338,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         raw = self.entry.options.get("calendar_entities") or ""
         cals = [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
         self._cal_status = {"calendars": cals, "events": 0, "with_location": 0,
-                            "geocoded": 0, "errors": []}
+                            "geocoded": 0, "errors": [], "seen": []}
         if not cals:
             self._cal_pois = []
+            self._cal_status["errors"].append(
+                "no calendars configured (Settings -> Devices -> Kia Access -> "
+                "Configure -> 'Calendar entities for trip destinations')"
+            )
             return
         hours = float(self.entry.options.get("calendar_lookahead_hours") or 72)
         start = dt_util.now()
@@ -322,11 +369,19 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             block = (resp or {}).get(cal) if isinstance(resp, dict) else None
             events = (block or resp or {}).get("events", []) if isinstance(
                 block or resp or {}, dict) else []
+            if not events:
+                self._cal_status["errors"].append(
+                    f"{cal}: no events in the next {hours:g}h "
+                    f"(response keys: {list(resp.keys()) if isinstance(resp, dict) else type(resp).__name__})"
+                )
             self._cal_status["events"] += len(events)
             for ev in events:
                 loc = (ev.get("location") or "").strip()
                 summary = (ev.get("summary") or "Event").strip()
                 if not loc:
+                    self._cal_status["seen"].append(
+                        {"summary": summary[:40], "location": None, "result": "no location"}
+                    )
                     continue
                 self._cal_status["with_location"] += 1
                 if loc.lower() in seen:
@@ -335,7 +390,15 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 ll = await self._geocode_cached(loc)
                 if ll:
                     self._cal_status["geocoded"] += 1
+                    self._cal_status["seen"].append(
+                        {"summary": summary[:40], "location": loc, "result": "ok"}
+                    )
                     pois.append({"name": summary[:40], "lat": ll[0], "lon": ll[1]})
+                else:
+                    self._cal_status["seen"].append(
+                        {"summary": summary[:40], "location": loc,
+                         "result": "geocode failed (see geocode_errors)"}
+                    )
         self._cal_pois = pois[:12]
         _LOGGER.info(
             "Kia Access calendar destinations: %s event(s), %s with a location, "
