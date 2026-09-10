@@ -1,6 +1,7 @@
 """Data coordinator for Kia Access."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -294,7 +295,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
         session = async_get_clientsession(self.hass)
-        async with session.get(req["url"]) as resp:
+        async with asyncio.timeout(15), session.get(req["url"]) as resp:
             resp.raise_for_status()
             data = await resp.json(content_type=None)
         hit = drive_routing.parse_geocode(provider, data)
@@ -559,7 +560,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
             session = async_get_clientsession(self.hass)
-            async with session.post(
+            async with asyncio.timeout(20), session.post(
                 req["url"], data=req["body"], headers=req["headers"],
             ) as resp:
                 resp.raise_for_status()
@@ -676,9 +677,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "token": d.get(CONF_TOKEN),
             # "Poll the car directly" is the master switch. When it's off (the
             # default — kinder to the 12V battery) every update takes Kia's
-            # server-side cache: forceRefreshTimeout 0 tells kia_client not to
-            # wake the car. When on, we wait up to force_refresh_timeout seconds
-            # for a live reading before falling back to the cache.
+            # server-side cache. Two independent guards enforce that, either of
+            # which alone stops kia_client from waking the car:
+            #   refresh: False           -> the wake branch is skipped entirely
+            #   forceRefreshTimeout: 0   -> ...and even if it ran, 0s wait
+            "refresh": self._poll_car_directly(),
             "forceRefreshTimeout": (
                 self.entry.options.get(
                     "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
@@ -691,7 +694,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         return job
 
     async def _async_update_data(self) -> dict:
-        job = self._job(refresh=True)
+        job = self._job()
         try:
             result = await self.hass.async_add_executor_job(kia_client.fetch, job)
         except kia_client.OtpRequired as err:

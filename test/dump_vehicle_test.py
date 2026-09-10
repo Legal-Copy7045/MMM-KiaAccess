@@ -99,5 +99,8 @@ def _run_fetch(job):
 assert _run_fetch({"refresh": True, "forceRefreshTimeout": 30}).woke is True
 assert _run_fetch({"refresh": True, "forceRefreshTimeout": 0}).woke is False
 assert _run_fetch({"refresh": False, "forceRefreshTimeout": 30}).woke is False
+assert _run_fetch({"refresh": False, "forceRefreshTimeout": 0}).woke is False
+assert _run_fetch({"refresh": True, "forceRefreshTimeout": -1}).woke is False
+assert _run_fetch({"forceRefreshTimeout": None}).woke is True, "legacy default wakes"
 
 print("dump_vehicle tests passed")

@@ -147,8 +147,11 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
     _attr_suggested_display_precision = 0
-    # POI coordinates ride in the attributes — keep them out of the DB
-    _unrecorded_attributes = frozenset({"pois", "in_reach"})
+    # POI coordinates + diagnostic blobs ride in the attributes — keep them
+    # out of the recorder / history
+    _unrecorded_attributes = frozenset(
+        {"pois", "in_reach", "calendar_status", "drive_time_status"}
+    )
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "range_reach")

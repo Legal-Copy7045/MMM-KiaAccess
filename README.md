@@ -158,9 +158,11 @@ Lovelace card. No MagicMirror required.
      (`set_temp` — **°F, 62–82** for the USA region — `duration`, `climate`,
      `defrost`, `heating`, `steering_wheel`, `front_left_seat` …
      `rear_right_seat`), `kia_access.stop_climate`,
-     `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`) and
+     `kia_access.set_charge_limits` (`ac_limit` / `dc_limit`),
      `kia_access.send_to_car` (`name` + `address`, or `latitude` / `longitude`)
-     — see [Send to car](#send-to-car)
+     — see [Send to car](#send-to-car) — and
+     `kia_access.refresh_calendar_destinations` (re-read the calendars for the
+     reachable-destinations list / range map now)
    - *(commands the car or region doesn't support just return a clear error
      when pressed)*
    - **`kia_access_alert`** events on the event bus for the same edge-triggered
@@ -187,12 +189,16 @@ Lovelace card. No MagicMirror required.
    browser. For a fixed one-tap warm-up, call `kia_access.start_climate` from a
    script or automation instead.
 
-**Scan interval** and **Poll the car directly** are in the integration's
-**Configure** dialog. Leave **Poll the car directly** off (the default) to only
-ever read Kia's cached data and never wake the car (see the note at the top of
-this README); turn it on for live readings, bounded by **Live wake-up wait**.
-The rotated refresh token is stored in the config entry — nothing is written
-into the HACS-managed folder.
+The integration's **Configure** dialog holds **Scan interval**, **Poll the car
+directly** (+ **Live wake-up wait**), **Price per kWh** / **capacity**, **Range
+reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
+(hours)**, and **Drive-time provider** / **Routing API key**. Leave **Poll the
+car directly** off (the default) to only ever read Kia's cached data and never
+wake the car — with it off, every update sends both `refresh: false` **and**
+`forceRefreshTimeout: 0`, either of which alone stops the wake (see the note at
+the top of this README); turn it on for live readings, bounded by **Live
+wake-up wait**. The rotated refresh token is stored in the config entry —
+nothing is written into the HACS-managed folder.
 
 **Ownership extras (optional):** [`examples/ha-ownership-package.yaml`](examples/ha-ownership-package.yaml)
 is a drop-in HA package that adds an efficiency proxy, a seasonal-range
@@ -699,11 +705,24 @@ location: {
 
 Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 (state = one-way distance; `pois` attribute lists reachable places with
-`one_way_reachable` / `round_trip_reachable`, `arrival_pct`, `mi`, and lat/lon).
-Destinations are your **US** `zone.*` entities plus — if you set **Calendar
-entities** + **Calendar look-ahead** in the **Configure** dialog — any event
-with a location in the next N hours (geocoded, US only, cached). `Range reach
-factor` and `… reserve %` are there too.
+`one_way_reachable` / `round_trip_reachable`, `arrival_pct`, `mi`, `duration` /
+`duration_min`, `routed`, and lat/lon). `Range reach factor` and `… reserve %`
+are in the **Configure** dialog.
+
+**Destinations** are your **US** `zone.*` entities plus — if you set **Calendar
+entities** + **Calendar look-ahead (hours)** in the **Configure** dialog — any
+event with a location in the next N hours, geocoded (US only, cached). Call
+**`kia_access.refresh_calendar_destinations`** to re-read the calendars now
+instead of waiting for the ~30-min cycle; `calendar_status` on the sensor shows
+what was found / geocoded.
+
+**Drive time.** By default the `duration` is a straight-line estimate. Set
+**Drive-time provider** = `geoapify` or `tomtom` and a **Routing API key** in
+the **Configure** dialog and `duration` / `mi` / `arrival_pct` become **real
+road distance + live-traffic drive time** (one matrix call per poll, free
+tiers are plenty). A **Geoapify** key is also used to geocode calendar
+locations even when the provider is left on `estimate` — Home Assistant's
+built-in Nominatim geocoder is increasingly blocked.
 
 **Reachable-area map.** A map of how far you can drive, shaded, with your saved
 places pinned. Two providers, both free:
