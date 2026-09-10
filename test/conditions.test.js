@@ -139,4 +139,40 @@ r = C.evaluate(
 );
 assert.strictEqual(find(r, "not_plugged_home").active, false);
 
+// --- moved while parked (tow / theft) ---
+r = C.evaluate({ movedWhileParkedKm: 1.2, movedWhileParkedMin: 5, carOn: false }, {}, {});
+assert.strictEqual(find(r, "unexpected_move").active, true);
+assert.ok(/moved 1 km/.test(find(r, "unexpected_move").message));
+// sustained-minutes gate: far but only just started
+r = C.evaluate({ movedWhileParkedKm: 1.2, movedWhileParkedMin: 1, carOn: false }, {}, {});
+assert.strictEqual(find(r, "unexpected_move").active, false);
+// being driven -> not a tow
+r = C.evaluate({ movedWhileParkedKm: 5, movedWhileParkedMin: 30, carOn: true }, {}, {});
+assert.strictEqual(find(r, "unexpected_move").active, false);
+// no data -> inert
+r = C.evaluate({}, {}, {});
+assert.strictEqual(find(r, "unexpected_move").active, null);
+// small jitter clears
+r = C.evaluate({ movedWhileParkedKm: 0.1, carOn: false }, {}, { unexpected_move: true });
+assert.strictEqual(find(r, "unexpected_move").active, false);
+
+// --- can't get home ---
+// 250 km range, 15% reserve -> 212 usable; home 200 km * 1.3 = 260 need -> short
+r = C.evaluate({ atHome: false, homeDistanceKm: 200, rangeKm: 250 }, {}, {});
+assert.strictEqual(find(r, "cant_get_home").active, true);
+assert.strictEqual(find(r, "cant_get_home").level, "critical");
+// plenty of range
+r = C.evaluate({ atHome: false, homeDistanceKm: 40, rangeKm: 250 }, {}, {});
+assert.strictEqual(find(r, "cant_get_home").active, false);
+// tight but makes it -> warning level, holds in band
+r = C.evaluate({ atHome: false, homeDistanceKm: 150, rangeKm: 250 }, {}, {});
+const gh = find(r, "cant_get_home");
+assert.strictEqual(gh.level, "warning");
+// at home -> not evaluated
+r = C.evaluate({ atHome: true, homeDistanceKm: 200, rangeKm: 50 }, {}, {});
+assert.strictEqual(find(r, "cant_get_home"), undefined);
+// away but no range data -> not evaluated
+r = C.evaluate({ atHome: false, homeDistanceKm: 200 }, {}, {});
+assert.strictEqual(find(r, "cant_get_home"), undefined);
+
 console.log("all conditions tests passed");

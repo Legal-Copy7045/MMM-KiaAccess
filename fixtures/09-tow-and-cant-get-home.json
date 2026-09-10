@@ -1,0 +1,17 @@
+{
+  "name": "moved while parked + not enough range to get home",
+  "state": {
+    "carOn": false,
+    "movedWhileParkedKm": 2.4,
+    "movedWhileParkedMin": 9,
+    "atHome": false,
+    "homeDistanceKm": 210,
+    "rangeKm": 240
+  },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "unexpected_move": true,
+    "cant_get_home": true
+  }
+}

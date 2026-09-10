@@ -647,6 +647,39 @@ Module.register("MMM-KiaAccess", {
     st.homeUnpluggedMin = this._homeUnpluggedSince
       ? (Date.now() - this._homeUnpluggedSince) / 60000 : null;
 
+    // distance car -> configured home (km) for the "can't get home" check
+    const _loc = (this.config.visuals && this.config.visuals.location) || {};
+    st.homeDistanceKm = (_loc.homeLat != null && st.locationLat != null)
+      ? this.haversineKm(st.locationLat, st.locationLon,
+          Number(_loc.homeLat), Number(_loc.homeLon))
+      : null;
+
+    // moved-while-parked (tow / theft): GPS shifted while the odometer stayed
+    // put and the car was off. Track how far and for how long.
+    const now = Date.now();
+    const p = this._lastParked;
+    const odoStable = p && st.odometerKm != null && Math.abs(st.odometerKm - p.odo) < 0.1;
+    if (odoStable && st.carOn !== true && st.locationLat != null && p.lat != null) {
+      const movedKm = this.haversineKm(p.lat, p.lon, st.locationLat, st.locationLon);
+      if (movedKm != null && movedKm >= 0.15) {
+        if (!this._movedSince) this._movedSince = now;
+        st.movedWhileParkedKm = movedKm;
+        st.movedWhileParkedMin = (now - this._movedSince) / 60000;
+      } else {
+        this._movedSince = null;
+        st.movedWhileParkedKm = 0;
+        st.movedWhileParkedMin = 0;
+      }
+    } else {
+      // driven, or first sample, or no GPS — (re)anchor the parked position
+      this._movedSince = null;
+      if (st.locationLat != null && st.odometerKm != null) {
+        this._lastParked = { lat: st.locationLat, lon: st.locationLon, odo: st.odometerKm };
+      }
+      st.movedWhileParkedKm = this._lastParked ? 0 : null;
+      st.movedWhileParkedMin = 0;
+    }
+
     if (this.config.debug) {
       const loc = (this.config.visuals && this.config.visuals.location) || {};
       Log.info("[MMM-KiaAccess] home check: " + JSON.stringify({

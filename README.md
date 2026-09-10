@@ -831,6 +831,8 @@ promote it to a persistent critical.
 | `chargingStarted` | info | charging just began — a "it plugged in OK" nudge (one-shot) |
 | `serviceDue` | warning | `next_service_distance` ≤ `belowKm` (800 ≈ 500 mi) |
 | `notPluggedInHome` | warning | car is home + unplugged for `graceMin` (20). Needs a home point — MM: `visuals.location.homeLat/homeLon`; HA: `zone.home`. Optional `afterHour` / `beforeHour` to only nag in an evening window |
+| `unexpectedMove` | **critical** | GPS moved ≥ `thresholdKm` (0.5) for ≥ `sustainedMin` (3) while the odometer stayed put and the car was off — a tow or theft. Needs a home point / GPS. Can false-positive on a bad GPS fix; disable with `unexpectedMove: false` |
+| `cantGetHome` | warning → **critical** | you're away from home and the reachable range (after `reservePct` 15) is below the drive home (straight-line × `roadFactor` 1.3). Warning while there's slack, critical once you can't make it. Needs a home point + `ev_driving_range` |
 | `otpExpiring` | warning | OTP within `otpWarnDays` of expiry (mode B) |
 
 `info`-level checks broadcast the `KIA_ACCESS_STATE_CHANGED` notification but

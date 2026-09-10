@@ -254,7 +254,9 @@
     service_due: "Service due",
     not_plugged_home: "Not plugged in",
     otp_expiring: "OTP expiring",
-    charge_interrupted: "Charge interrupted"
+    charge_interrupted: "Charge interrupted",
+    unexpected_move: "Moved while parked",
+    cant_get_home: "Range too low for home"
   };
 
   // "door_open" / "evBatteryLow" -> "Door open" / "Ev battery low"
