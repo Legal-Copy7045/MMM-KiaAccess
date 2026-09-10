@@ -320,6 +320,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "address": self._clean_address(p.get("address")),
             "parked_at": p.get("at"),
             "km_from_home": round(km_home, 2) if km_home is not None else None,
+            "mi_from_home": round(km_home * 0.621371, 2) if km_home is not None else None,
             "google_maps": f"https://www.google.com/maps/search/?api=1&query={ll}",
             "apple_maps": f"https://maps.apple.com/?ll={ll}&q=Car",
             "osm": f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=18/{lat}/{lon}",

@@ -102,13 +102,23 @@
   var UNIT = {};
   CATALOGUE.forEach(function (e) { if (e.unit) UNIT[e.key] = e.unit; });
 
-  function fmt(key, value) {
+  var DIST_KEYS = {
+    ev_driving_range: 1, total_driving_range: 1, fuel_driving_range: 1,
+    odometer: 1, next_service_distance: 1
+  };
+  var TEMP_KEYS = { outside_temperature: 1, air_temperature: 1 };
+
+  function fmt(key, value, imperial) {
     if (value === true || value === "true") return "Yes";
     if (value === false || value === "false") return "No";
     if (value == null || value === "" || value === "null") return "—";
     var u = UNIT[key];
-    if (u && (typeof value === "number" || /^-?\d+(\.\d+)?$/.test(value))) {
-      return (Math.round(Number(value) * 10) / 10) + " " + u;
+    var numeric = typeof value === "number" || /^-?\d+(\.\d+)?$/.test(value);
+    if (u && numeric) {
+      var n = Number(value);
+      if (imperial && DIST_KEYS[key]) { n = n * 0.621371; u = "mi"; }
+      else if (imperial && TEMP_KEYS[key]) { n = n * 9 / 5 + 32; u = "°F"; }
+      return (Math.round(n * 10) / 10) + " " + u;
     }
     return String(value);
   }
@@ -251,10 +261,6 @@
   }
   function saveRm(o) {
     try { window.localStorage.setItem(RM_STORE, JSON.stringify(o)); } catch (e) { /* */ }
-  }
-  function isMetric(hass) {
-    var u = hass && hass.config && hass.config.unit_system;
-    return !!(u && (u.length === "km" || u.length === "m"));
   }
   function kmToDisp(km, metric) {
     return metric ? Math.round(km) + " km" : Math.round(km * 0.621371) + " mi";
@@ -450,7 +456,7 @@
     }
     _rangeMapSection(inp, hass) {
       if (!inp || !RNG) return "";
-      var metric = isMetric(hass);
+      var metric = !this._imperial();
       var mode = this._rmMode();
       var dist = mode === "round" ? inp.round : inp.oneWay;
       var rm = this._rm;
@@ -476,10 +482,22 @@
         "</div>";
     }
 
-    // "C" / "F" for the climate panel — card config wins, else the HA unit system
+    // miles + °F, or km + °C? card `units:` config wins, else the HA unit system
+    _imperial() {
+      var c = this._config && this._config.units;
+      if (c === "imperial") return true;
+      if (c === "metric") return false;
+      var us = this._hass && this._hass.config && this._hass.config.unit_system;
+      return !!(us && (us.length === "mi" || us.temperature === "°F"));
+    }
+
+    // "C" / "F" for the climate panel + diagram — `temperature_unit` / `units`
+    // config wins, else the HA unit system
     _tempUnit() {
       var c = this._config && this._config.temperature_unit;
       if (c === "C" || c === "F") return c;
+      if (this._config && this._config.units === "imperial") return "F";
+      if (this._config && this._config.units === "metric") return "C";
       var us = this._hass && this._hass.config && this._hass.config.unit_system;
       return us && us.temperature === "°F" ? "F" : "C";
     }
@@ -619,10 +637,11 @@
       if (flat["vehicle.ev_battery_precondition_enabled"] === true) chips.push("<span class='ka-chip'>Preconditioning</span>");
       var chipHtml = chips.length ? "<div class='ka-chips'>" + chips.join("") + "</div>" : "";
 
+      var imperial = this._imperial();
       var rows = CATALOGUE.map(function (e) {
         var raw = flat["vehicle." + e.key];
         if (raw === undefined) return "";
-        return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(e.key, raw)) + "</td></tr>";
+        return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(e.key, raw, imperial)) + "</td></tr>";
       }).join("");
 
       var note = st.attributes.note
