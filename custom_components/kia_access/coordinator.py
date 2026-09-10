@@ -70,6 +70,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._static_pois: list[dict] = []
         self._cal_pois_at: float = 0.0
         self._cal_status: dict = {}
+        # keep the assembled destinations across a reload (option changes reload
+        # the entry a lot; without this the calendar list blinks out for ~30 min)
+        self._cal_store = Store(hass, 1, f"{DOMAIN}_caldest_{entry.entry_id}")
         # real drive-times from a routing provider, keyed by _poi_key(lat, lon)
         self._route_out: dict = {}
         self._route_at: float = 0.0
@@ -93,6 +96,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         tdata = await self._trips_store.async_load() or {}
         self._trips = tdata.get("trips") or []
         self._open_trip = tdata.get("open") or None
+        cdata = await self._cal_store.async_load() or {}
+        self._cal_pois = cdata.get("cal_pois") or []
+        self._static_pois = cdata.get("static_pois") or []
+        self._cal_status = cdata.get("cal_status") or {}
 
     @staticmethod
     def _valid_ll(v) -> bool:
@@ -486,7 +493,16 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                         {"summary": summary[:40], "location": loc,
                          "result": "geocode failed (see geocode_errors)"}
                     )
-        self._cal_pois = pois[:12]
+        # don't wipe a good list when a refresh geocoded nothing but events with
+        # a location exist (transient rate-limit / provider hiccup)
+        if pois or self._cal_status["with_location"] == 0:
+            self._cal_pois = pois[:12]
+        else:
+            self._cal_status["errors"].append(
+                f"kept {len(self._cal_pois)} cached destination(s) — this "
+                "refresh geocoded 0 of "
+                f"{self._cal_status['with_location']}"
+            )
         self._cal_status["pois"] = [
             {"name": p["name"], "lat": round(p["lat"], 4), "lon": round(p["lon"], 4)}
             for p in self._cal_pois
@@ -499,6 +515,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             f" — {'; '.join(self._cal_status['errors'])}"
             if self._cal_status["errors"] else "",
         )
+        try:
+            await self._cal_store.async_save({
+                "cal_pois": self._cal_pois,
+                "static_pois": self._static_pois,
+                "cal_status": self._cal_status,
+            })
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("could not persist calendar destinations", exc_info=True)
 
     @staticmethod
     def _poi_key(lat, lon) -> str:
