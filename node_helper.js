@@ -99,7 +99,21 @@ module.exports = NodeHelper.create({
   },
 
   cacheFile(id) {
-    return path.join(CACHE_DIR, crypto.createHash("sha1").update(id).digest("hex").slice(0, 16) + ".json");
+    const name = crypto.createHash("sha256").update(id).digest("hex").slice(0, 16);
+    const file = path.join(CACHE_DIR, name + ".json");
+    // one-time migration: an earlier version named this file after a truncated
+    // SHA-1 of the same id — carry the existing session/trip history over
+    if (!fs.existsSync(file)) {
+      const legacy = path.join(
+        CACHE_DIR, crypto.createHash("sha1").update(id).digest("hex").slice(0, 16) + ".json"
+      );
+      try {
+        if (fs.existsSync(legacy)) fs.renameSync(legacy, file);
+      } catch (e) {
+        /* fall through to a fresh cache */
+      }
+    }
+    return file;
   },
 
   st(id) {
