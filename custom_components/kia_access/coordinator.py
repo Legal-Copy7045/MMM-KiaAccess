@@ -293,7 +293,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         stashed on _cal_status. Returns [lat, lon] or None."""
         key = " ".join(address.lower().split())[:200]
         if key in self._geo_cache:
-            return self._geo_cache[key]
+            ll = self._geo_cache[key]
+            self._cal_status.setdefault("geocoded_ok", []).append(
+                {"address": address, "lat": round(ll[0], 4), "lon": round(ll[1], 4),
+                 "via": "cache"}
+            )
+            return ll
 
         provider = (self.entry.options.get("drive_time_provider") or "").strip()
         rkey = (self.entry.options.get("routing_api_key") or "").strip()
@@ -305,10 +310,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         )
         attempts: list[str] = []
         latlon = None
+        via = None
 
         if gc_provider and rkey:
             try:
                 latlon = await self._geocode_provider(gc_provider, rkey, address)
+                via = gc_provider
             except Exception as err:  # noqa: BLE001
                 attempts.append(f"{gc_provider}: {err}")
 
@@ -318,6 +325,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     kia_client._geocode, address  # noqa: SLF001
                 )
                 latlon = (lat, lon)
+                via = "nominatim"
             except Exception as err:  # noqa: BLE001
                 attempts.append(f"nominatim: {err}")
 
@@ -336,6 +344,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return None
         self._geo_cache[key] = [lat, lon]
         await self._geo_store.async_save({"geo": self._geo_cache})
+        self._cal_status.setdefault("geocoded_ok", []).append(
+            {"address": address, "lat": round(lat, 4), "lon": round(lon, 4),
+             "via": via}
+        )
         return [lat, lon]
 
     async def async_refresh_calendar_pois(self) -> None:
@@ -397,7 +409,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 if ll:
                     self._cal_status["geocoded"] += 1
                     self._cal_status["seen"].append(
-                        {"summary": summary[:40], "location": loc, "result": "ok"}
+                        {"summary": summary[:40], "location": loc,
+                         "result": f"ok -> {round(ll[0], 4)},{round(ll[1], 4)}"}
                     )
                     pois.append({"name": summary[:40], "lat": ll[0], "lon": ll[1]})
                 else:
@@ -406,6 +419,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                          "result": "geocode failed (see geocode_errors)"}
                     )
         self._cal_pois = pois[:12]
+        self._cal_status["pois"] = [
+            {"name": p["name"], "lat": round(p["lat"], 4), "lon": round(p["lon"], 4)}
+            for p in self._cal_pois
+        ]
         _LOGGER.info(
             "Kia Access calendar destinations: %s event(s), %s with a location, "
             "%s geocoded%s",
