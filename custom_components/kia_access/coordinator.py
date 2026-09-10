@@ -60,6 +60,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._home_unplugged_since: float | None = None
         self._last_parked: dict | None = None
         self._moved_since: float | None = None
+        self._parked: dict | None = None
+        self._was_on: bool | None = None
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._sessions_store = Store(hass, 1, f"{DOMAIN}_sessions_{entry.entry_id}")
@@ -264,8 +266,33 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "reservePct": opts.get("range_reserve_pct")
             if opts.get("range_reserve_pct") is not None
             else drive_range.DEFAULTS["reservePct"],
+            "batteryPct": _n(self.vehicle.get("ev_battery_percentage")),
+            "roadFactor": 1.3,
         }
         return drive_range.summary(lat, lon, rng, self._zone_pois(), o)
+
+    @property
+    def parked_location(self) -> dict | None:
+        """Where the car was last seen parked, with map links + distance home."""
+        p = self._parked
+        if not p:
+            return None
+        lat, lon = p.get("lat"), p.get("lon")
+        if lat is None or lon is None:
+            return None
+        hlat, hlon, _ = self._home_point()
+        km_home = self._haversine_km(lat, lon, hlat, hlon)
+        ll = f"{lat},{lon}"
+        return {
+            "latitude": lat,
+            "longitude": lon,
+            "address": p.get("address"),
+            "parked_at": p.get("at"),
+            "km_from_home": round(km_home, 2) if km_home is not None else None,
+            "google_maps": f"https://www.google.com/maps/search/?api=1&query={ll}",
+            "apple_maps": f"https://maps.apple.com/?ll={ll}&q=Car",
+            "osm": f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=18/{lat}/{lon}",
+        }
 
     @property
     def charge_log(self) -> dict:
@@ -433,6 +460,20 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 self._last_parked = {"lat": lat, "lon": lon, "odo": odo}
             state["movedWhileParkedKm"] = 0 if self._last_parked else None
             state["movedWhileParkedMin"] = 0
+
+        # "where did I park" — snapshot on the drive->park transition (and once
+        # on startup if the car is already parked with a fix)
+        car_on = state.get("carOn") is True
+        just_parked = self._was_on is True and not car_on
+        if (just_parked or self._parked is None) and not car_on and lat is not None:
+            self._parked = {
+                "lat": lat,
+                "lon": lon,
+                "at": dt_util.utcnow().isoformat(),
+                "address": self.vehicle.get("location_name")
+                or self.vehicle.get("geocode"),
+            }
+        self._was_on = car_on
 
         try:
             res = evaluate_conditions(state, cfg, self._prev_cond)

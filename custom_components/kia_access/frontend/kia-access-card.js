@@ -1528,24 +1528,36 @@ g.KiaAccessCommands={
    * @param {number} lat @param {number} lon  the car
    * @param {Array<{name,lat,lon}>} pois
    * @param {number} reachKm  from reach()
+   * @param {object} [trip] { batteryPct, rangeKm, roadFactor } to also estimate
+   *        the state-of-charge you'd arrive with
    * @returns sorted nearest-first:
-   *   [{ name, km, reachable:boolean, marginKm, bearing }]
-   *   marginKm > 0 = spare, < 0 = short by that much
+   *   [{ name, km, reachable, marginKm, bearing, arrivalPct }]
+   *   marginKm > 0 = spare, < 0 = short by that much; arrivalPct null if no trip
    */
-  function poiStatus(lat, lon, pois, reachKm) {
+  function poiStatus(lat, lon, pois, reachKm, trip) {
     if (!isFinite(lat) || !isFinite(lon) || !Array.isArray(pois)) return [];
+    trip = trip || {};
+    var pct = Number(trip.batteryPct);
+    var rng = Number(trip.rangeKm);
+    var road = Number(trip.roadFactor) || 1.3;
+    var canArrive = isFinite(pct) && isFinite(rng) && rng > 0;
     var out = [];
     pois.forEach(function (p) {
       if (!p || p.lat == null || p.lon == null) return;
       var pla = Number(p.lat), plo = Number(p.lon);
       if (!isFinite(pla) || !isFinite(plo)) return;
       var km = haversineKm(lat, lon, pla, plo);
+      var arrivalPct = null;
+      if (canArrive) {
+        arrivalPct = Math.round(Math.max(0, pct * (1 - (km * road) / rng)));
+      }
       out.push({
         name: p.name || "",
         km: km,
         reachable: reachKm != null && km <= reachKm,
         marginKm: reachKm != null ? reachKm - km : null,
-        bearing: bearingDeg(lat, lon, pla, plo)
+        bearing: bearingDeg(lat, lon, pla, plo),
+        arrivalPct: arrivalPct
       });
     });
     out.sort(function (a, b) { return a.km - b.km; });
@@ -1568,16 +1580,22 @@ g.KiaAccessCommands={
 
   /** Everything a surface needs for one render. */
   function summary(carLat, carLon, rangeKm, pois, o) {
+    o = o || {};
     var one = reach(rangeKm, Object.assign({}, o, { roundTrip: false }));
     var round = reach(rangeKm, Object.assign({}, o, { roundTrip: true }));
     var rt = opt(o, "roundTrip");
     var active = rt ? round : one;
+    var trip = {
+      batteryPct: o.batteryPct,
+      rangeKm: rangeKm,
+      roadFactor: o.roadFactor
+    };
     return {
       roundTrip: !!rt,
       oneWayKm: one,
       roundTripKm: round,
       reachKm: active,
-      pois: poiStatus(carLat, carLon, pois || [], active),
+      pois: poiStatus(carLat, carLon, pois || [], active, trip),
       circle: (isFinite(carLat) && active) ? circleRing(carLat, carLon, active) : null
     };
   }

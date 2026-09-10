@@ -40,6 +40,13 @@ assert.strictEqual(st[0].reachable, true);
 assert.strictEqual(st[2].reachable, false);
 assert.ok(st[0].marginKm > 80, "Work has lots of spare");
 assert.ok(st[2].marginKm < 0, "Shore is short by a lot");
+assert.strictEqual(st[0].arrivalPct, null, "no trip info -> no arrival estimate");
+
+// with trip info: arrival SoC drops with distance
+const st2 = R.poiStatus(car[0], car[1], pois, 120, { batteryPct: 80, rangeKm: 300, roadFactor: 1.3 });
+assert.ok(st2[0].arrivalPct > 60 && st2[0].arrivalPct < 80, st2[0].arrivalPct);
+assert.strictEqual(st2[2].arrivalPct, 0, "shore is way out of range -> 0%");
+assert.ok(st2[0].arrivalPct > st2[1].arrivalPct, "nearer place = more charge left");
 
 // ---- circleRing: closed ring, right size ----
 const ring = R.circleRing(40.71374, -79.75464, 100, 32);

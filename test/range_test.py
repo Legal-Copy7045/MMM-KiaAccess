@@ -40,6 +40,13 @@ assert st[0]["reachable"] is True
 assert st[2]["reachable"] is False
 assert st[0]["marginKm"] > 80
 assert st[2]["marginKm"] < 0
+assert st[0]["arrivalPct"] is None
+
+st2 = R.poi_status(car[0], car[1], pois, 120,
+                   {"batteryPct": 80, "rangeKm": 300, "roadFactor": 1.3})
+assert 60 < st2[0]["arrivalPct"] < 80, st2[0]["arrivalPct"]
+assert st2[2]["arrivalPct"] == 0
+assert st2[0]["arrivalPct"] > st2[1]["arrivalPct"]
 
 # circle_ring
 ring = R.circle_ring(40.71374, -79.75464, 100, 32)

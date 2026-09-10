@@ -997,8 +997,13 @@ Module.register("MMM-KiaAccess", {
       const km = this.haversineKm(lat, lon, Number(cfg.homeLat), Number(cfg.homeLon));
       lines.push(km < 0.15 ? "At home" : (this.fmtDist(km) || "") + " from home");
     }
-    const addr = f["vehicle.geocode"];
+    const addr = f["vehicle.geocode"] || f["vehicle.location_name"];
     if (addr && addr !== "—") lines.push(String(addr));
+    // "where did I park" — a maps link (opens on a phone) when the car is off
+    if (cfg.parkedLink !== false && f["vehicle.engine_is_running"] !== true &&
+        f["vehicle.engine_is_running"] !== "true") {
+      lines.push("maps.google.com/?q=" + lat.toFixed(5) + "," + lon.toFixed(5));
+    }
     if (lines.length) {
       const t = document.createElement("div");
       t.className = "kiaaccess-batt-detail";
@@ -1018,7 +1023,9 @@ Module.register("MMM-KiaAccess", {
       const sum = KiaAccessRange.summary(lat, lon, st.rangeKm, pois, {
         factor: cfg.reachFactor,
         reservePct: cfg.reachReservePct,
-        roundTrip: cfg.reachRoundTrip === true
+        roundTrip: cfg.reachRoundTrip === true,
+        batteryPct: st.batteryPct,
+        roadFactor: cfg.reachRoadFactor || 1.3
       });
       if (sum.reachKm != null) {
         const rb = document.createElement("div");
@@ -1033,8 +1040,9 @@ Module.register("MMM-KiaAccess", {
           '<div><span class="kiaaccess-bd-value">' + this.escape(head) + "</span></div>";
         sum.pois.slice(0, Number(cfg.reachPois) || 4).forEach((p) => {
           const d = this.fmtDist(p.km) || "";
+          const arr = p.arrivalPct != null ? " · arrive " + p.arrivalPct + "%" : "";
           const tail = p.reachable
-            ? d
+            ? d + arr
             : d + " · " + (this.fmtDist(-p.marginKm) || "") + " short";
           html +=
             '<div class="kiaaccess-reach-poi ' + (p.reachable ? "ok" : "no") +

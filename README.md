@@ -149,8 +149,11 @@ Lovelace card. No MagicMirror required.
    - **buttons**: `lock`, `unlock`, `flash hazards`, `flash and honk` (find the
      car), `open` / `close charge port`, `start` / `stop charge`
    - **sensors** — fuel level & range, charge current, per-seat status, a
-     `Remote action` diagnostic, and **`Range reach`** (derated drive distance
-     now; the `pois` attribute flags every `zone.*` one-way / round-trip)
+     `Remote action` diagnostic, **`Range reach`** (derated drive distance now;
+     the `pois` attribute flags every `zone.*` one-way / round-trip and the
+     **state-of-charge you'd arrive with**), `Last trip` + `Cost per mile`
+     (from the auto trip log), and **`Parked`** — where the car was last seen
+     parked, with Google / Apple / OSM map deep-links and distance from home
    - **services**: the no-arg buttons above, plus `kia_access.start_climate`
      (`set_temp` — **°F, 62–82** for the USA region — `duration`, `climate`,
      `defrost`, `heating`, `steering_wheel`, `front_left_seat` …
