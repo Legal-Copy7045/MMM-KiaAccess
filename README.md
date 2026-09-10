@@ -192,8 +192,9 @@ Lovelace card. No MagicMirror required.
 The integration's **Configure** dialog holds **Scan interval**, **Poll the car
 directly** (+ **Live wake-up wait**), **Price per kWh** / **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
-(hours)** / **Static destinations**, and **Drive-time provider** / **Routing
-API key** / **Per-destination routes**. Leave **Poll the
+(hours)** / **Static destinations** / **Zones to show**, and **Drive-time
+provider** / **Routing API key** / **Geocoding API key** / **Per-destination
+routes**. Leave **Poll the
 car directly** off (the default) to only ever read Kia's cached data and never
 wake the car — with it off, every update sends both `refresh: false` **and**
 `forceRefreshTimeout: 0`, either of which alone stops the wake (see the note at
@@ -746,6 +747,9 @@ Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 **Destinations** are your **US** `zone.*` entities, plus (from the **Configure**
 dialog):
 
+- **Zones to show** — blank = every US zone; otherwise one zone per line by
+  entity id or name (`zone.home` / `Work`). A line starting with `-` excludes
+  that zone instead (e.g. leave blank-ish and just add `-Grandma`).
 - **Static destinations** — one `Name | address` per line, always shown
   (geocoded once, cached), e.g. `White House | 1600 Pennsylvania Ave NW, Washington, DC`.
 - **Calendar entities** + **Calendar look-ahead (hours)** — any event with a
