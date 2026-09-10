@@ -163,6 +163,17 @@ Module.register("MMM-KiaAccess", {
         logRows: 4, // most recent sessions to list
         logRetentionDays: 180 // sessions kept on disk
       },
+      // trip log — auto-detected drives (odometer delta + SoC drop): distance,
+      // mi/kWh, and cost per trip, plus a rolling total. Uses
+      // chargeCost.pricePerKwh / capacityKwh for the £ and kWh maths.
+      tripLog: {
+        enabled: false,
+        days: 30, // window for the rolling total
+        rows: 4, // most recent trips to list
+        minKm: 0.5, // ignore drives shorter than this
+        parkGapMin: 8, // odometer stable this long = parked (ends the trip)
+        retentionDays: 365 // trips kept on disk
+      },
       // readouts shown under the battery gauge (and removed from the table).
       // Uses your labels / formatters / hideWhenFalsy just like table rows.
       // charge power (kW) + current (A) show on the diagram under the charger
@@ -259,6 +270,7 @@ Module.register("MMM-KiaAccess", {
       this.file("core/conditions.js"),
       this.file("core/state.js"),
       this.file("core/sessions.js"),
+      this.file("core/trips.js"),
       this.file("core/range.js")
     ];
   },
@@ -273,10 +285,13 @@ Module.register("MMM-KiaAccess", {
     this.conditions = typeof KiaConditions !== "undefined" ? KiaConditions : null;
     this.stateBuilder = typeof KiaAccessState !== "undefined" ? KiaAccessState : null;
     this.sessionLib = typeof KiaAccessSessions !== "undefined" ? KiaAccessSessions : null;
+    this.tripLib = typeof KiaAccessTrips !== "undefined" ? KiaAccessTrips : null;
     this.flatMap = null;
     this.history = [];
     this.sessions = [];
     this.openSession = null;
+    this.trips = [];
+    this.openTrip = null;
     this.stale = false;
     this.staleNote = null;
     this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
@@ -294,6 +309,7 @@ Module.register("MMM-KiaAccess", {
       this.config.visuals.location.rangeMap
     );
     this.config.visuals.chargeCost = merge(this.defaults.visuals.chargeCost, this.config.visuals.chargeCost);
+    this.config.visuals.tripLog = merge(this.defaults.visuals.tripLog, this.config.visuals.tripLog);
     this.config.icons = merge(this.defaults.icons, this.config.icons);
     this.config.homeassistant = merge(this.defaults.homeassistant, this.config.homeassistant);
     this.config.notifications = merge(this.defaults.notifications, this.config.notifications);
@@ -381,6 +397,11 @@ Module.register("MMM-KiaAccess", {
         capacityKwh: ((c.visuals || {}).chargeCost || {}).capacityKwh || null,
         retentionDays: ((c.visuals || {}).chargeCost || {}).logRetentionDays || 180
       },
+      tripLog: {
+        minKm: ((c.visuals || {}).tripLog || {}).minKm,
+        parkGapMin: ((c.visuals || {}).tripLog || {}).parkGapMin,
+        retentionDays: ((c.visuals || {}).tripLog || {}).retentionDays || 365
+      },
       mqtt: c.mqtt && c.mqtt.enabled && c.mqtt.url ? c.mqtt : null,
       rangeMap: this.rangeMapConfig()
     };
@@ -422,6 +443,8 @@ Module.register("MMM-KiaAccess", {
       this.history = data.payload.history || [];
       this.sessions = data.payload.sessions || [];
       this.openSession = data.payload.openSession || null;
+      this.trips = data.payload.trips || [];
+      this.openTrip = data.payload.openTrip || null;
       if (data.payload.rangeMap) this.rangeMap = data.payload.rangeMap;
       this.liveChargeTimer(); // start/stop the "cost this charge" refresh
       this.stale = !!m.stale;
@@ -1104,6 +1127,54 @@ Module.register("MMM-KiaAccess", {
     return el;
   },
 
+  // trip log — recent drives + a rolling distance / efficiency / cost total
+  tripLogEl() {
+    const tl = (this.config.visuals || {}).tripLog || {};
+    if (!tl.enabled) return null;
+    const list = (this.trips || []).slice()
+      .filter((x) => x && x.endedAt)
+      .sort((a, b) => b.endedAt - a.endedAt);
+    if (!list.length) return null;
+
+    const cc = (this.config.visuals || {}).chargeCost || {};
+    const cur = (n) => (cc.currency || "$") + Number(n).toFixed(2);
+    const imperial = this.config.units !== "metric";
+    const dist = (x) => imperial
+      ? (x.distanceMi != null ? x.distanceMi + " mi" : "—")
+      : (x.distanceKm != null ? x.distanceKm + " km" : "—");
+    const eff = (x) => x.miPerKwh != null ? x.miPerKwh + " mi/kWh" : null;
+    const val = (x) => [dist(x), eff(x), x.cost != null ? cur(x.cost) : null]
+      .filter(Boolean).join(" · ");
+
+    const days = tl.days || 30;
+    const sum = this.tripLib ? this.tripLib.summary(list, days) : null;
+
+    const el = document.createElement("div");
+    el.className = "kiaaccess-batt-detail";
+    const rows = list.slice(0, tl.rows || 4).map((x) =>
+      '<div><span class="kiaaccess-bd-label">' +
+      this.escape(this.agoText(new Date(x.endedAt))) +
+      '</span><span class="kiaaccess-bd-value">' + this.escape(val(x)) + "</span></div>"
+    ).join("");
+    let total = "";
+    if (sum && sum.count) {
+      const td = imperial ? sum.distanceMi + " mi" : sum.distanceKm + " km";
+      const tbits = [
+        td,
+        sum.miPerKwh != null ? sum.miPerKwh + " mi/kWh" : null,
+        sum.costPerMi != null ? cur(sum.costPerMi) + "/mi" : null
+      ].filter(Boolean).join(" · ");
+      total =
+        '<div style="opacity:.85;border-top:1px solid rgba(255,255,255,.15);margin-top:3px;padding-top:3px">' +
+        '<span class="kiaaccess-bd-label">Last ' + days + ' d</span>' +
+        '<span class="kiaaccess-bd-value">' + this.escape(tbits) + "</span></div>";
+    }
+    el.innerHTML =
+      '<div class="kiaaccess-bd-label" style="text-align:center;margin-bottom:2px">Trips</div>' +
+      rows + total;
+    return el;
+  },
+
   preconditionEl() {
     const f = this.flatMap || {};
     const on = f["vehicle.ev_first_departure_enabled"];
@@ -1295,6 +1366,7 @@ Module.register("MMM-KiaAccess", {
         this.preconditionEl(),
         this.chargeCostEl(),
         this.chargeLogEl(),
+        this.tripLogEl(),
         this.tripStatsEl(),
         this.locationEl()
       ].forEach((el) => el && wrapper.appendChild(el));
