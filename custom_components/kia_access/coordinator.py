@@ -636,28 +636,42 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         )
         self._route_status["routes_enabled"] = do_routes
         n_routed = 0
-        route_err = None
+        route_errs: dict = {}
         if do_routes:
-            for p in pois:
+            if req:
+                await asyncio.sleep(0.5)  # gap after the matrix call
+            for i, p in enumerate(pois):
+                if i:
+                    await asyncio.sleep(0.5)  # some TomTom keys cap at ~1-2 req/s
                 rreq = drive_routing.route_request(
                     provider, origin, {"lat": p["lat"], "lon": p["lon"]}, key,
                     {"traffic": True},
                 )
                 if not rreq:
                     continue
-                try:
-                    rdata = await self._http_json(rreq)
-                    parsed = drive_routing.parse_route(provider, rdata)
-                except Exception as err:  # noqa: BLE001
-                    route_err = route_err or f"{p['name']}: {err}"
-                    _LOGGER.warning("Kia Access: route call for %r failed: %s",
-                                    p["name"], err)
-                    continue
+                parsed = None
+                for attempt in (1, 2):
+                    try:
+                        rdata = await self._http_json(rreq)
+                        parsed = drive_routing.parse_route(provider, rdata)
+                        if not parsed:
+                            raise RuntimeError("no route in response")
+                        break
+                    except Exception as err:  # noqa: BLE001
+                        msg = str(err)[:160]
+                        if attempt == 1 and ("429" in msg or "403" in msg):
+                            await asyncio.sleep(1.5)  # back off once on a rate limit
+                            continue
+                        route_errs[p["name"]] = msg
+                        _LOGGER.warning("Kia Access: route call for %r failed: %s",
+                                        p["name"], err)
+                        break
                 if parsed:
                     out.setdefault(self._poi_key(p["lat"], p["lon"]), {}).update(parsed)
                     n_routed += 1
-        if route_err:
-            self._route_status["route_error"] = route_err
+        if route_errs:
+            self._route_status["route_errors"] = route_errs
+            self._route_status["route_error"] = next(iter(route_errs.values()))
 
         self._route_out = out
         self._route_origin = (lat, lon)
@@ -684,7 +698,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             else:
                 ctx = session.get(req["url"])
             async with ctx as resp:
-                resp.raise_for_status()
+                if resp.status >= 400:
+                    body = (await resp.text())[:200]
+                    raise RuntimeError(f"HTTP {resp.status}: {body}")
                 return await resp.json(content_type=None)
 
     @staticmethod
