@@ -139,6 +139,8 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
     _attr_suggested_display_precision = 0
+    # POI coordinates ride in the attributes — keep them out of the DB
+    _unrecorded_attributes = frozenset({"pois", "in_reach"})
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "range_reach")
@@ -159,16 +161,24 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         r = self._reach() or {}
+        cal_names = {p["name"] for p in getattr(self.coordinator, "_cal_pois", [])}
         return {
             "one_way_km": r.get("oneWayKm"),
+            "one_way_mi": round(r["oneWayKm"] * 0.621371, 1)
+            if r.get("oneWayKm") is not None else None,
             "round_trip_km": r.get("roundTripKm"),
+            "round_trip_mi": round(r["roundTripKm"] * 0.621371, 1)
+            if r.get("roundTripKm") is not None else None,
             "reserve_pct": self.coordinator.entry.options.get("range_reserve_pct", 10),
             "factor": self.coordinator.entry.options.get("range_factor", 0.92),
             "in_reach": [p["name"] for p in r.get("pois", []) if p["reachable"]],
             "pois": [
                 {
                     "name": p["name"],
+                    "latitude": p.get("lat"),
+                    "longitude": p.get("lon"),
                     "km": round(p["km"], 1),
+                    "mi": round(p["km"] * 0.621371, 1),
                     "reachable": p["reachable"],
                     "one_way_reachable": r.get("oneWayKm") is not None
                     and p["km"] <= r["oneWayKm"],
@@ -178,6 +188,7 @@ class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):
                     if p["marginKm"] is not None
                     else None,
                     "arrival_pct": p.get("arrivalPct"),
+                    "source": "calendar" if p["name"] in cal_names else "zone",
                 }
                 for p in r.get("pois", [])
             ],

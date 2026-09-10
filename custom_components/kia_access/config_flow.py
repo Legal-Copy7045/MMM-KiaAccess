@@ -254,6 +254,17 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         "range_reserve_pct",
                         default=float(opts.get("range_reserve_pct") or 10),
                     ): _number(0, 50, 1),
+                    vol.Optional(
+                        "calendar_entities",
+                        default=opts.get("calendar_entities", ""),
+                        description={
+                            "suggested_value": opts.get("calendar_entities", "")
+                        },
+                    ): str,
+                    vol.Optional(
+                        "calendar_lookahead_hours",
+                        default=float(opts.get("calendar_lookahead_hours") or 72),
+                    ): _number(6, 336, 1),
                 }
             ),
         )

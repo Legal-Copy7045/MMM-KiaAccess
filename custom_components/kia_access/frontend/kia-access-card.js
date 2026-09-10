@@ -1553,6 +1553,8 @@ g.KiaAccessCommands={
       }
       out.push({
         name: p.name || "",
+        lat: pla,
+        lon: plo,
         km: km,
         reachable: reachKm != null && km <= reachKm,
         marginKm: reachKm != null ? reachKm - km : null,
@@ -2781,23 +2783,22 @@ g.KiaAccessCommands={
     return flat;
   }
 
-  function isMetric(hass) {
-    var u = hass && hass.config && hass.config.unit_system;
-    return !!(u && (u.length === "km" || u.length === "m"));
-  }
   function kmToDisp(km, metric) {
     return metric ? Math.round(km) + " km" : Math.round(km * 0.621371) + " mi";
   }
-  function zonePois(hass) {
-    return Object.keys(hass.states)
-      .filter(function (id) { return id.indexOf("zone.") === 0; })
-      .map(function (id) {
-        var a = hass.states[id].attributes || {};
-        return (a.latitude != null && a.longitude != null)
-          ? { name: a.friendly_name || id.slice(5), lat: a.latitude, lon: a.longitude }
-          : null;
-      })
-      .filter(Boolean);
+  // destinations (US zones + calendar events) already computed by the
+  // integration and hung on sensor.<vehicle>_range_reach's `pois` attribute
+  function reachPois(hass, rawId, cfg) {
+    var id = (cfg && cfg.range_reach_entity) ||
+      (rawId && rawId.replace(/_status$/, "_range_reach")) || "";
+    var st = hass && hass.states && hass.states[id];
+    var pois = st && st.attributes && st.attributes.pois;
+    if (!Array.isArray(pois)) return [];
+    return pois
+      .filter(function (p) { return p && p.latitude != null && p.longitude != null; })
+      .map(function (p) {
+        return { name: p.name, lat: p.latitude, lon: p.longitude, km: p.km };
+      });
   }
 
   var STYLE =
@@ -2860,12 +2861,21 @@ g.KiaAccessCommands={
       this._render();
     }
 
+    _imperial() {
+      var c = this._config && this._config.units;
+      if (c === "imperial") return true;
+      if (c === "metric") return false;
+      var us = this._hass && this._hass.config && this._hass.config.unit_system;
+      return !!(us && (us.length === "mi" || us.temperature === "°F"));
+    }
+
     _inputs() {
       var hass = this._hass;
       if (!hass) return null;
       var entId = findRawEntity(hass, this._config && this._config.entity);
       var st = entId && hass.states[entId];
       if (!st) return null;
+      this._rawId = entId;
       var flat = flatFromAttributes(st.attributes);
       this._entryId = st.attributes.entry_id || null;
       var lat = Number(flat["vehicle.location_latitude"]);
@@ -2994,7 +3004,7 @@ g.KiaAccessCommands={
       var inp = this._inputs();
       if (!inp) return;
       var hass = this._hass;
-      var metric = isMetric(hass);
+      var metric = !this._imperial();
       var mode = this._mode;
       var dist = mode === "round" ? inp.round : inp.oneWay;
       if (!dist) return;
@@ -3015,9 +3025,12 @@ g.KiaAccessCommands={
         }).addTo(grp);
 
         var far = Math.max(inp.oneWay, inp.round || 0) * 1.6;
-        var near = zonePois(hass)
+        var near = reachPois(hass, self0._rawId, self0._config)
           .map(function (z) {
-            return { z: z, km: RNG.haversineKm(inp.lat, inp.lon, z.lat, z.lon) };
+            return {
+              z: z,
+              km: z.km != null ? z.km : RNG.haversineKm(inp.lat, inp.lon, z.lat, z.lon)
+            };
           })
           .filter(function (x) { return x.km <= far; })
           .sort(function (a, b) { return a.km - b.km; })

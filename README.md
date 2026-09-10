@@ -698,9 +698,12 @@ location: {
 ```
 
 Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
-(state = one-way distance; `pois` attribute lists every `zone.*` with
-`one_way_reachable` / `round_trip_reachable`). `Range reach factor` and
-`… reserve %` are in the **Configure** dialog.
+(state = one-way distance; `pois` attribute lists reachable places with
+`one_way_reachable` / `round_trip_reachable`, `arrival_pct`, `mi`, and lat/lon).
+Destinations are your **US** `zone.*` entities plus — if you set **Calendar
+entities** + **Calendar look-ahead** in the **Configure** dialog — any event
+with a location in the next N hours (geocoded, US only, cached). `Range reach
+factor` and `… reserve %` are there too.
 
 **Reachable-area map.** A map of how far you can drive, shaded, with your saved
 places pinned. Two providers, both free:

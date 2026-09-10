@@ -91,6 +91,8 @@ def poi_status(lat, lon, pois, reach_km, trip=None):
         out.append(
             {
                 "name": p.get("name") or "",
+                "lat": float(p["lat"]),
+                "lon": float(p["lon"]),
                 "km": km,
                 "reachable": reach_km is not None and km <= reach_km,
                 "marginKm": (reach_km - km) if reach_km is not None else None,
