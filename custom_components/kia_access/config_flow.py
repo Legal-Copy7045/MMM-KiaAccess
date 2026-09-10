@@ -292,6 +292,13 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         },
                     ): str,
                     vol.Optional(
+                        "geocoding_api_key",
+                        default=opts.get("geocoding_api_key", ""),
+                        description={
+                            "suggested_value": opts.get("geocoding_api_key", "")
+                        },
+                    ): str,
+                    vol.Optional(
                         "drive_time_routes",
                         default=opts.get("drive_time_routes", True),
                     ): bool,

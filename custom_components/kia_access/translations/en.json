@@ -57,7 +57,8 @@
           "drive_time_provider": "Drive-time provider for reachable destinations",
           "routing_api_key": "Routing API key (Geoapify or TomTom)",
           "drive_time_routes": "Per-destination routes (road names + traffic delay)",
-          "static_destinations": "Fixed destinations (one per line: Name | address)"
+          "static_destinations": "Fixed destinations (one per line: Name | address)",
+          "geocoding_api_key": "Geoapify geocoding key (optional)"
         },
         "data_description": {
           "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
@@ -66,7 +67,8 @@
           "drive_time_provider": "Estimate (default) uses straight-line distance. Geoapify or TomTom return real road distance and live-traffic drive time via one matrix call per poll (free tiers are plenty; needs the matching API key).",
           "routing_api_key": "Used for live drive times AND for geocoding calendar event locations. A Geoapify key works for both even if the drive-time provider is left on “estimate” (Nominatim increasingly blocks Home Assistant).",
           "drive_time_routes": "TomTom only: one routing call per destination each refresh so the reachable list can show “via <roads>” and colour the ETA by traffic delay. Turn off for one cheap matrix call (time + distance only).",
-          "static_destinations": "Always-shown destinations for the reachable list / driving-times panel, one per line as \"Name | address\" — e.g. \"White House | 1600 Pennsylvania Ave NW, Washington, DC\". Geocoded once and cached."
+          "static_destinations": "Always-shown destinations for the reachable list / driving-times panel, one per line as \"Name | address\" — e.g. \"White House | 1600 Pennsylvania Ave NW, Washington, DC\". Geocoded once and cached.",
+          "geocoding_api_key": "A Geoapify key used only to turn calendar / static addresses into coordinates. Set this if your routing provider is TomTom (TomTom's Search API is not on every key) or you left the provider on “estimate”."
         }
       }
     }

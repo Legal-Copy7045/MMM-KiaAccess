@@ -314,21 +314,29 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 return [ll[0], ll[1]]
             self._geo_cache.pop(key, None)  # stale bad entry — fall through
 
-        provider = (self.entry.options.get("drive_time_provider") or "").strip()
-        rkey = (self.entry.options.get("routing_api_key") or "").strip()
-        # use the routing key for geocoding whenever one is set — even if the
-        # drive-time provider is left on "estimate". Geoapify is the default
-        # geocoder (generous free tier); TomTom only if that's the provider.
-        gc_provider = provider if provider in drive_routing.PROVIDERS else (
-            "geoapify" if rkey else ""
-        )
+        opts = self.entry.options
+        provider = (opts.get("drive_time_provider") or "").strip()
+        rkey = (opts.get("routing_api_key") or "").strip()
+        gkey = (opts.get("geocoding_api_key") or "").strip()
+        # geocoder chain: an explicit Geoapify geocoding key first (its free
+        # geocoding is reliable and unlike TomTom is always on a plain key),
+        # then the routing provider's own geocoder, then Nominatim.
+        chain: list[tuple[str, str]] = []
+        if gkey:
+            chain.append(("geoapify", gkey))
+        if rkey and (provider in drive_routing.PROVIDERS):
+            chain.append((provider, rkey))
+        elif rkey and not gkey:
+            chain.append(("geoapify", rkey))
         attempts: list[str] = []
         latlon = None
         via = None
 
-        if gc_provider and rkey:
+        for gc_provider, gc_key in chain:
+            if latlon is not None:
+                break
             try:
-                latlon = await self._geocode_provider(gc_provider, rkey, address)
+                latlon = await self._geocode_provider(gc_provider, gc_key, address)
                 via = gc_provider
             except Exception as err:  # noqa: BLE001
                 attempts.append(f"{gc_provider}: {err}")
@@ -383,15 +391,22 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
     async def _refresh_static_pois(self) -> None:
         """Geocode the fixed 'static_destinations' addresses (cached)."""
-        pairs = self._parse_static_destinations(
-            self.entry.options.get("static_destinations") or ""
-        )
+        raw = self.entry.options.get("static_destinations") or ""
+        pairs = self._parse_static_destinations(raw)
         pois: list[dict] = []
         for name, addr in pairs[:12]:
             ll = await self._geocode_cached(addr)
             if ll:
                 pois.append({"name": name[:40], "lat": ll[0], "lon": ll[1]})
         self._static_pois = pois
+        self._cal_status["static_raw_len"] = len(raw)
+        self._cal_status["static_parsed"] = len(pairs)
+        self._cal_status["static_geocoded"] = len(pois)
+        if pairs:
+            self._cal_status["static"] = [
+                {"name": n, "geocoded": any(p["name"] == n[:40] for p in pois)}
+                for n, _ in pairs
+            ]
         if pairs:
             self._cal_status["static"] = [p["name"] for p in pois]
 

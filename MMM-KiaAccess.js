@@ -1415,9 +1415,27 @@ Module.register("MMM-KiaAccess", {
         "</div>";
     });
     if (rr && rr.length && !anyRouted && dt.showVia !== false) {
+      const dbg = this.rangeReach && this.rangeReach.debug;
+      const src = (this.rangeReach && this.rangeReach.driveTimeSource) || "estimate";
+      let hint;
+      if (src === "estimate") {
+        hint = "Estimated times — set a Drive-time provider (TomTom) in Home Assistant for routes + traffic";
+      } else if (dbg && dbg.errors && dbg.errors.length) {
+        hint = "Routing (" + src + ") error: " + this.escape(String(dbg.errors[0]).slice(0, 90));
+      } else if (dbg && dbg.routes_enabled === false) {
+        hint = "Turn on 'Per-destination routes' in Home Assistant for the route + delay";
+      } else {
+        hint = "Routing configured (" + src + ") but no route data yet — see drive_time_status in HA";
+      }
+      html += '<div class="kiaaccess-dt-hint">' + hint + "</div>";
+    }
+    if (rr && this.rangeReach && this.rangeReach.debug &&
+        this.rangeReach.debug.static_configured &&
+        !this.rangeReach.debug.static_geocoded &&
+        !rows.some((r) => r.source === "static")) {
       html +=
-        '<div class="kiaaccess-dt-hint">Set a Drive-time provider (TomTom) in ' +
-        'Home Assistant for routes + traffic delay</div>';
+        '<div class="kiaaccess-dt-hint">Static destinations set but none geocoded — ' +
+        'add a Geoapify geocoding key in Home Assistant</div>';
     }
     el.innerHTML = html;
     return el;
