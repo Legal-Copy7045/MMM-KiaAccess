@@ -1,0 +1,131 @@
+blueprint:
+  name: Kia Access — vehicle alerts to your phone
+  description: >
+    Sends a push notification (HA companion app) for every Kia Access alert —
+    door left open, not locked, tyre pressure, 12V trouble, tow / theft, "can't
+    get home", etc. Critical alerts can repeat until the condition clears, and a
+    couple carry an action button (Lock, Start charge).
+
+    Fires off the kia_access_alert event, so it needs the integration set up.
+  domain: automation
+  source_url: https://github.com/Legal-Copy7045/MMM-KiaAccess/blob/main/blueprints/automation/kia_access/alert_to_phone.yaml
+  input:
+    notify_service:
+      name: Notify service
+      description: e.g. notify.mobile_app_steve_phone
+      selector:
+        text: {}
+    min_level:
+      name: Minimum level
+      default: warning
+      selector:
+        select:
+          options: [warning, critical]
+    quiet_start:
+      name: Quiet hours start (no non-critical alerts after)
+      default: "22:00:00"
+      selector:
+        time: {}
+    quiet_end:
+      name: Quiet hours end
+      default: "07:00:00"
+      selector:
+        time: {}
+    repeat_critical_minutes:
+      name: Re-notify criticals every (minutes, 0 = once)
+      default: 0
+      selector:
+        number: { min: 0, max: 120, step: 5, unit_of_measurement: min }
+    entry_id:
+      name: Only this Kia Access account (optional)
+      default: ""
+      selector:
+        text: {}
+
+mode: parallel
+max: 10
+
+variables:
+  notify_service: !input notify_service
+  min_level: !input min_level
+  quiet_start: !input quiet_start
+  quiet_end: !input quiet_end
+  repeat_minutes: !input repeat_critical_minutes
+  want_entry: !input entry_id
+  ev: "{{ trigger.event.data }}"
+  level: "{{ trigger.event.data.level }}"
+  reason: "{{ trigger.event.data.reason }}"
+  is_critical: "{{ trigger.event.data.level == 'critical' }}"
+  # a tag per reason so a re-fire replaces the previous card, and clears cleanly
+  tag: "kia-{{ trigger.event.data.reason }}"
+
+trigger:
+  - platform: event
+    event_type: kia_access_alert
+
+condition:
+  - condition: template
+    value_template: >
+      {{ (want_entry == "" or ev.entry_id == want_entry)
+         and (min_level == 'warning' or is_critical)
+         and (ev.active in [true, false]) }}
+  - condition: template
+    # quiet hours: criticals always get through; warnings are held
+    value_template: >
+      {% set now_t = now().strftime('%H:%M:%S') %}
+      {% set q = (quiet_start <= now_t) or (now_t < quiet_end)
+                 if quiet_start > quiet_end
+                 else (quiet_start <= now_t < quiet_end) %}
+      {{ is_critical or not q }}
+
+action:
+  # ---- condition cleared: dismiss the card ----
+  - if:
+      - condition: template
+        value_template: "{{ ev.active == false }}"
+    then:
+      - service: "{{ notify_service }}"
+        data:
+          message: clear_notification
+          data: { tag: "{{ tag }}" }
+      - stop: cleared
+
+  # ---- condition active: send, then optionally re-send criticals ----
+  - repeat:
+      sequence:
+        - service: "{{ notify_service }}"
+          data:
+            title: "{{ ev.title | default('Kia EV9') }}{{ ' ⚠️' if is_critical else '' }}"
+            message: "{{ ev.message | default(reason | replace('_',' ') | title) }}"
+            data:
+              tag: "{{ tag }}"
+              channel: "{{ 'Vehicle critical' if is_critical else 'Vehicle' }}"
+              importance: "{{ 'high' if is_critical else 'default' }}"
+              priority: high
+              ttl: 0
+              actions: >-
+                {% if reason == 'unlocked' %}[{"action":"KIA_LOCK","title":"Lock"}]
+                {%- elif reason in ['not_plugged_home','charge_interrupted'] %}[{"action":"KIA_START_CHARGE","title":"Start charge"}]
+                {%- else %}[]{% endif %}
+        - choose:
+            - conditions: "{{ not is_critical or repeat_minutes | int == 0 or repeat.index >= 12 }}"
+              sequence:
+                - stop: done
+        - wait_for_trigger:
+            - platform: event
+              event_type: kia_access_alert
+              event_data: { reason: "{{ reason }}", active: false }
+          timeout: "{{ { 'minutes': repeat_minutes | int } }}"
+          continue_on_timeout: true
+        - if:
+            - condition: template
+              value_template: "{{ wait.trigger is not none }}"
+          then:
+            - service: "{{ notify_service }}"
+              data:
+                message: clear_notification
+                data: { tag: "{{ tag }}" }
+            - stop: cleared
+      while:
+        - condition: template
+          value_template: "{{ is_critical and repeat_minutes | int > 0 and repeat.index < 12 }}"
