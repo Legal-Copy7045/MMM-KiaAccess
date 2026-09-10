@@ -192,8 +192,8 @@ Lovelace card. No MagicMirror required.
 The integration's **Configure** dialog holds **Scan interval**, **Poll the car
 directly** (+ **Live wake-up wait**), **Price per kWh** / **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
-(hours)** / **Static destinations** / **Zones to show** / **MagicMirror: zones
-to show**, and **Drive-time provider** / **Routing API key** / **Geocoding API
+(hours)** / **Static destinations** / **Zones to show on the MagicMirror
+panel**, and **Drive-time provider** / **Routing API key** / **Geocoding API
 key** / **Per-destination routes**. Leave **Poll the
 car directly** off (the default) to only ever read Kia's cached data and never
 wake the car — with it off, every update sends both `refresh: false` **and**
@@ -692,16 +692,13 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
   }
   ```
 
-  `drivingTimes.zones` filters **only this panel** — Home Assistant still gets
-  every US zone (dashboard, `sensor.<v>_range_reach`). Three ways to control it,
-  in order of precedence:
+  The zone list filters **only this panel** — the dashboard and
+  `sensor.<v>_range_reach` always show every US zone. Set it in **either**
+  place (the integration option wins if both are set):
 
-  1. **`MagicMirror: zones to show`** — an integration **Configure** option
-     that filters the mirror panel only (dashboard keeps every zone). Set it
-     here and you never touch `config.js`.
-  2. `drivingTimes.zones` in `config.js` (this list).
-  3. The integration's **Zones to show** option — narrows *everything*
-     (dashboard + sensor + mirror).
+  - the integration's **Configure → Zones to show on the MagicMirror panel**
+    option (no `config.js` edit needed), or
+  - `drivingTimes.zones` here in `config.js`.
 
   The **destinations** come from Home Assistant: your US `zone.*`, the
   integration's **Static destinations** (`Configure` → one `Name | address`
@@ -760,9 +757,10 @@ Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 **Destinations** are your **US** `zone.*` entities, plus (from the **Configure**
 dialog):
 
-- **Zones to show** — blank = every US zone; otherwise one zone per line by
-  entity id or name (`zone.home` / `Work`). A line starting with `-` excludes
-  that zone instead (e.g. leave blank-ish and just add `-Grandma`).
+- **Zones to show on the MagicMirror panel** — narrows which zones appear on
+  the *mirror's* driving-times panel (the dashboard / sensor always show every
+  US zone). Blank = all; one zone per line by entity id or name (`zone.home` /
+  `Work`); a line starting with `-` excludes that zone.
 - **Static destinations** — one `Name | address` per line, always shown
   (geocoded once, cached), e.g. `White House | 1600 Pennsylvania Ave NW, Washington, DC`.
 - **Calendar entities** + **Calendar look-ahead (hours)** — any event with a

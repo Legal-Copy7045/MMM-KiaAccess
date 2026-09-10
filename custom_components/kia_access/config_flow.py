@@ -288,13 +288,6 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         },
                     ): _multiline(),
                     vol.Optional(
-                        "mm_zone_entities",
-                        default=opts.get("mm_zone_entities", ""),
-                        description={
-                            "suggested_value": opts.get("mm_zone_entities", "")
-                        },
-                    ): _multiline(),
-                    vol.Optional(
                         "drive_time_provider",
                         default=opts.get("drive_time_provider", "estimate"),
                     ): vol.In(["estimate", "geoapify", "tomtom"]),
