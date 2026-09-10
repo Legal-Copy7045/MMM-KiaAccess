@@ -284,6 +284,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 {
                     "name": st.attributes.get("friendly_name")
                     or st.entity_id.split(".", 1)[-1].replace("_", " ").title(),
+                    "entity_id": st.entity_id,
                     "lat": lat,
                     "lon": lon,
                 }
@@ -545,8 +546,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # overlay real road distance + drive time where the routing provider
         # gave us a number (straight-line estimate is the fallback)
         cal_when = {c["name"]: c.get("when") for c in self._cal_pois}
+        zone_id = {z["name"]: z.get("entity_id") for z in self._zone_pois()}
         reach_km = out.get("reachKm")
         for p in out.get("pois") or []:
+            if p["name"] in zone_id:
+                p["zone_id"] = zone_id[p["name"]]
             if p["name"] in cal_when and cal_when[p["name"]]:
                 p["when"] = cal_when[p["name"]]
             rt = self._route_out.get(self._poi_key(p["lat"], p["lon"]))
