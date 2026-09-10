@@ -220,6 +220,20 @@ raw GitHub URL:
 | `alert_to_phone.yaml` | every `kia_access_alert` → a phone push, quiet hours, re-notify criticals, Lock / Start-charge buttons |
 | `notification_actions.yaml` | runs the Lock / Start-charge buttons (add once) |
 
+**What can start the climate / preconditioning?** Only: the card's **Climate
+panel**, `button.<v>_stop_climate`, the `kia_access.start_climate` /
+`stop_climate` services (Developer Tools, a script, an automation *you* wrote),
+the `climate.<v>` entity (any automation / scene / voice that sets its mode or
+temperature), the two **preconditioning blueprints** above if you imported
+them, and the car's **own scheduled climate** set in the Kia app (the
+integration only *shows* that, at `ev_first_departure_*`). The MagicMirror
+module never sends commands. To make climate **manual-only**, tick
+**Configure → Block automated climate**: `start_climate` / `stop_climate` are
+then rejected unless the call came straight from a person (card, button,
+Developer Tools, a hand-run script) — automations, scenes and the blueprints
+get an error. It does not touch the car's own Kia-app schedule — turn that off
+in the app.
+
 ### B · MagicMirror only
 
 The module polls the Kia / Hyundai cloud directly through a small Python bridge

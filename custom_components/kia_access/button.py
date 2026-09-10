@@ -36,4 +36,6 @@ class KiaAccessButton(KiaAccessEntity, ButtonEntity):
             self._attr_icon = spec["icon"]
 
     async def async_press(self) -> None:
-        await self.coordinator.async_run_command(self._command)
+        await self.coordinator.async_run_command(
+            self._command, context=getattr(self, "_context", None)
+        )

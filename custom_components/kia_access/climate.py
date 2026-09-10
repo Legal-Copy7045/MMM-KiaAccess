@@ -96,11 +96,16 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
     def _to_celsius(self, temp: float) -> float:
         return (temp - 32) * 5 / 9 if self._fahrenheit else temp
 
+    def _ctx(self):
+        return getattr(self, "_context", None)
+
     async def _start(self, temp_c: float | None) -> None:
         if temp_c is not None:
             await self.coordinator.async_set_pref("last_temp_c", round(temp_c, 1))
         opts = self.coordinator.build_climate_options(temp_c)
-        await self.coordinator.async_run_command("start_climate", opts)
+        await self.coordinator.async_run_command(
+            "start_climate", opts, context=self._ctx()
+        )
 
     async def async_set_temperature(self, **kwargs) -> None:
         temp = kwargs.get(ATTR_TEMPERATURE)
@@ -110,7 +115,9 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode == HVACMode.OFF:
-            await self.coordinator.async_run_command("stop_climate")
+            await self.coordinator.async_run_command(
+                "stop_climate", context=self._ctx()
+            )
         else:
             await self._start(None)
 
@@ -118,4 +125,6 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
         await self._start(None)
 
     async def async_turn_off(self) -> None:
-        await self.coordinator.async_run_command("stop_climate")
+        await self.coordinator.async_run_command(
+            "stop_climate", context=self._ctx()
+        )

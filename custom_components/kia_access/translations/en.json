@@ -59,7 +59,8 @@
           "drive_time_routes": "Per-destination routes (road names + traffic delay)",
           "static_destinations": "Fixed destinations (one per line: Name | address)",
           "geocoding_api_key": "Geoapify geocoding key (optional)",
-          "zone_entities": "Zones to show on the MagicMirror panel"
+          "zone_entities": "Zones to show on the MagicMirror panel",
+          "block_automated_climate": "Block automated climate control"
         },
         "data_description": {
           "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
@@ -70,7 +71,8 @@
           "drive_time_routes": "TomTom only: one routing call per destination each refresh so the reachable list can show “via <roads>” and colour the ETA by traffic delay. Turn off for one cheap matrix call (time + distance only).",
           "static_destinations": "Always-shown destinations for the reachable list / driving-times panel, one per line as \"Name | address\" — e.g. \"White House | 1600 Pennsylvania Ave NW, Washington, DC\". Geocoded once and cached.",
           "geocoding_api_key": "A Geoapify key used only to turn calendar / static addresses into coordinates. Set this if your routing provider is TomTom (TomTom's Search API is not on every key) or you left the provider on “estimate”.",
-          "zone_entities": "Narrows which Home Assistant zones appear on the MagicMirror driving-times panel. One per line by entity id or name (“zone.home” / “Work”); a line starting with “-” excludes that zone. Blank = show every US zone. The dashboard and sensor always show every US zone."
+          "zone_entities": "Narrows which Home Assistant zones appear on the MagicMirror driving-times panel. One per line by entity id or name (“zone.home” / “Work”); a line starting with “-” excludes that zone. Blank = show every US zone. The dashboard and sensor always show every US zone.",
+          "block_automated_climate": "Reject start_climate / stop_climate unless the call comes straight from a person (the card, the button, Developer Tools, a script you run by hand). Automations, scripts triggered by automations, scenes and the preconditioning blueprints are blocked. Does not touch the car's own scheduled climate set in the Kia app."
         }
       }
     }
