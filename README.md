@@ -201,6 +201,17 @@ tracker** with an excess-mileage cost projection, and a **maintenance /
 renewals countdown** with one-tap "done" buttons. Edit the entity prefix and
 the lease block, drop it in `config/packages/`, restart.
 
+**Automation blueprints (optional):** in [`blueprints/automation/kia_access/`](blueprints/automation/kia_access/) —
+import each with **Settings → Automations → Blueprints → Import** and paste the
+raw GitHub URL:
+
+| Blueprint | What it does |
+|---|---|
+| `precondition_on_calendar.yaml` | warm/cool the car N minutes before a calendar event — plugged-in only |
+| `precondition_on_weather.yaml` | at a set weekday time, cool if hot / warm+defrost if cold, else skip |
+| `alert_to_phone.yaml` | every `kia_access_alert` → a phone push, quiet hours, re-notify criticals, Lock / Start-charge buttons |
+| `notification_actions.yaml` | runs the Lock / Start-charge buttons (add once) |
+
 ### B · MagicMirror only
 
 The module polls the Kia / Hyundai cloud directly through a small Python bridge

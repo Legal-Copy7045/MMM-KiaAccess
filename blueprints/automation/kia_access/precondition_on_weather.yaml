@@ -1,0 +1,112 @@
+blueprint:
+  name: Kia Access — weather-smart preconditioning at a departure time
+  description: >
+    At a fixed departure time on chosen days, checks the outside temperature and
+    preconditions the car: cool it if it's hot, warm + defrost if it's cold, do
+    nothing in between. Only while the car is plugged in.
+
+    Needs the Kia Access integration (kia_access.start_climate).
+  domain: automation
+  source_url: https://github.com/Legal-Copy7045/MMM-KiaAccess/blob/main/blueprints/automation/kia_access/precondition_on_weather.yaml
+  input:
+    start_time:
+      name: Start time
+      description: >
+        When to begin conditioning — set this to your departure time minus the
+        warm-up you want (e.g. leave at 07:30, warm for 12 min -> 07:18).
+      selector:
+        time: {}
+    days:
+      name: Days
+      default: [mon, tue, wed, thu, fri]
+      selector:
+        select:
+          multiple: true
+          options:
+            - { label: Monday, value: mon }
+            - { label: Tuesday, value: tue }
+            - { label: Wednesday, value: wed }
+            - { label: Thursday, value: thu }
+            - { label: Friday, value: fri }
+            - { label: Saturday, value: sat }
+            - { label: Sunday, value: sun }
+    outside_temp:
+      name: Outside temperature sensor
+      description: e.g. sensor.<vehicle>_outside_temperature or a local weather sensor.
+      selector:
+        entity: { filter: { domain: sensor, device_class: temperature } }
+    plugged_sensor:
+      name: Plugged-in sensor
+      selector:
+        entity: { filter: { domain: binary_sensor } }
+    hot_above:
+      name: "Cool the car when it's warmer than (°)"
+      default: 26
+      selector:
+        number: { min: 15, max: 40 }
+    cold_below:
+      name: "Warm + defrost when it's colder than (°)"
+      default: 4
+      selector:
+        number: { min: -15, max: 15 }
+    cool_temp:
+      name: Target when cooling
+      default: 68
+      selector:
+        number: { min: 60, max: 78 }
+    warm_temp:
+      name: Target when warming
+      default: 72
+      selector:
+        number: { min: 62, max: 82 }
+    run_minutes:
+      name: Run time (minutes)
+      default: 10
+      selector:
+        number: { min: 5, max: 30 }
+    entry_id:
+      name: Kia Access account (optional)
+      default: ""
+      selector:
+        text: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  outside_temp: !input outside_temp
+  hot_above: !input hot_above
+  cold_below: !input cold_below
+  cool_temp: !input cool_temp
+  warm_temp: !input warm_temp
+  run_minutes: !input run_minutes
+  entry_id: !input entry_id
+
+trigger:
+  - platform: time
+    at:
+      - !input start_time
+
+condition:
+  - condition: time
+    weekday: !input days
+  - condition: state
+    entity_id: !input plugged_sensor
+    state: "on"
+  - condition: template
+    value_template: >
+      {% set t = states(outside_temp) | float(999) %}
+      {{ t > hot_above or t < cold_below }}
+
+action:
+  - variables:
+      cooling: "{{ (states(outside_temp) | float(0)) > hot_above }}"
+  - service: kia_access.start_climate
+    data: >
+      {{ {
+           'set_temp': (cool_temp if cooling else warm_temp) | int,
+           'duration': run_minutes | int,
+           'climate': true,
+           'defrost': (not cooling),
+           'heating': (0 if cooling else 1)
+         } | combine({'entry_id': entry_id} if entry_id else {}) }}

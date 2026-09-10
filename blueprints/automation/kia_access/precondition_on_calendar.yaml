@@ -1,0 +1,82 @@
+blueprint:
+  name: Kia Access — precondition before a calendar event
+  description: >
+    Warms or cools the car a set number of minutes before the next event on a
+    calendar starts — only while the car is plugged in (so it never touches the
+    traction battery), and optionally only when it's parked at home.
+
+    Needs the Kia Access integration (kia_access.start_climate).
+  domain: automation
+  source_url: https://github.com/Legal-Copy7045/MMM-KiaAccess/blob/main/blueprints/automation/kia_access/precondition_on_calendar.yaml
+  input:
+    calendar:
+      name: Calendar
+      selector:
+        entity: { filter: { domain: calendar } }
+    lead_offset:
+      name: Lead time before the event
+      description: >
+        Negative offset, HH:MM:SS. -00:15:00 means "start 15 minutes before the
+        event begins".
+      default: "-00:15:00"
+      selector:
+        text: {}
+    plugged_sensor:
+      name: Plugged-in sensor
+      description: The car's "plugged in" binary sensor.
+      selector:
+        entity: { filter: { domain: binary_sensor } }
+    location_tracker:
+      name: Location check (optional)
+      description: >
+        A device_tracker for the car. If set, the automation only runs when it
+        reads "home". Leave blank to precondition wherever the car is parked.
+      default: ""
+      selector:
+        entity: { filter: { domain: device_tracker } }
+    target_temp:
+      name: Cabin temperature
+      description: Passed to kia_access.start_climate (°F for USA/CA, else °C).
+      default: 70
+      selector:
+        number: { min: 60, max: 82 }
+    run_minutes:
+      name: Run time (minutes)
+      default: 10
+      selector:
+        number: { min: 5, max: 30 }
+    entry_id:
+      name: Kia Access account (optional)
+      description: Leave blank if you only have one vehicle.
+      default: ""
+      selector:
+        text: {}
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - platform: calendar
+    event: start
+    offset: !input lead_offset
+    entity_id: !input calendar
+
+variables:
+  entry_id: !input entry_id
+  location_tracker: !input location_tracker
+  target_temp: !input target_temp
+  run_minutes: !input run_minutes
+
+condition:
+  - condition: state
+    entity_id: !input plugged_sensor
+    state: "on"
+  - condition: template
+    value_template: >
+      {{ location_tracker == "" or is_state(location_tracker, "home") }}
+
+action:
+  - service: kia_access.start_climate
+    data: >
+      {{ {'set_temp': target_temp | int, 'duration': run_minutes | int, 'climate': true}
+         | combine({'entry_id': entry_id} if entry_id else {}) }}

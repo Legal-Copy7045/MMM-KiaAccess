@@ -1,0 +1,39 @@
+blueprint:
+  name: Kia Access — handle notification action buttons
+  description: >
+    Runs the Lock / Start charge buttons on the push notifications from the
+    "vehicle alerts to your phone" blueprint. Add this once.
+  domain: automation
+  source_url: https://github.com/Legal-Copy7045/MMM-KiaAccess/blob/main/blueprints/automation/kia_access/notification_actions.yaml
+  input:
+    entry_id:
+      name: Kia Access account (optional)
+      default: ""
+      selector:
+        text: {}
+
+mode: parallel
+max: 5
+
+variables:
+  entry_id: !input entry_id
+  action: "{{ trigger.event.data.action }}"
+
+trigger:
+  - platform: event
+    event_type: mobile_app_notification_action
+
+condition:
+  - condition: template
+    value_template: "{{ action in ['KIA_LOCK', 'KIA_START_CHARGE'] }}"
+
+action:
+  - choose:
+      - conditions: "{{ action == 'KIA_LOCK' }}"
+        sequence:
+          - service: kia_access.lock
+            data: "{{ {'entry_id': entry_id} if entry_id else {} }}"
+      - conditions: "{{ action == 'KIA_START_CHARGE' }}"
+        sequence:
+          - service: kia_access.start_charge
+            data: "{{ {'entry_id': entry_id} if entry_id else {} }}"
