@@ -49,10 +49,11 @@ with your HA URL + token. No Kia credentials, no OTP, no Python needed.
 
 ### Fresh readings vs. the 12V battery
 
-Each poll either **wakes the car** for live data or reads the **cached values
-Kia / Hyundai already hold** (which costs the car nothing). Repeatedly waking a
-parked car flattens its 12V battery in the cold, so cached reads are the safe
-default; the live wake-up is time-boxed and falls back to the cache.
+The app can either **wake the car** for live data, or read the **cached values
+Kia / Hyundai already hold** (default — which costs the car nothing in battery
+power). Repeatedly waking a parked car flattens its 12V battery in the cold, so
+cached reads are the safe default. If the live wake-up is selected, it is
+time-boxed and falls back to the cache.
 - **HA** — *Configure → Poll the car directly*: off (default) = cache only.
 - **MagicMirror mode B** — `refresh: false` = cache. Mode C leaves this to HA.
 
