@@ -968,6 +968,27 @@ reported; charging / plugged / locked / doors / frunk / liftgate / sunroof / tyr
 warning / defrost / climate binary sensors) appear in Home Assistant
 automatically, grouped under one device, with `kia/ev9/status` as availability.
 
+## Time-series export (InfluxDB / Prometheus)
+
+Optional — pushes every numeric / boolean `vehicle.*` value straight to a
+time-series DB after each fetch, no MQTT broker needed. Node built-ins only.
+
+```js
+exporter: {
+  tags: { car: "ev9" },        // extra labels on every point (vin is automatic)
+  influx: {
+    url: "http://192.168.1.8:8086",   // InfluxDB v2 or v1.8 (/api/v2/write)
+    org: "home", bucket: "vehicles", token: "…",
+    measurement: "kia_vehicle"
+  },
+  prometheus: { enabled: true, port: 9110 }   // then scrape http://<pi>:9110/metrics
+}
+```
+
+Influx: one line-protocol `POST` per update (`kia_vehicle,vin=… ev_battery_percentage=63,…`).
+Prometheus: an always-on `/metrics` endpoint — `kia_ev_battery_percentage{vin="…"} 63`,
+plus `kia_stale`. Strings are skipped; booleans become `1`/`0`.
+
 ## Reliability
 
 - **Live wake-up is time-boxed.** With `refresh: true` the bridge asks the car to
