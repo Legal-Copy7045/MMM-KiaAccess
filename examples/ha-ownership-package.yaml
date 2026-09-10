@@ -100,7 +100,7 @@ template:
         unit_of_measurement: "mi"
         icon: mdi:calendar-check
         state: >
-          {% set start = as_timestamp(strptime('2025-01-01 00:00', '%Y-%m-%d %H:%M')) %}
+          {% set start = as_timestamp('2025-01-01 00:00:00', 1735707600) %}
           {% set term_days = 1096 %}
           {% set allowance = 30000 %}
           {% set days = [(now().timestamp() - start) / 86400, 0] | max %}
@@ -119,7 +119,7 @@ template:
         unit_of_measurement: "mi"
         icon: mdi:trending-up
         state: >
-          {% set start = as_timestamp(strptime('2025-01-01 00:00', '%Y-%m-%d %H:%M')) %}
+          {% set start = as_timestamp('2025-01-01 00:00:00', 1735707600) %}
           {% set term_days = 1096 %}
           {% set days = (now().timestamp() - start) / 86400 %}
           {% set used = states('sensor.kia_lease_miles_used') | float(0) %}
