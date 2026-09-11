@@ -256,6 +256,13 @@ raw GitHub URL:
 | `alert_to_phone.yaml` | every `kia_access_alert` → a phone push, quiet hours, re-notify criticals, Lock / Start-charge buttons |
 | `notification_actions.yaml` | runs the Lock / Start-charge buttons (add once) |
 
+**Testing `alert_to_phone` without waiting for a real alert:** call
+**Developer Tools → Actions → `kia_access.test_alert`** — fires a fake
+`kia_access_alert` event so you can check the notify target, quiet hours,
+and the Lock / Start-charge action buttons (pick `unlocked` or
+`charge_interrupted` for those) on demand. `active: false` sends the
+matching "cleared" notification instead.
+
 **What can start the climate / preconditioning?** Only: the card's **Climate
 panel**, `button.<v>_stop_climate`, the `kia_access.start_climate` /
 `stop_climate` services (Developer Tools, a script, an automation *you* wrote),
