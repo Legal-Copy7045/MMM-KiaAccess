@@ -30,6 +30,27 @@ for mod in ("const", "conditions", "vehicle_state", "range", "coordinator",
     importlib.import_module(f"{pkg}.{mod}" if mod != "__init__" else pkg)
     print("imported", mod)
 
+# services.yaml must validate against HA's ACTUAL schema for the whole file,
+# not just parse as YAML -- HA loads it as one document and silently drops
+# EVERY service's description/fields (Developer Tools shows blank options
+# for the whole integration) if any single service in it fails validation.
+# Bit us for real: send_to_car's lat/lon had step: 0.000001, but the number
+# selector requires step >= 1e-3 (or the literal "any") -- go check
+# homeassistant.helpers.service._load_services_file's except clause.
+from homeassistant.helpers.service import _SERVICES_SCHEMA  # noqa: E402
+from homeassistant.util.yaml import load_yaml_dict  # noqa: E402
+
+_services_path = os.path.join(ROOT, "custom_components/kia_access/services.yaml")
+try:
+    _validated = _SERVICES_SCHEMA(load_yaml_dict(_services_path))
+except Exception as err:  # noqa: BLE001
+    raise AssertionError(
+        f"services.yaml fails HA's real schema -- every Kia Access service "
+        f"would show blank options in Developer Tools: {err}"
+    ) from err
+assert "test_alert" in _validated and "send_to_car" in _validated
+print("services.yaml: ok -", len(_validated), "services validate")
+
 cond = importlib.import_module(f"{pkg}.conditions")
 vs = importlib.import_module(f"{pkg}.vehicle_state")
 r = cond.evaluate(vs.build_state({"vehicle.is_locked": "false"}, {}), {}, {})
