@@ -68,7 +68,6 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._geo_store = Store(hass, 1, f"{DOMAIN}_geocache_{entry.entry_id}")
         self._cal_pois: list[dict] = []
         self._static_pois: list[dict] = []
-        self._cal_pois_at: float = 0.0
         self._cal_status: dict = {}
         # keep the assembled destinations across a reload (option changes reload
         # the entry a lot; without this the calendar list blinks out for ~30 min)
@@ -945,13 +944,19 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         _async_update_data before this ever ran, so the reachable-
         destinations panel only ever updated when someone hit
         refresh_calendar_destinations by hand. Called on every poll
-        regardless of fetch outcome, still throttled to once/30min."""
-        if time.monotonic() - self._cal_pois_at > 1800:
-            self._cal_pois_at = time.monotonic()
-            try:
-                await self.async_refresh_calendar_pois()
-            except Exception:  # noqa: BLE001
-                _LOGGER.debug("calendar POI refresh failed", exc_info=True)
+        regardless of fetch outcome.
+
+        async_refresh_calendar_pois() itself has no real throttle need: it
+        reads events from HA's own calendar entity (calendar.get_events is
+        local — it does not poll Google/etc itself, that integration has
+        its own schedule) and _geocode_cached() only ever calls out for an
+        address it hasn't seen before, so repeat runs cost nothing extra.
+        _refresh_drive_times() is the one with real external API calls
+        (routing) and keeps its own separate 600s / car-moved throttle."""
+        try:
+            await self.async_refresh_calendar_pois()
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("calendar POI refresh failed", exc_info=True)
         try:
             await self._refresh_drive_times()
         except Exception:  # noqa: BLE001
