@@ -161,6 +161,9 @@ action:
                 - service: "{{ notify_service }}"
                   data: *clear_payload
             - stop: cleared
-      while:
+      # until (checked AFTER each pass) guarantees the sequence runs at least
+      # once -- `while` is checked BEFORE every pass including the first, so
+      # a non-critical alert (is_critical false) would never send at all.
+      until:
         - condition: template
-          value_template: "{{ is_critical and repeat_minutes | int > 0 and repeat.index < 12 }}"
+          value_template: "{{ not is_critical or repeat_minutes | int == 0 or repeat.index >= 12 }}"
