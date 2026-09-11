@@ -188,6 +188,9 @@ assert {"location", "location_latitude", "location_longitude", "token",
 
 init = importlib.import_module(pkg)
 assert hasattr(init, "_register_frontend")
+assert hasattr(init, "async_track_time_interval"), (
+    "the 1-min calendar-refresh timer needs this imported"
+)
 assert os.path.exists(
     os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
 ), "card bundle not vendored"

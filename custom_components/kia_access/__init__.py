@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import COMMANDS, DOMAIN, PLATFORMS, VERSION
 from .coordinator import KiaAccessCoordinator
@@ -43,6 +45,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
+    # Calendar destinations + drive-time routing on their own 1-min timer,
+    # independent of the (often much longer, battery-friendly) vehicle
+    # scan_interval -- reading calendar.get_events and the geocode cache is
+    # local/free, so there's no reason a new calendar event should wait on
+    # the vehicle poll cadence to show up. _refresh_drive_times() keeps its
+    # own separate throttle for the actual external routing calls.
+    async def _calendar_tick(_now) -> None:
+        await coordinator._refresh_calendar_and_routes()  # noqa: SLF001
+        coordinator.async_update_listeners()
+
+    entry.async_on_unload(
+        async_track_time_interval(hass, _calendar_tick, timedelta(minutes=1))
+    )
     return True
 
 
