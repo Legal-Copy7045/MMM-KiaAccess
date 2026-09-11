@@ -18,7 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import COMMANDS, DOMAIN, PLATFORMS, VERSION
+from .const import COMMANDS, DOMAIN, EVENT_STATE_CHANGED, PLATFORMS, VERSION
 from .coordinator import KiaAccessCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,6 +105,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.services.async_remove(DOMAIN, spec["key"])
             hass.services.async_remove(DOMAIN, "refresh_calendar_destinations")
             hass.services.async_remove(DOMAIN, "set_charge_cost")
+            hass.services.async_remove(DOMAIN, "test_alert")
     return unload_ok
 
 
@@ -219,6 +220,46 @@ def _register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema({
             vol.Required("cost"): vol.Coerce(float),
             vol.Optional("started_at"): vol.Coerce(float),
+            vol.Optional("entry_id"): cv.string,
+        }),
+    )
+
+    async def _test_alert(call: ServiceCall) -> None:
+        """Fire a synthetic kia_access_alert event — no real condition needed.
+        For checking a notify target / the alert_to_phone blueprint / quiet
+        hours / action buttons without waiting for the real thing to happen."""
+        coordinator = _coordinator_for(hass, call)
+        reason = call.data.get("reason", "unlocked")
+        level = call.data.get("level", "warning")
+        active = call.data.get("active", True)
+        label = reason.replace("_", " ")
+        hass.bus.async_fire(
+            EVENT_STATE_CHANGED,
+            {
+                "entry_id": coordinator.entry.entry_id,
+                "reason": reason,
+                "level": level,
+                "active": active,
+                "title": f"Kia Access test — {label}",
+                "message": (
+                    f"Test alert: {label}" if active
+                    else f"Test alert cleared: {label}"
+                ),
+                "value": {},
+                "vin": coordinator.vehicle.get("VIN"),
+            },
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        "test_alert",
+        _test_alert,
+        schema=vol.Schema({
+            vol.Optional("reason", default="unlocked"): cv.string,
+            vol.Optional("level", default="warning"): vol.In(
+                ["info", "warning", "critical"]
+            ),
+            vol.Optional("active", default=True): cv.boolean,
             vol.Optional("entry_id"): cv.string,
         }),
     )

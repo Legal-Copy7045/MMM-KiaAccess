@@ -320,3 +320,51 @@ set_charge_cost:
       selector:
         config_entry:
           integration: kia_access
+
+test_alert:
+  name: "Send a test alert"
+  description: "Fires a fake kia_access_alert event -- no real condition needed. Use it to check a notify target, the alert_to_phone blueprint, quiet hours, or the Lock / Start-charge action buttons (pick unlocked / not_plugged_home / charge_interrupted for those)."
+  fields:
+    reason:
+      name: Reason
+      description: Which condition to pretend fired.
+      required: false
+      default: unlocked
+      selector:
+        select:
+          custom_value: true
+          options:
+            - unlocked
+            - door_open
+            - window_open
+            - not_plugged_home
+            - charge_interrupted
+            - tyre_pressure
+            - battery_12v_critical
+            - unexpected_move
+            - cant_get_home
+            - vehicle_fault
+    level:
+      name: Level
+      required: false
+      default: warning
+      selector:
+        select:
+          options:
+            - info
+            - warning
+            - critical
+    active:
+      name: Active
+      description: "On = the alert just fired. Off = it just cleared (sends clear_notification instead)."
+      required: false
+      default: true
+      selector:
+        boolean: {}
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access

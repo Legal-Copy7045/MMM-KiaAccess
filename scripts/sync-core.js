@@ -113,6 +113,38 @@ yaml +=
   "      description: Config entry id (only needed with multiple accounts).\n" +
   "      required: false\n" +
   "      selector:\n        config_entry:\n          integration: kia_access\n";
+yaml +=
+  "\ntest_alert:\n" +
+  '  name: "Send a test alert"\n' +
+  '  description: "Fires a fake kia_access_alert event -- no real condition needed. Use it to check a notify target, the alert_to_phone blueprint, quiet hours, or the Lock / Start-charge action buttons (pick unlocked / not_plugged_home / charge_interrupted for those)."\n' +
+  "  fields:\n" +
+  "    reason:\n" +
+  "      name: Reason\n" +
+  "      description: Which condition to pretend fired.\n" +
+  "      required: false\n" +
+  "      default: unlocked\n" +
+  "      selector:\n        select:\n          custom_value: true\n          options:\n" +
+  "            - unlocked\n            - door_open\n            - window_open\n" +
+  "            - not_plugged_home\n            - charge_interrupted\n" +
+  "            - tyre_pressure\n            - battery_12v_critical\n" +
+  "            - unexpected_move\n            - cant_get_home\n" +
+  "            - vehicle_fault\n" +
+  "    level:\n" +
+  "      name: Level\n" +
+  "      required: false\n" +
+  "      default: warning\n" +
+  "      selector:\n        select:\n          options:\n            - info\n            - warning\n            - critical\n" +
+  "    active:\n" +
+  "      name: Active\n" +
+  '      description: "On = the alert just fired. Off = it just cleared (sends clear_notification instead)."\n' +
+  "      required: false\n" +
+  "      default: true\n" +
+  "      selector:\n        boolean: {}\n" +
+  "    entry_id:\n" +
+  "      name: Account\n" +
+  "      description: Config entry id (only needed with multiple accounts).\n" +
+  "      required: false\n" +
+  "      selector:\n        config_entry:\n          integration: kia_access\n";
 outputs[path.join(HA, "services.yaml")] = yaml;
 
 function indentSelector(obj, pad) {
