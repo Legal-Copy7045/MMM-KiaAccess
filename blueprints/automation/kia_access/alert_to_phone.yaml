@@ -124,10 +124,6 @@ action:
                     message: "{{ ev.message | default(reason | replace('_',' ') | title) }}"
                     data:
                       tag: "{{ tag }}"
-                      channel: "{{ 'Vehicle critical' if is_critical else 'Vehicle' }}"
-                      importance: "{{ 'high' if is_critical else 'default' }}"
-                      priority: high
-                      ttl: 0
                       actions: >-
                         {% if reason == 'unlocked' %}[{"action":"KIA_LOCK","title":"Lock"}]
                         {%- elif reason in ['not_plugged_home','charge_interrupted'] %}[{"action":"KIA_START_CHARGE","title":"Start charge"}]
