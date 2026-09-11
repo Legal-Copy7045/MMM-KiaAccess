@@ -103,11 +103,11 @@ module.exports = NodeHelper.create({
     // name for a local (git-ignored) cache file — not a security boundary.
     const name = crypto.createHash("sha256").update(id).digest("hex").slice(0, 16);
     const file = path.join(CACHE_DIR, name + ".json");
-    // one-time migration off the older filename so charge-session / trip
-    // history carries over on upgrade (see migrateLegacyCache)
+    // one-time migration off the older (pre-v2.43.1) filename so
+    // charge-session / trip history carries over on upgrade
     if (!fs.existsSync(file)) {
       try {
-        this.migrateLegacyCache(id, file);
+        this.migrateLegacyCache(file);
       } catch (e) {
         /* fall through to a fresh cache */
       }
@@ -115,15 +115,17 @@ module.exports = NodeHelper.create({
     return file;
   },
 
-  // Pre-v2.43.1 the cache filename was a truncated SHA-1 of the same id.
-  // SHA-1 is used here ONLY to reconstruct that legacy path for a local
-  // rename — no security decision depends on it.
-  migrateLegacyCache(id, file) {
-    const legacy = path.join(
-      CACHE_DIR,
-      crypto.createHash("sha1").update(id).digest("hex").slice(0, 16) + ".json"
-    );
-    if (fs.existsSync(legacy)) fs.renameSync(legacy, file);
+  // The old cache filename was also a hash of the vehicle id, so there's no
+  // way to recompute it without hashing sensitive data again. Instead: if
+  // this is a single-vehicle setup, the directory holds exactly one leftover
+  // file from the old scheme — adopt it. Ambiguous (0 or 2+ files) just
+  // falls through to a fresh cache.
+  migrateLegacyCache(file) {
+    const leftovers = fs.readdirSync(CACHE_DIR)
+      .filter((f) => f.endsWith(".json") && path.join(CACHE_DIR, f) !== file);
+    if (leftovers.length === 1) {
+      fs.renameSync(path.join(CACHE_DIR, leftovers[0]), file);
+    }
   },
 
   st(id) {
