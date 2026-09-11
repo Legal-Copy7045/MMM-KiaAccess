@@ -188,7 +188,7 @@
   flex: none;
 }
 .kiaaccess-dt-sub {
-  opacity: 0.55;
+  opacity: 0.75;
   font-size: calc(10.5px * var(--kia-scale, 1));
   line-height: 1.15;
   white-space: nowrap;
