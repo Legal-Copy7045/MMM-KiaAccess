@@ -11,10 +11,13 @@ blueprint:
   source_url: https://github.com/Legal-Copy7045/MMM-KiaAccess/blob/main/blueprints/automation/kia_access/alert_to_phone.yaml
   input:
     notify_service:
-      name: Notify service
-      description: e.g. notify.mobile_app_steve_phone
+      name: Notify target
+      description: >
+        The phone (or other) notify entity to send to — e.g.
+        notify.steve_iphone from the Home Assistant companion app.
       selector:
-        text: {}
+        entity:
+          filter: { domain: notify }
     min_level:
       name: Minimum level
       default: warning
@@ -38,9 +41,11 @@ blueprint:
         number: { min: 0, max: 120, step: 5, unit_of_measurement: min }
     entry_id:
       name: Only this Kia Access account (optional)
+      description: Leave blank if you only have one vehicle.
       default: ""
       selector:
-        text: {}
+        config_entry:
+          integration: kia_access
 
 mode: parallel
 max: 10
@@ -66,7 +71,7 @@ trigger:
 condition:
   - condition: template
     value_template: >
-      {{ (want_entry == "" or ev.entry_id == want_entry)
+      {{ (not want_entry or ev.entry_id == want_entry)
          and (min_level == 'warning' or is_critical)
          and (ev.active in [true, false]) }}
   - condition: template
@@ -84,7 +89,8 @@ action:
       - condition: template
         value_template: "{{ ev.active == false }}"
     then:
-      - service: "{{ notify_service }}"
+      - service: notify.send_message
+        target: { entity_id: "{{ notify_service }}" }
         data:
           message: clear_notification
           data: { tag: "{{ tag }}" }
@@ -93,7 +99,8 @@ action:
   # ---- condition active: send, then optionally re-send criticals ----
   - repeat:
       sequence:
-        - service: "{{ notify_service }}"
+        - service: notify.send_message
+          target: { entity_id: "{{ notify_service }}" }
           data:
             title: "{{ ev.title | default('Kia EV9') }}{{ ' ⚠️' if is_critical else '' }}"
             message: "{{ ev.message | default(reason | replace('_',' ') | title) }}"
@@ -121,7 +128,8 @@ action:
             - condition: template
               value_template: "{{ wait.trigger is not none }}"
           then:
-            - service: "{{ notify_service }}"
+            - service: notify.send_message
+              target: { entity_id: "{{ notify_service }}" }
               data:
                 message: clear_notification
                 data: { tag: "{{ tag }}" }

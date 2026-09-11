@@ -50,7 +50,8 @@ blueprint:
       description: Leave blank if you only have one vehicle.
       default: ""
       selector:
-        text: {}
+        config_entry:
+          integration: kia_access
 
 mode: single
 max_exceeded: silent

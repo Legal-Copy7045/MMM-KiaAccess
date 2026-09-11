@@ -8,9 +8,11 @@ blueprint:
   input:
     entry_id:
       name: Kia Access account (optional)
+      description: Leave blank if you only have one vehicle.
       default: ""
       selector:
-        text: {}
+        config_entry:
+          integration: kia_access
 
 mode: parallel
 max: 5
