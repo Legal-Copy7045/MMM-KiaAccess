@@ -938,34 +938,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         job.update(extra)
         return job
 
-    async def _async_update_data(self) -> dict:
-        job = self._job()
-        try:
-            result = await self.hass.async_add_executor_job(kia_client.fetch, job)
-        except kia_client.OtpRequired as err:
-            # triggers HA's reauth flow instead of an endless retry
-            raise ConfigEntryAuthFailed(
-                "Kia needs re-enrollment (one-time code)."
-            ) from err
-        except kia_client.ClientError as err:
-            raise UpdateFailed(str(err)) from err
-        except Exception as err:  # noqa: BLE001
-            raise UpdateFailed(f"{type(err).__name__}: {err}") from err
-
-        self.meta = result.get("meta", {}) or {}
-        # persist a rotated refresh token back into the config entry.
-        # async_update_entry fires the update listener, but _async_options_updated
-        # ignores data-only changes so this does not reload the integration.
-        new_token = self.meta.pop("token", None)
-        if new_token and new_token != self.entry.data.get(CONF_TOKEN):
-            self.hass.config_entries.async_update_entry(
-                self.entry,
-                data={**self.entry.data, CONF_TOKEN: new_token},
-            )
-        self.vehicle = (result.get("vehicles") or [{}])[0]
-        await self._update_sessions()
-        await self._update_trips()
-        # refresh calendar destinations at most every 30 min (each is a geocode)
+    async def _refresh_calendar_and_routes(self) -> None:
+        """Calendar destinations + drive times. Deliberately independent of
+        whether the Kia vehicle fetch just succeeded — a Kia cloud hiccup
+        (rate limit, wake timeout, transient auth) used to abort
+        _async_update_data before this ever ran, so the reachable-
+        destinations panel only ever updated when someone hit
+        refresh_calendar_destinations by hand. Called on every poll
+        regardless of fetch outcome, still throttled to once/30min."""
         if time.monotonic() - self._cal_pois_at > 1800:
             self._cal_pois_at = time.monotonic()
             try:
@@ -976,6 +956,51 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             await self._refresh_drive_times()
         except Exception:  # noqa: BLE001
             _LOGGER.debug("drive-time refresh failed", exc_info=True)
+
+    async def _async_update_data(self) -> dict:
+        job = self._job()
+        fetch_err: Exception | None = None
+        otp_required = False
+        try:
+            result = await self.hass.async_add_executor_job(kia_client.fetch, job)
+        except kia_client.OtpRequired as err:
+            otp_required = True
+            fetch_err = err
+        except kia_client.ClientError as err:
+            fetch_err = err
+        except Exception as err:  # noqa: BLE001
+            fetch_err = err
+
+        if fetch_err is None:
+            self.meta = result.get("meta", {}) or {}
+            # persist a rotated refresh token back into the config entry.
+            # async_update_entry fires the update listener, but
+            # _async_options_updated ignores data-only changes so this does
+            # not reload the integration.
+            new_token = self.meta.pop("token", None)
+            if new_token and new_token != self.entry.data.get(CONF_TOKEN):
+                self.hass.config_entries.async_update_entry(
+                    self.entry,
+                    data={**self.entry.data, CONF_TOKEN: new_token},
+                )
+            self.vehicle = (result.get("vehicles") or [{}])[0]
+            await self._update_sessions()
+            await self._update_trips()
+
+        await self._refresh_calendar_and_routes()
+
+        if fetch_err is not None:
+            if otp_required:
+                # triggers HA's reauth flow instead of an endless retry
+                raise ConfigEntryAuthFailed(
+                    "Kia needs re-enrollment (one-time code)."
+                ) from fetch_err
+            if isinstance(fetch_err, kia_client.ClientError):
+                raise UpdateFailed(str(fetch_err)) from fetch_err
+            raise UpdateFailed(
+                f"{type(fetch_err).__name__}: {fetch_err}"
+            ) from fetch_err
+
         self._emit_alerts()
         return self.vehicle
 
