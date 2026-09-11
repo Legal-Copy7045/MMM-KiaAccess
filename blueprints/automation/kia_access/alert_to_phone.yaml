@@ -72,6 +72,15 @@ variables:
   # it has no backing entity, so states[...] is none for it). Both are
   # common; this picks the right call shape either way.
   notify_is_entity: "{{ states[notify_service] is not none }}"
+  # a bare {{ }} expression (nothing else in the string) keeps this a real
+  # list, not a stringified one -- data.actions needs an actual YAML list of
+  # {action,title} maps. A JSON-encoded string here still delivers the
+  # notification but the button silently doesn't work.
+  action_buttons: >-
+    {{ [{'action': 'KIA_LOCK', 'title': 'Lock'}] if reason == 'unlocked'
+       else [{'action': 'KIA_START_CHARGE', 'title': 'Start charge'}]
+       if reason in ['not_plugged_home', 'charge_interrupted']
+       else [] }}
 
 trigger:
   - platform: event
@@ -124,10 +133,7 @@ action:
                     message: "{{ ev.message | default(reason | replace('_',' ') | title) }}"
                     data:
                       tag: "{{ tag }}"
-                      actions: >-
-                        {% if reason == 'unlocked' %}[{"action":"KIA_LOCK","title":"Lock"}]
-                        {%- elif reason in ['not_plugged_home','charge_interrupted'] %}[{"action":"KIA_START_CHARGE","title":"Start charge"}]
-                        {%- else %}[]{% endif %}
+                      actions: "{{ action_buttons }}"
           default:
             - service: "{{ notify_service }}"
               data: *send_payload
