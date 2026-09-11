@@ -938,21 +938,22 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         return job
 
     async def _refresh_calendar_and_routes(self) -> None:
-        """Calendar destinations + drive times. Deliberately independent of
-        whether the Kia vehicle fetch just succeeded — a Kia cloud hiccup
-        (rate limit, wake timeout, transient auth) used to abort
-        _async_update_data before this ever ran, so the reachable-
-        destinations panel only ever updated when someone hit
-        refresh_calendar_destinations by hand. Called on every poll
-        regardless of fetch outcome.
+        """Calendar destinations + drive times. Called from two places:
+        every _async_update_data() poll (regardless of whether the Kia
+        vehicle fetch that cycle succeeded — a Kia cloud hiccup used to
+        abort the whole cycle before this ever ran), AND a separate 1-min
+        timer in __init__.async_setup_entry so a new/changed calendar event
+        shows up quickly without waiting on the (often much longer,
+        battery-friendly) vehicle scan_interval.
 
-        async_refresh_calendar_pois() itself has no real throttle need: it
-        reads events from HA's own calendar entity (calendar.get_events is
-        local — it does not poll Google/etc itself, that integration has
-        its own schedule) and _geocode_cached() only ever calls out for an
-        address it hasn't seen before, so repeat runs cost nothing extra.
+        async_refresh_calendar_pois() has no real throttle need: it reads
+        events from HA's own calendar entity (calendar.get_events is local
+        — it does not poll Google/etc itself, that integration has its own
+        schedule) and _geocode_cached() only ever calls out for an address
+        it hasn't seen before, so back-to-back runs cost nothing extra.
         _refresh_drive_times() is the one with real external API calls
-        (routing) and keeps its own separate 600s / car-moved throttle."""
+        (routing) and keeps its own separate 600s / car-moved throttle, so
+        calling this every minute doesn't hammer that provider either."""
         try:
             await self.async_refresh_calendar_pois()
         except Exception:  # noqa: BLE001
