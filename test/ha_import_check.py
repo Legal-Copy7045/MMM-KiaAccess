@@ -195,8 +195,8 @@ assert os.path.exists(
     os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
 ), "card bundle not vendored"
 # local brand images (HA 2026.3+ brand/ folder, served at
-# /api/brands/integration/kia_access/icon.png) -- independent of the
-# home-assistant/brands submission, which HACS's own store listing still needs
+# /api/brands/integration/kia_access/icon.png) -- this is now the ONLY path;
+# home-assistant/brands stopped accepting new custom-integration icons
 for _f in ("icon.png", "icon@2x.png"):
     assert os.path.exists(
         os.path.join(ROOT, "custom_components/kia_access/brand", _f)
