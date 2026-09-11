@@ -194,6 +194,13 @@ assert hasattr(init, "async_track_time_interval"), (
 assert os.path.exists(
     os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
 ), "card bundle not vendored"
+# local brand images (HA 2026.3+ brand/ folder, served at
+# /api/brands/integration/kia_access/icon.png) -- independent of the
+# home-assistant/brands submission, which HACS's own store listing still needs
+for _f in ("icon.png", "icon@2x.png"):
+    assert os.path.exists(
+        os.path.join(ROOT, "custom_components/kia_access/brand", _f)
+    ), f"missing custom_components/kia_access/brand/{_f}"
 
 # strings.json <-> translations/en.json identical, and cover the flow steps
 s = json.load(open(os.path.join(ROOT, "custom_components/kia_access/strings.json"), encoding="utf-8"))
