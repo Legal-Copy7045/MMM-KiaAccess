@@ -164,7 +164,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def _refresh_calendar(call: ServiceCall) -> None:
         coordinator = _coordinator_for(hass, call)
-        coordinator._cal_pois_at = 0.0  # noqa: SLF001 — clear the throttle
+        # calendar refresh has no throttle to clear (every poll runs it); the
+        # routing throttle still needs clearing so the new/changed POIs route
         coordinator._route_at = 0.0  # noqa: SLF001 — re-route the new POIs too
         try:
             await coordinator.async_refresh_calendar_pois()
