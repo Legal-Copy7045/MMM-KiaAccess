@@ -40,9 +40,14 @@ class KiaAccessChargingSwitch(KiaAccessEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and (
-            self.coordinator.vehicle.get("ev_battery_is_plugged_in") in _TRUE
+        # ev_battery_is_plugged_in isn't strict 0/1 on the EV9 -- it's a
+        # connector-type code (seen: 4 while actively charging) -- so treat
+        # any nonzero number as plugged too, matching vehicle_state.py's _bool
+        v = self.coordinator.vehicle.get("ev_battery_is_plugged_in")
+        plugged = v in _TRUE or (
+            isinstance(v, (int, float)) and not isinstance(v, bool) and v != 0
         )
+        return super().available and plugged
 
     @property
     def is_on(self) -> bool | None:

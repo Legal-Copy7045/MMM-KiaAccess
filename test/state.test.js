@@ -43,6 +43,24 @@ assert.ok(s.tokenAgeDays > 25 && s.tokenAgeDays < 27);
 assert.strictEqual(s.otpLifetimeDays, 30);
 assert.deepStrictEqual(s.history, [{ t: 1, ev: 60 }]);
 
+// bool(): some binary_sensor-shaped fields aren't strict 0/1 -- the EV9
+// sends ev_battery_is_plugged_in as a connector-type code (seen live: 4
+// while actively charging), not a boolean. Any nonzero number must read as
+// true (0 stays false, weird strings stay unknown) -- this was a real bug:
+// plugged came back null for a code of 4, so notPluggedInHome false-fired
+// at home even while genuinely charging.
+assert.strictEqual(
+  buildState({ "vehicle.ev_battery_is_plugged_in": 4 }, {}).plugged, true,
+  "nonzero connector-type code reads as plugged"
+);
+assert.strictEqual(
+  buildState({ "vehicle.ev_battery_is_plugged_in": 0 }, {}).plugged, false
+);
+assert.strictEqual(
+  buildState({ "vehicle.ev_battery_is_plugged_in": "unplugged" }, {}).plugged, null,
+  "non-numeric, non-true/false strings stay unknown"
+);
+
 // empty flat map -> all null, no throw
 const empty = buildState({}, {});
 assert.strictEqual(empty.batteryPct, null);
