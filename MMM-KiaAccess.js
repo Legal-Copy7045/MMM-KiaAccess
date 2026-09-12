@@ -745,7 +745,7 @@ Module.register("MMM-KiaAccess", {
     const odoStable = p && st.odometerKm != null && Math.abs(st.odometerKm - p.odo) < 0.1;
     if (odoStable && st.carOn !== true && st.locationLat != null && p.lat != null) {
       const movedKm = this.haversineKm(p.lat, p.lon, st.locationLat, st.locationLon);
-      if (movedKm != null && movedKm >= 0.15) {
+      if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
         if (!this._movedSince) this._movedSince = now;
         st.movedWhileParkedKm = movedKm;
         st.movedWhileParkedMin = (now - this._movedSince) / 60000;

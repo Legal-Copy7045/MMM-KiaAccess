@@ -1149,9 +1149,11 @@ g.KiaAccessCommands={
     notPluggedInHome: {
       enabled: true, level: "warning", graceMin: 20, afterHour: null, beforeHour: null
     },
-    // GPS moved while the odometer stayed put and the car was off (tow / theft)
+    // GPS moved while the odometer stayed put and the car was off (tow / theft).
+    // thresholdKm 0.3048 = 1000 ft -- ordinary parked-GPS jitter (garages,
+    // multipath) can drift tens of meters; this needs a real move, not noise.
     unexpectedMove: {
-      enabled: true, level: "critical", thresholdKm: 0.5, sustainedMin: 3
+      enabled: true, level: "critical", thresholdKm: 0.3048, sustainedMin: 3
     },
     // not enough range to drive home (only when away from home)
     cantGetHome: {
@@ -1419,7 +1421,7 @@ g.KiaAccessCommands={
     if (cMv.enabled) {
       var mk = num(s.movedWhileParkedKm);
       var mmin = num(s.movedWhileParkedMin);
-      var thr = num(cMv.thresholdKm) != null ? num(cMv.thresholdKm) : 0.5;
+      var thr = num(cMv.thresholdKm) != null ? num(cMv.thresholdKm) : 0.3048;
       var sustained = num(cMv.sustainedMin) != null ? num(cMv.sustainedMin) : 3;
       var mvActive;
       if (mk == null) mvActive = null;
@@ -2719,7 +2721,7 @@ g.KiaAccessCommands={
       if (odoStable && state.carOn !== true && state.locationLat != null
           && p.lat != null && RNG && RNG.haversineKm) {
         var movedKm = RNG.haversineKm(p.lat, p.lon, state.locationLat, state.locationLon);
-        if (movedKm != null && movedKm >= 0.15) {
+        if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
           if (!this._movedSince) this._movedSince = now;
           state.movedWhileParkedKm = movedKm;
           state.movedWhileParkedMin = (now - this._movedSince) / 60000;
