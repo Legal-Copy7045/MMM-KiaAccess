@@ -2079,8 +2079,16 @@ g.KiaAccessCommands={
     ".ka-top{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}" +
     ".ka-diagram svg{max-width:264px;height:auto}" +  /* room for the warning badge's wider viewBox */
     ".ka-side{flex:1 1 160px;min-width:150px}" +
+    ".ka-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}" +
+    ".ka-title{min-width:0}" +
     ".ka-name{font-size:1.1em;font-weight:500}" +
     ".ka-sub{color:var(--secondary-text-color);font-size:.85em}" +
+    ".ka-refresh{flex:none;background:none;border:0;cursor:pointer;padding:4px;" +
+    "border-radius:50%;color:var(--secondary-text-color);display:flex}" +
+    ".ka-refresh:hover{background:var(--secondary-background-color);color:var(--primary-text-color)}" +
+    ".ka-refresh ha-icon{--mdc-icon-size:20px;width:20px;height:20px}" +
+    ".ka-refresh.spinning ha-icon{animation:ka-spin 1s linear infinite}" +
+    "@keyframes ka-spin{to{transform:rotate(360deg)}}" +
     ".ka-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}" +
     ".ka-chip{font-size:.75em;padding:2px 8px;border-radius:10px;background:var(--secondary-background-color);color:var(--secondary-text-color)}" +
     ".ka-chip.alert{background:var(--error-color);color:#fff}" +
@@ -2610,6 +2618,24 @@ g.KiaAccessCommands={
       this._climNote("Stopping climate…");
     }
 
+    // pull fresh data from Kia's servers now (button.<vehicle>_refresh_now,
+    // added alongside the integration's coordinator.async_force_refresh() —
+    // wakes the car even when "poll car directly" is off). Spins the icon
+    // for a few seconds as immediate feedback; the entity has no state of
+    // its own to watch (it's a momentary button, not a sensor).
+    _refreshNow() {
+      if (!this._hass || this._tooSoon("refresh_now") || !this._refreshEntity) return;
+      this._hass.callService("button", "press", { entity_id: this._refreshEntity });
+      this._refreshing = true;
+      this._render();
+      clearTimeout(this._refreshT);
+      this._refreshT = setTimeout(function () {
+        this._refreshing = false;
+        this._sig = null;
+        this._render();
+      }.bind(this), 3200);
+    }
+
     _wireClimate() {
       var root = this._root;
       var card = this;
@@ -2669,6 +2695,15 @@ g.KiaAccessCommands={
       var updated = st.state && st.state !== "unknown" && st.state !== "unavailable"
         ? "Updated " + relTime(st.state) : "";
 
+      // "Refresh now" icon next to the name/updated line -- only shown when
+      // the integration is new enough to have registered the button entity
+      this._refreshEntity = entId.replace(/^sensor\./, "button.").replace(/_status$/, "_refresh_now");
+      var refreshBtnHtml = hass.states[this._refreshEntity]
+        ? "<button type='button' class='ka-refresh" + (this._refreshing ? " spinning" : "") +
+          "' data-refresh title='Refresh now' aria-label='Refresh now'>" +
+          "<ha-icon icon='mdi:refresh'></ha-icon></button>"
+        : "";
+
       // status chips for the at-a-glance stuff
       var chips = [];
       if (state.critical) chips.push("<span class='ka-chip alert'>Check vehicle</span>");
@@ -2693,8 +2728,12 @@ g.KiaAccessCommands={
         "<ha-card><div class='ka-wrap'><div class='ka-top'>" +
         "<div class='ka-diagram'>" + diagram + "</div>" +
         "<div class='ka-side'>" +
+        "<div class='ka-head'>" +
+        "<div class='ka-title'>" +
         "<div class='ka-name'>" + esc(name) + "</div>" +
         "<div class='ka-sub'>" + esc(updated) + "</div>" +
+        "</div>" + refreshBtnHtml +
+        "</div>" +
         chipHtml + note +
         "</div></div>" +
         this._rangeMapSection(rmInp, hass) +
@@ -2714,6 +2753,8 @@ g.KiaAccessCommands={
       root.querySelectorAll(".ka-rmseg button").forEach(function (b) {
         b.addEventListener("click", function () { card._setRmMode(b.getAttribute("data-rm")); });
       });
+      var refreshBtn = root.querySelector(".ka-refresh");
+      if (refreshBtn) refreshBtn.addEventListener("click", function () { card._refreshNow(); });
       this._wireClimate();
     }
   }
