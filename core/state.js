@@ -23,6 +23,12 @@
       var v = f["vehicle." + k];
       if (v === true || v === "true" || v === 1 || v === "1") return true;
       if (v === false || v === "false" || v === 0 || v === "0") return false;
+      // some binary_sensor-shaped fields aren't strict 0/1 -- e.g. the EV9's
+      // ev_battery_is_plugged_in comes back as a connector-type code (seen: 4
+      // while actively charging), not a boolean. Any other finite number: 0
+      // is false, anything else is true. Strings that aren't "true"/"false"
+      // stay unknown (null) rather than guessing.
+      if (typeof v === "number" && isFinite(v)) return v !== 0;
       return null;
     };
     var num = function (k) {

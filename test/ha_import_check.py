@@ -30,6 +30,18 @@ for mod in ("const", "conditions", "vehicle_state", "range", "coordinator",
     importlib.import_module(f"{pkg}.{mod}" if mod != "__init__" else pkg)
     print("imported", mod)
 
+# _bool(): some binary_sensor-shaped fields aren't strict 0/1 -- the EV9
+# sends ev_battery_is_plugged_in as a connector-type code (seen live: 4
+# while actively charging), not a boolean. Real bug: plugged came back None
+# for a code of 4, so notPluggedInHome false-fired at home while charging,
+# and switch.<v>_charging was marked unavailable. Nonzero numbers must read
+# as True; keep parity with core/state.js's bool() (see test/state.test.js).
+_vs = importlib.import_module(f"{pkg}.vehicle_state")
+assert _vs._bool({"vehicle.x": 4}, "x") is True, "nonzero connector-type code reads as plugged"
+assert _vs._bool({"vehicle.x": 0}, "x") is False
+assert _vs._bool({"vehicle.x": True}, "x") is True
+assert _vs._bool({"vehicle.x": "weird"}, "x") is None, "non-numeric unknown strings stay unknown"
+
 # services.yaml must validate against HA's ACTUAL schema for the whole file,
 # not just parse as YAML -- HA loads it as one document and silently drops
 # EVERY service's description/fields (Developer Tools shows blank options

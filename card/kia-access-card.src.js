@@ -52,7 +52,19 @@
     "@keyframes ka-spin{to{transform:rotate(360deg)}}" +
     ".ka-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}" +
     ".ka-chip{font-size:.75em;padding:2px 8px;border-radius:10px;background:var(--secondary-background-color);color:var(--secondary-text-color)}" +
-    ".ka-chip.alert{background:var(--error-color);color:#fff}" +
+    // status bar for active warnings/criticals -- same idea as the MM
+    // module's persistent banner (every active issue, colour by severity)
+    ".ka-alertbar{display:flex;align-items:baseline;gap:6px;margin-top:6px;" +
+    "font-size:.85em;font-weight:600;line-height:1.3}" +
+    ".ka-alert-icon{--mdc-icon-size:16px;width:16px;height:16px;flex:none;" +
+    "animation:ka-alertflash 1.3s ease-in-out infinite}" +
+    ".ka-alertbar.is-critical .ka-alert-icon{color:var(--error-color,#e53935);animation-duration:.85s}" +
+    ".ka-alertbar.is-warning .ka-alert-icon{color:var(--warning-color,#ffb300)}" +
+    ".ka-alert-crit{color:var(--error-color,#e53935)}" +
+    ".ka-alert-warn{color:var(--warning-color,#ffb300)}" +
+    ".ka-alert-sep{color:var(--secondary-text-color);font-weight:400}" +
+    "@keyframes ka-alertflash{0%,100%{opacity:1}50%{opacity:.25}}" +
+    "@media (prefers-reduced-motion:reduce){.ka-alert-icon{animation:none}}" +
     ".ka-actions{margin-top:14px}" +
     ".ka-group{margin-top:9px}" +
     ".ka-group-label{font-size:.68em;text-transform:uppercase;letter-spacing:.08em;" +
@@ -619,6 +631,70 @@
       });
     }
 
+    // unexpected_move / not_plugged_home / cant_get_home need a caller-tracked
+    // parked-GPS anchor + home-unplugged timer -- conditions.js can't compute
+    // these itself (see core/conditions.js comments). The MM module and the
+    // HA coordinator (coordinator.py _emit_alerts) each keep this state
+    // locally and it was never surfaced back onto the summary sensor's
+    // attributes, so the card's own client-side C.evaluate() call could never
+    // see it and silently never detected these three conditions -- MM (or
+    // the coordinator's own kia_access_alert events) could show "Moved while
+    // parked" while this card stayed clean for the exact same car. Mirrors
+    // MMM-KiaAccess.js processConditions()/coordinator.py _emit_alerts()
+    // exactly, but reads the home point from zone.home instead of a config
+    // option -- the card already has hass, no extra setup needed.
+    _updateHomeAndMoveTracking(state) {
+      var hass = this._hass;
+      var zone = hass && hass.states["zone.home"];
+      if (zone && state.locationLat != null && state.locationLon != null
+          && RNG && RNG.haversineKm) {
+        var km = RNG.haversineKm(
+          state.locationLat, state.locationLon,
+          zone.attributes.latitude, zone.attributes.longitude
+        );
+        var radiusKm = (Number(zone.attributes.radius) || 100) / 1000;
+        state.atHome = km != null ? km <= radiusKm : undefined;
+        state.homeDistanceKm = km;
+      } else {
+        state.atHome = undefined;
+        state.homeDistanceKm = null;
+      }
+
+      var homeUnplugged = state.atHome === true && state.plugged !== true;
+      if (homeUnplugged && !this._homeUnpluggedSince) this._homeUnpluggedSince = Date.now();
+      if (!homeUnplugged) this._homeUnpluggedSince = null;
+      state.homeUnpluggedMin = this._homeUnpluggedSince
+        ? (Date.now() - this._homeUnpluggedSince) / 60000 : null;
+
+      // moved-while-parked (tow / theft): GPS shifted while the odometer
+      // stayed put and the car was off
+      var now = Date.now();
+      var p = this._lastParked;
+      var odoStable = p && state.odometerKm != null && Math.abs(state.odometerKm - p.odo) < 0.1;
+      if (odoStable && state.carOn !== true && state.locationLat != null
+          && p.lat != null && RNG && RNG.haversineKm) {
+        var movedKm = RNG.haversineKm(p.lat, p.lon, state.locationLat, state.locationLon);
+        if (movedKm != null && movedKm >= 0.15) {
+          if (!this._movedSince) this._movedSince = now;
+          state.movedWhileParkedKm = movedKm;
+          state.movedWhileParkedMin = (now - this._movedSince) / 60000;
+        } else {
+          this._movedSince = null;
+          state.movedWhileParkedKm = 0;
+          state.movedWhileParkedMin = 0;
+        }
+      } else {
+        this._movedSince = null;
+        if (state.locationLat != null && state.odometerKm != null) {
+          this._lastParked = {
+            lat: state.locationLat, lon: state.locationLon, odo: state.odometerKm
+          };
+        }
+        state.movedWhileParkedKm = this._lastParked ? 0 : null;
+        state.movedWhileParkedMin = 0;
+      }
+    }
+
     _render() {
       var hass = this._hass;
       var root = this._root;
@@ -637,6 +713,7 @@
       this._entryId = st.attributes.entry_id || null;
       var flat = flatFromAttributes(st.attributes);
       var state = S.buildState(flat, {});
+      this._updateHomeAndMoveTracking(state);
       if (C) {
         try {
           var cres = C.evaluate(state, {}, {});
@@ -667,10 +744,25 @@
 
       // status chips for the at-a-glance stuff
       var chips = [];
-      if (state.critical) chips.push("<span class='ka-chip alert'>Check vehicle</span>");
       if (flat["vehicle.valet_mode_active"] === true) chips.push("<span class='ka-chip'>Valet</span>");
       if (flat["vehicle.ev_battery_precondition_enabled"] === true) chips.push("<span class='ka-chip'>Preconditioning</span>");
       var chipHtml = chips.length ? "<div class='ka-chips'>" + chips.join("") + "</div>" : "";
+
+      // same status bar as MM's persistent banner -- every active warning
+      // and critical, not just a generic "something's wrong" chip
+      var alertHtml = "";
+      if (state.alerts && state.alerts.length) {
+        var anyCrit = state.alerts.some(function (a) { return a.level === "critical"; });
+        var parts = state.alerts.map(function (a) {
+          return "<span class='ka-alert-" + (a.level === "critical" ? "crit" : "warn") + "'>" +
+            esc(a.label) + "</span>";
+        });
+        alertHtml = "<div class='ka-alertbar" + (anyCrit ? " is-critical" : " is-warning") + "'>" +
+          "<ha-icon icon='mdi:alert' class='ka-alert-icon'></ha-icon>" +
+          "<span class='ka-alert-list'>" +
+          parts.join("<span class='ka-alert-sep'> &middot; </span>") +
+          "</span></div>";
+      }
 
       var imperial = this._imperial();
       var rows = CATALOGUE.map(function (e) {
@@ -695,7 +787,7 @@
         "<div class='ka-sub'>" + esc(updated) + "</div>" +
         "</div>" + refreshBtnHtml +
         "</div>" +
-        chipHtml + note +
+        alertHtml + chipHtml + note +
         "</div></div>" +
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +

@@ -18,6 +18,15 @@ def _bool(f, key):
         return True
     if v in _FALSE:
         return False
+    # some binary_sensor-shaped fields aren't strict 0/1 -- e.g. the EV9's
+    # ev_battery_is_plugged_in comes back as a connector-type code (seen: 4
+    # while actively charging), not a boolean. Any other finite number: 0
+    # is false, anything else is true. Strings that aren't "true"/"false"
+    # stay unknown (None) rather than guessing.
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and v not in (
+        float("inf"), float("-inf")
+    ):
+        return v != 0
     return None
 
 
