@@ -40,8 +40,10 @@ CHECK_DEFAULTS = {
         "enabled": True, "level": "warning", "graceMin": 20,
         "afterHour": None, "beforeHour": None,
     },
+    # thresholdKm 0.3048 = 1000 ft -- ordinary parked-GPS jitter (garages,
+    # multipath) can drift tens of meters; this needs a real move, not noise.
     "unexpectedMove": {
-        "enabled": True, "level": "critical", "thresholdKm": 0.5, "sustainedMin": 3,
+        "enabled": True, "level": "critical", "thresholdKm": 0.3048, "sustainedMin": 3,
     },
     "cantGetHome": {
         "enabled": True, "level": "warning", "reservePct": 15, "roadFactor": 1.3,
@@ -319,7 +321,7 @@ def evaluate(s, cfg, prev):
     if c_mv.get("enabled"):
         mk = _num(s.get("movedWhileParkedKm"))
         mmin = _num(s.get("movedWhileParkedMin"))
-        thr = _num(c_mv.get("thresholdKm")) if c_mv.get("thresholdKm") is not None else 0.5
+        thr = _num(c_mv.get("thresholdKm")) if c_mv.get("thresholdKm") is not None else 0.3048
         sustained = _num(c_mv.get("sustainedMin")) if c_mv.get("sustainedMin") is not None else 3
         if mk is None:
             mv_active = None

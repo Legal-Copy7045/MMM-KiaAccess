@@ -674,7 +674,7 @@
       if (odoStable && state.carOn !== true && state.locationLat != null
           && p.lat != null && RNG && RNG.haversineKm) {
         var movedKm = RNG.haversineKm(p.lat, p.lon, state.locationLat, state.locationLon);
-        if (movedKm != null && movedKm >= 0.15) {
+        if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
           if (!this._movedSince) this._movedSince = now;
           state.movedWhileParkedKm = movedKm;
           state.movedWhileParkedMin = (now - this._movedSince) / 60000;

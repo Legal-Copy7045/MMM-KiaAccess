@@ -1,0 +1,14 @@
+{
+  "name": "moved 0.35km while parked (past new 1000ft threshold, below old 500m threshold)",
+  "state": {
+    "carOn": false,
+    "movedWhileParkedKm": 0.35,
+    "movedWhileParkedMin": 5,
+    "atHome": true
+  },
+  "cfg": {},
+  "prev": {},
+  "expectConditions": {
+    "unexpected_move": true
+  }
+}

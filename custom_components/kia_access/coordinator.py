@@ -1194,7 +1194,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         odo_stable = p is not None and odo is not None and abs(odo - p["odo"]) < 0.1
         if odo_stable and state.get("carOn") is not True and lat is not None:
             moved = self._haversine_km(p["lat"], p["lon"], lat, lon)
-            if moved is not None and moved >= 0.15:
+            if moved is not None and moved >= 0.3048:  # 1000 ft -- real move, not GPS jitter
                 if self._moved_since is None:
                     self._moved_since = time.monotonic()
                 state["movedWhileParkedKm"] = moved
