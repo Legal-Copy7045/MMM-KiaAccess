@@ -139,6 +139,7 @@ class _FakeCoord:
         self.entry = type(
             "E", (), {"data": {"username": "u", "password": "p"}, "options": opts}
         )()
+        self._force_next_refresh = False
 
 
 _cache_job = _FakeCoord({})._job()
@@ -149,6 +150,22 @@ assert _live_job["refresh"] is True and _live_job["forceRefreshTimeout"] == 30
 # explicit poll off wins even with a stale legacy timeout
 _off_job = _FakeCoord({"poll_car_directly": False, "force_refresh_timeout": 60})._job()
 assert _off_job["refresh"] is False and _off_job["forceRefreshTimeout"] == 0
+
+# manual "Refresh now" (_force_next_refresh) must wake the car even when
+# cache-only is on, and it must be a one-shot flag (cleared after one _job())
+_fc = _FakeCoord({})
+_fc._force_next_refresh = True
+_forced_job = _fc._job()
+assert _forced_job["refresh"] is True, "forced refresh must wake the car"
+assert _forced_job["forceRefreshTimeout"] == co.DEFAULT_FORCE_REFRESH_TIMEOUT, (
+    "forced refresh must use a real wait even though the option is 0/absent"
+)
+assert _fc._force_next_refresh is False, "the force flag must be one-shot"
+assert _fc._job()["refresh"] is False, "second call must fall back to cache-only"
+assert hasattr(co.KiaAccessCoordinator, "async_force_refresh")
+
+_btn = importlib.import_module(f"{pkg}.button")
+assert hasattr(_btn, "KiaAccessRefreshButton")
 
 _cln = co.KiaAccessCoordinator._clean_address
 assert _cln(["Maple Street", "Maple St, Springfield, PA", {"road": "x"}]) == "Maple Street"

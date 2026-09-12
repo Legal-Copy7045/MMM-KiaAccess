@@ -113,8 +113,9 @@ USA, °C 16–30 elsewhere).
 - **Native controls** — `lock`, `climate` (an HVAC entity), `number` (charge
   limits, climate run-time), `switch` (charging, defrost), `select` (seat / wheel
   heat), one-tap `button`s (lock / unlock, flash, charge port, start / stop
-  charge) and services (`start_climate` with seats, `set_charge_limits`,
-  `send_to_car`).
+  charge, **refresh now** — force a live pull from Kia's servers on demand,
+  even with "poll the car directly" off) and services (`start_climate` with
+  seats, `set_charge_limits`, `send_to_car`).
 - **`device_tracker.<v>_location`** — the car's GPS, so HA's map, zones and
   presence automations work natively.
 - **Derived sensors**

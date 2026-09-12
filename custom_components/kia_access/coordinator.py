@@ -88,6 +88,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self.climate_prefs: dict = dict(DEFAULT_CLIMATE_PREFS)
         # last control command, for the "action in progress" sensor
         self.last_action: dict = {"name": None, "status": "idle", "at": None}
+        # set for exactly one _job() call by async_force_refresh() -- lets the
+        # manual "Refresh now" button wake the car even when "poll car
+        # directly" is off for the regular scheduled polls
+        self._force_next_refresh = False
 
     async def async_load_sessions(self) -> None:
         data = await self._sessions_store.async_load() or {}
@@ -910,6 +914,23 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
     def _job(self, **extra) -> dict:
         d = self.entry.data
+        # async_force_refresh() sets this for exactly one call to make a manual
+        # "Refresh now" wake the car even when "poll car directly" is off.
+        forced = self._force_next_refresh
+        self._force_next_refresh = False
+        poll_now = self._poll_car_directly() or forced
+        timeout = (
+            self.entry.options.get(
+                "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
+            )
+            if poll_now
+            else 0
+        )
+        if forced and not timeout:
+            # a manual refresh should always actually wake the car, even if
+            # the configured wait is 0 (which only makes sense for the
+            # battery-friendly scheduled polls)
+            timeout = DEFAULT_FORCE_REFRESH_TIMEOUT
         job = {
             "username": d["username"],
             "password": d["password"],
@@ -925,14 +946,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             # which alone stops kia_client from waking the car:
             #   refresh: False           -> the wake branch is skipped entirely
             #   forceRefreshTimeout: 0   -> ...and even if it ran, 0s wait
-            "refresh": self._poll_car_directly(),
-            "forceRefreshTimeout": (
-                self.entry.options.get(
-                    "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
-                )
-                if self._poll_car_directly()
-                else 0
-            ),
+            "refresh": poll_now,
+            "forceRefreshTimeout": timeout,
         }
         job.update(extra)
         return job
@@ -1304,3 +1319,24 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         finally:
             self.async_update_listeners()
             await self.async_request_refresh()
+
+    async def async_force_refresh(self) -> None:
+        """Manual 'refresh now' -- wakes the car for one live pull from Kia's
+        servers immediately, overriding the 'poll car directly' battery-
+        friendly default for just this one cycle. Surfaced as a button
+        entity and the Lovelace card's refresh icon."""
+        self.last_action = {
+            "name": "refresh_now",
+            "status": "running",
+            "at": dt_util.utcnow().isoformat(),
+        }
+        self.async_update_listeners()
+        self._force_next_refresh = True
+        try:
+            await self.async_request_refresh()
+        finally:
+            self.last_action = {
+                **self.last_action,
+                "status": "done" if self.last_update_success else "failed",
+            }
+            self.async_update_listeners()
