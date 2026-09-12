@@ -94,6 +94,60 @@ async def _register_frontend(hass: HomeAssistant) -> None:
         return
     _FRONTEND_REGISTERED = True
 
+    # add_extra_js_url alone races Lovelace's own dashboard rendering: on a
+    # cold app/browser launch straight into a view with our card, Lovelace
+    # can construct <kia-access-card>/<kia-range-map-card> before the extra
+    # module has finished loading, showing a "Configuration error" that only
+    # self-heals with a reload. A resource added the normal way (Settings ->
+    # Dashboards -> Resources) IS awaited before Lovelace builds any view, so
+    # also registering one here (best-effort, private API, never fatal) fixes
+    # that race for storage-mode dashboards without the user doing it by hand.
+    await _ensure_lovelace_resource(hass, CARD_URL)
+
+
+async def _ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None:
+    """Best-effort: register CARD_URL as a real Lovelace resource so the
+    frontend awaits it before rendering any dashboard (see _register_frontend).
+    No-ops quietly for YAML-mode dashboards, if lovelace hasn't set up yet, or
+    if this private API changes shape in a future HA release -- add_extra_js_url
+    above is the fallback that still works either way."""
+    try:
+        from homeassistant.components.lovelace.const import (
+            CONF_RESOURCE_TYPE_WS,
+            LOVELACE_DATA,
+        )
+        from homeassistant.components.lovelace.resources import (
+            ResourceStorageCollection,
+        )
+        from homeassistant.const import CONF_URL
+
+        lovelace_data = hass.data.get(LOVELACE_DATA)
+        if lovelace_data is None:
+            return
+        resources = lovelace_data.resources
+        if not isinstance(resources, ResourceStorageCollection):
+            return  # YAML-managed resources -- nothing we can add programmatically
+
+        # lovelace's own setup doesn't load this collection eagerly (only the
+        # dashboards collection) -- async_create_item below calls this same
+        # guarded helper internally, but we need self.data populated first
+        # too, for the dedup check right after
+        await resources._async_ensure_loaded()  # noqa: SLF001
+        # no query string here: the static path already disables caching
+        # (register_static_path(..., cache_headers=False) above), so this
+        # entry keeps working across future version bumps without edits
+        if any(item.get(CONF_URL) == url for item in resources.async_items()):
+            return
+        await resources.async_create_item(
+            {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: url}
+        )
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug(
+            "Could not auto-register Kia Access card as a Lovelace resource "
+            "(non-fatal, add_extra_js_url still covers it)",
+            exc_info=True,
+        )
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""

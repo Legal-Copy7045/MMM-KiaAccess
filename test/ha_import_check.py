@@ -229,6 +229,21 @@ assert hasattr(init, "_register_frontend")
 assert hasattr(init, "async_track_time_interval"), (
     "the 1-min calendar-refresh timer needs this imported"
 )
+assert manifest.get("after_dependencies") == ["lovelace"], (
+    "_ensure_lovelace_resource reads hass.data[LOVELACE_DATA]; without this "
+    "hint lovelace may not have set up yet when we look for it"
+)
+
+# _ensure_lovelace_resource (auto-registers the card as a real Lovelace
+# resource so the frontend awaits it, instead of racing add_extra_js_url on a
+# cold app launch) must resolve its private-API imports against the real
+# installed HA package, and no-op cleanly -- never raise -- when lovelace
+# hasn't set up yet (hass.data is just a plain dict here, no LOVELACE_DATA key)
+import asyncio  # noqa: E402
+
+assert hasattr(init, "_ensure_lovelace_resource")
+_fake_hass = type("H", (), {"data": {}})()
+asyncio.run(init._ensure_lovelace_resource(_fake_hass, "/kia_access/kia-access-card.js"))
 assert os.path.exists(
     os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
 ), "card bundle not vendored"
