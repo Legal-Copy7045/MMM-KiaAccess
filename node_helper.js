@@ -20,6 +20,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const { flatten } = require("./core/flatten.js");
+const S = require("./core/state.js");
 const haDiscovery = require("./core/ha-discovery.js");
 const haSource = require("./ha_source.js");
 const sessions = require("./core/sessions.js");
@@ -49,6 +50,7 @@ module.exports = NodeHelper.create({
     this.promServers = {}; // key -> exporter.PromServer
     this.haLive = {}; // id -> HaLiveClient (source: "homeassistant", mode: "push")
     this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
+    this._warnedMultiVehicle = {}; // id -> true once we've logged the no-VIN warning
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
     } catch (e) {
@@ -316,6 +318,20 @@ module.exports = NodeHelper.create({
       if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
         return this.fail(id, config, "bridge returned no vehicles");
       }
+      // With no `vin` configured, kia_client returns every vehicle on the
+      // account and this always reads element [0] -- not guaranteed to be
+      // the same physical car from one poll to the next, and this module's
+      // own identifierFor() also collapses every un-VIN'd vehicle on an
+      // account into one shared cache/history file. Warn once rather than
+      // silently mixing two cars' data together.
+      if (!config.vin && result.vehicles.length > 1 && !this._warnedMultiVehicle[id]) {
+        this._warnedMultiVehicle[id] = true;
+        Log.warn(
+          `[MMM-KiaAccess] this account has ${result.vehicles.length} vehicles and no ` +
+          "'vin' is set in config.js -- data may jump between cars from one poll to the " +
+          "next, and their history will be mixed together. Set vin: \"<VIN>\" to fix this."
+        );
+      }
 
       const vehicle = result.vehicles[0];
       const payload = {
@@ -379,8 +395,9 @@ module.exports = NodeHelper.create({
     const cLat = numOrNull(vehicle.location_latitude);
     const cLon = numOrNull(vehicle.location_longitude);
     if (cl.homeLat != null && cl.homeLon != null && cLat != null && cLon != null) {
+      const homeRadiusKm = Number(cl.homeRadiusKm);
       atHome = drange.haversineKm(cLat, cLon, Number(cl.homeLat), Number(cl.homeLon))
-        <= (Number(cl.homeRadiusKm) || 0.2);
+        <= (isFinite(homeRadiusKm) ? homeRadiusKm : 0.2);
     }
     // per-zone rates: first matching zone wins; its rate + label override the
     // home/away rate for this session
@@ -424,15 +441,22 @@ module.exports = NodeHelper.create({
     }
 
     // ---- trip / drive-segment log ----
+    // carOn (and charging) must use the SAME canonical definition the rest
+    // of the app uses (buildState()'s anyTrue(engine_is_running,
+    // accessory_on, ign3, remote_ignition)) -- a hand-picked
+    // truthy(vehicle.engine_is_running) here would let trip tracking
+    // disagree with the alert engine about whether the car is actually
+    // driving.
+    const tripState = S.buildState(flatten({ vehicle: vehicle }), {});
     const tcfg = config.tripLog || {};
     const tr = trips.update(s.openTrip, {
       t: sample.t,
-      odometerKm: numOrNull(vehicle.odometer),
-      batteryPct: numOrNull(vehicle.ev_battery_percentage),
-      charging: truthy(vehicle.ev_battery_is_charging),
-      carOn: truthy(vehicle.engine_is_running),
-      locationLat: numOrNull(vehicle.location_latitude),
-      locationLon: numOrNull(vehicle.location_longitude)
+      odometerKm: tripState.odometerKm,
+      batteryPct: tripState.batteryPct,
+      charging: tripState.charging,
+      carOn: tripState.carOn,
+      locationLat: tripState.locationLat,
+      locationLon: tripState.locationLon
     }, {
       pricePerKwh: cl.pricePerKwh,
       capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity),

@@ -15,9 +15,12 @@ the Lovelace card and this module all agree on names and arguments.
 
 import datetime
 import json
+import logging
 import os
 import stat
 import threading
+
+_LOGGER = logging.getLogger(__name__)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_TOKEN_FILE = os.path.join(_HERE, "token.json")
@@ -181,8 +184,13 @@ def _save_token(token_file, vm, enrolled_at):
         with open(token_file, "w", encoding="utf-8") as fh:
             json.dump(tok, fh, indent=2, default=str)
         os.chmod(token_file, stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # non-fatal (the caller already has a good fetch to hand back this
+        # cycle) but must NOT be silent -- a failed rotation here means the
+        # next run authenticates with a stale token and fails for a reason
+        # that's invisible without this line.
+        _LOGGER.warning("Kia Access: could not persist rotated token to %s: %s",
+                         token_file, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +309,20 @@ def fetch(job, token_file=None):
         th.start()
         th.join(timeout)
         if th.is_alive():
-            meta_note = f"live wake-up timed out after {int(timeout)}s — using cached data"
+            # The background thread is still inside force_refresh_all_vehicles_
+            # states(), which mutates `vm`'s vehicle objects in place -- reading
+            # them now (update_all_vehicles_with_cached_state() + dump_vehicle()
+            # below) would race an unsynchronized write from another thread on
+            # the very same objects, up to and including a mid-iteration
+            # RuntimeError. Fail this fetch cleanly instead: the caller
+            # (coordinator.py / node_helper.js) already has a "keep serving the
+            # last known good state" fallback for exactly this case, which is a
+            # strictly better outcome than a torn/corrupted live read. The
+            # orphaned thread finishes on its own (it's daemonized) against a
+            # `vm` nothing else will ever touch again.
+            raise ClientError(
+                f"live wake-up timed out after {int(timeout)}s — will retry next cycle"
+            )
         elif "e" in err:
             meta_note = f"live wake-up failed: {err['e']}"
     vm.update_all_vehicles_with_cached_state()
@@ -344,6 +365,17 @@ def run_command(job, token_file=None):
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
         raise ClientError("no matching vehicles on the account")
+    if not job.get("vin") and len(selected) > 1:
+        # Reads can reasonably default to "vehicle 1" (see fetch()) -- a
+        # remote command cannot. Without an explicit VIN, `selected[0]` is
+        # whichever vehicle the account API happened to list first THIS
+        # call, which is not guaranteed stable; sending lock/unlock/climate/
+        # charge to an arbitrary, possibly-wrong physical vehicle is a real
+        # safety issue, not just a data-quality one.
+        raise ClientError(
+            f"{len(selected)} vehicles on this account — set a VIN before "
+            f"running '{name}' (control commands need an explicit target)"
+        )
     vehicle_id = selected[0].id
 
     method = getattr(vm, spec["method"], None)
@@ -355,11 +387,21 @@ def run_command(job, token_file=None):
     opts = job.get("options") or {}
     opt_specs = spec.get("options") or {}
     call = spec.get("call", "bare")
+    # options like start_climate's set_temp carry a region-specific "metric"
+    # variant of default/min/max (see core/commands.json's $comment) --
+    # everything else about the catalogue is region-agnostic, so only the
+    # DEFAULT substitution needs this; an explicitly-passed value (e.g. from
+    # the HA climate entity, which already converts correctly) is trusted
+    # as-is and never reinterpreted here.
+    fahrenheit = str(job.get("region", "USA")).upper() in ("USA", "CA")
 
     def _with_default(key):
         if key in opts:
             return opts[key]
-        return (opt_specs.get(key) or {}).get("default")
+        spec_for_key = opt_specs.get(key) or {}
+        if not fahrenheit and spec_for_key.get("metric"):
+            return spec_for_key["metric"].get("default")
+        return spec_for_key.get("default")
 
     try:
         if call == "climate_options":

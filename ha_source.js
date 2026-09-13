@@ -164,6 +164,14 @@ class HaLiveClient {
     this._retry = RECONNECT_MIN_MS;
     this._pingTimer = null;
     this._reconnectTimer = null;
+    // _emit() awaits an HTTP enrichment call (attachRangeReach) before handing
+    // the payload to the caller. Two state events (or an initial-prime racing
+    // a live event) can therefore have their enrichment calls resolve out of
+    // order -- whichever HTTP request finishes first would otherwise "win"
+    // and the newer state could be overwritten by a stale one. This sequence
+    // token is bumped BEFORE the async work starts; only the emit that still
+    // holds the current (latest) token when its await resolves is delivered.
+    this._emitSeq = 0;
   }
 
   static get supported() {
@@ -300,8 +308,13 @@ class HaLiveClient {
 
   async _emit(state) {
     if (typeof this.cb.onPayload !== "function") return;
+    const seq = ++this._emitSeq;
     const payload = payloadFromState(state, this._entity, "push");
     await attachRangeReach(this.base, this.ha.token, payload, this._entity, this.ha);
+    // a newer state (live event or another prime) entered the pipeline while
+    // we were awaiting the enrichment call -- drop this now-stale one rather
+    // than let it regress the vehicle state the caller just saw.
+    if (seq !== this._emitSeq) return;
     this.cb.onPayload(payload);
   }
 

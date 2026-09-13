@@ -60,7 +60,14 @@
     var pct = num(cur.batteryPct);
     var kw = num(cur.chargeKw);
     var charging = cur.charging === true;
-    var plugged = cur.plugged !== false; // treat unknown as still plugged
+    // "not confirmed unplugged" (true OR unknown/null), not "confirmed
+    // plugged" -- a genuinely unknown reading (a momentary API hiccup) must
+    // not prematurely end a real session, but this is NOT "hold open
+    // indefinitely": the gapMs window below is measured from lastChargingAt,
+    // so an unknown/plugged reading only keeps a session open for the same
+    // bounded grace period (default 45 min, see GAP_MIN) that a real pause
+    // already gets, never longer.
+    var pluggedNotConfirmedUnplugged = cur.plugged !== false;
 
     // start
     if (charging && !open) {
@@ -94,7 +101,7 @@
     }
 
     // not charging this sample — keep open through a short pause
-    if (plugged && cur.plugged !== false &&
+    if (pluggedNotConfirmedUnplugged &&
         t - (open.lastChargingAt || open.startedAt) < gapMs) {
       if (pct != null) open.lastPct = pct;
       return { open: open, closed: null };

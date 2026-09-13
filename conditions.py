@@ -189,7 +189,12 @@ def evaluate(s, cfg, prev):
             remaining = max(0, math.ceil(life - age))
             emit("otp_expiring", c_o.get("level"), (life - age) <= warn,
                  (f"OTP enrolment expires in ~{remaining} day" + ("" if remaining == 1 else "s"))
-                 if remaining > 0 else "OTP enrolment has likely expired - re-run enroll.py",
+                 # lifetimeDays is a configured/assumed value (the actual
+                 # refresh-token lifetime is controlled by Kia/Hyundai's own
+                 # auth backend, which this app has no way to query) -- this
+                 # is a heuristic estimate, not a confirmed expiry.
+                 if remaining > 0 else
+                 "OTP enrolment is well past its assumed lifetime - if sign-in starts failing, re-run enroll.py",
                  {"remainingDays": remaining, "ageDays": round(age)})
 
     # ---- unlocked ----

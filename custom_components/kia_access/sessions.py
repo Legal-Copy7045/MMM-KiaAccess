@@ -58,7 +58,14 @@ def update(open_s, cur, opts=None):
     pct = _num(cur.get("batteryPct"))
     kw = _num(cur.get("chargeKw"))
     charging = cur.get("charging") is True
-    plugged = cur.get("plugged") is not False
+    # "not confirmed unplugged" (True OR unknown/None), not "confirmed
+    # plugged" -- a genuinely unknown reading (a momentary API hiccup) must
+    # not prematurely end a real session, but this is NOT "hold open
+    # indefinitely": the gap_ms window below is measured from lastChargingAt,
+    # so an unknown/plugged reading only keeps a session open for the same
+    # bounded grace period (default 45 min, see GAP_MIN) that a real pause
+    # already gets, never longer.
+    plugged_not_confirmed_unplugged = cur.get("plugged") is not False
 
     if charging and not open_s:
         return {
@@ -89,7 +96,7 @@ def update(open_s, cur, opts=None):
             open_s["peakKw"] = kw
         return {"open": open_s, "closed": None}
 
-    if (plugged and cur.get("plugged") is not False
+    if (plugged_not_confirmed_unplugged
             and t - (open_s.get("lastChargingAt") or open_s["startedAt"]) < gap_ms):
         if pct is not None:
             open_s["lastPct"] = pct

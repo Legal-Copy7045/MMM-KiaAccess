@@ -73,9 +73,26 @@ for (const c of commands) {
   yaml += "      required: false\n";
   yaml += "      selector:\n        config_entry:\n          integration: kia_access\n";
   for (const [name, o] of Object.entries(c.options || {})) {
-    const sel = (TYPE_SELECTOR[o.type] || TYPE_SELECTOR.string)(o);
+    // this file is one static schema shared by every config entry regardless
+    // of that vehicle's actual region, so it can't pick the Fahrenheit vs
+    // metric variant the way kia_client.py/the card do per-vehicle -- widen
+    // to the union of both ranges instead of rejecting a valid metric value
+    // (the region-correct default/clamping happens at dispatch time).
+    const selOpts = o.metric
+      ? Object.assign({}, o, {
+          min: Math.min(o.min, o.metric.min),
+          max: Math.max(o.max, o.metric.max),
+          unit: undefined
+        })
+      : o;
+    const sel = (TYPE_SELECTOR[o.type] || TYPE_SELECTOR.string)(selOpts);
     yaml += `    ${name}:\n`;
     yaml += `      name: ${JSON.stringify(name.replace(/_/g, " ").replace(/^./, (m) => m.toUpperCase()))}\n`;
+    if (o.metric) {
+      yaml += `      description: ${JSON.stringify(
+        "°F for USA/Canada vehicles, °C otherwise (matches this vehicle's region) — omit to use its region's default."
+      )}\n`;
+    }
     yaml += `      required: false\n`;
     if (o.default !== undefined) yaml += `      default: ${JSON.stringify(o.default)}\n`;
     yaml += `      selector:\n`;

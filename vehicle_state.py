@@ -58,9 +58,19 @@ def build_state(flat, opts=None):
     headlights = _any_true(f, "headlamp_left_low", "headlamp_right_low",
                            "headlamp_left_high", "headlamp_right_high",
                            "headlamp_left_bifunc", "headlamp_right_bifunc")
+    _HEADLIGHT_ON = ("on", "low", "high", "bifunc", "1", "true")
+    _HEADLIGHT_OFF = ("off", "none", "0", "false")
     if headlights is None and isinstance(hs, str):
         t = hs.strip().lower()
-        headlights = bool(t and t not in ("off", "none", "0"))
+        # allow-list, not a deny-list: an unrecognized string ("unknown",
+        # "unavailable", "error", "not_available", ...) must stay unknown
+        # (None), not silently read as "on".
+        if t in _HEADLIGHT_ON:
+            headlights = True
+        elif t in _HEADLIGHT_OFF:
+            headlights = False
+        else:
+            headlights = None
 
     air_temp_c = _num(f, "air_temperature")        # climate set-point
     outside_temp_c = _num(f, "outside_temperature")

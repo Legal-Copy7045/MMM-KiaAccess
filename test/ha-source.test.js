@@ -150,5 +150,84 @@ function mockFetch(routes) {
   assert.strictEqual(live.healthy, false, "not healthy after stop");
   delete global.WebSocket;
 
+  // ---- out-of-order enrichment must not regress the emitted state ----
+  // Each _emit() awaits an HTTP call (attachRangeReach) before delivering its
+  // payload. If an OLDER event's HTTP call resolves AFTER a NEWER event's,
+  // the sequence guard must drop the stale one instead of letting it "win".
+  {
+    const raceSent = [];
+    let raceWs;
+    class RaceFakeWS {
+      constructor(url) {
+        this.url = url;
+        this.readyState = 1;
+        this._l = {};
+        raceWs = this;
+      }
+      addEventListener(t, fn) { (this._l[t] = this._l[t] || []).push(fn); }
+      send(s) { raceSent.push(JSON.parse(s)); }
+      close() { this.readyState = 3; (this._l.close || []).forEach((f) => f()); }
+      _emit(obj) { (this._l.message || []).forEach((f) => f({ data: JSON.stringify(obj) })); }
+    }
+    global.WebSocket = RaceFakeWS;
+    // primeInitial's own attachRangeReach call is what's racing here (finding
+    // #2) -- no separate live event needed to reproduce it.
+    let rangeReachCalls = 0;
+    global.fetch = async (url) => {
+      const path = url.replace(/^https?:\/\/[^/]+/, "");
+      if (path === "/api/states/sensor.kia_ev9_status") {
+        return { ok: true, status: 200, json: async () => ({
+          entity_id: "sensor.kia_ev9_status",
+          state: "2026-09-07T10:00:00+00:00",
+          attributes: { kia_access_raw: true, ev_battery_percentage: 50 }
+        }) };
+      }
+      if (path === "/api/states/sensor.kia_ev9_range_reach") {
+        rangeReachCalls++;
+        // the PRIME's enrichment call (the first one issued) resolves LAST --
+        // exactly the "startup: new state -> old state" scenario from finding #2.
+        const delayMs = rangeReachCalls === 1 ? 40 : 0;
+        await new Promise((r) => setTimeout(r, delayMs));
+        return { ok: true, status: 200, json: async () => ({
+          entity_id: "sensor.kia_ev9_range_reach", state: "1", attributes: {}
+        }) };
+      }
+      return { ok: false, status: 404, statusText: "Not Found" };
+    };
+
+    const racePayloads = [];
+    const raceLive = new HaLiveClient(
+      { url: "http://ha.local:8123", token: "T", entity: "sensor.kia_ev9_status" },
+      { onPayload: (p) => racePayloads.push(p), onStatus: () => {} }
+    );
+    raceLive.start();
+    raceWs._emit({ type: "auth_required" });
+    raceWs._emit({ type: "auth_ok" });
+    await new Promise((r) => setTimeout(r, 5)); // let subscribe go out; primeInitial is now in flight
+    const raceSub = raceSent.find((m) => m.type === "subscribe_trigger");
+    assert.ok(raceSub, "subscribed");
+    // a live event lands (and fully resolves, incl. its own range-reach call)
+    // WHILE primeInitial's slower range-reach call is still pending
+    raceWs._emit({
+      id: raceSub.id, type: "event",
+      event: { variables: { trigger: { to_state: {
+        entity_id: "sensor.kia_ev9_status",
+        state: "2026-09-07T11:00:00+00:00",
+        attributes: { kia_access_raw: true, ev_battery_percentage: 70 }
+      } } } }
+    });
+    await new Promise((r) => setTimeout(r, 60)); // both _emit() calls settle, prime's included
+    assert.strictEqual(
+      racePayloads[racePayloads.length - 1].vehicle.ev_battery_percentage, 70,
+      "the live event must not be regressed by primeInitial's slower-to-resolve enrichment call"
+    );
+    assert.ok(
+      !racePayloads.some((p) => p.vehicle.ev_battery_percentage === 50),
+      "primeInitial's stale payload must never be delivered once a live event has superseded it"
+    );
+    raceLive.stop();
+    delete global.WebSocket;
+  }
+
   console.log("all ha-source tests passed");
 })();
