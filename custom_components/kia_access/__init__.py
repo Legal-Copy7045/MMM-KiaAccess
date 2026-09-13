@@ -202,10 +202,24 @@ def _register_services(hass: HomeAssistant) -> None:
                 "float": vol.Coerce(float),
                 "bool": cv.boolean,
             }.get(meta.get("type"), cv.string)
-            if meta.get("type") in ("int", "float") and (
-                meta.get("min") is not None or meta.get("max") is not None
-            ):
-                typ = vol.All(base, vol.Range(min=meta.get("min"), max=meta.get("max")))
+            # This schema is registered once, globally, before any specific
+            # vehicle/entry_id is known (a service call's entry_id is only
+            # resolved inside the handler via _coordinator_for()) -- it can't
+            # pick the Fahrenheit vs metric bounds per-vehicle the way the
+            # native climate entity or kia_client.py's dispatch-time default-
+            # filling do. An option with a `metric` variant (currently just
+            # start_climate's set_temp) must therefore validate against the
+            # UNION of both ranges here, or a real EU/Celsius value would be
+            # hard-rejected before ever reaching the region-aware code.
+            lo, hi = meta.get("min"), meta.get("max")
+            if meta.get("metric"):
+                m = meta["metric"]
+                if lo is not None and m.get("min") is not None:
+                    lo = min(lo, m["min"])
+                if hi is not None and m.get("max") is not None:
+                    hi = max(hi, m["max"])
+            if meta.get("type") in ("int", "float") and (lo is not None or hi is not None):
+                typ = vol.All(base, vol.Range(min=lo, max=hi))
             else:
                 typ = base
             opt_schema[vol.Optional(opt_name)] = typ
@@ -235,20 +249,27 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def _refresh_calendar(call: ServiceCall) -> None:
         coordinator = _coordinator_for(hass, call)
-        # calendar refresh has no throttle to clear (every poll runs it); the
-        # routing throttle still needs clearing so the new/changed POIs route
-        coordinator._route_at = 0.0  # noqa: SLF001 — re-route the new POIs too
-        try:
-            await coordinator.async_refresh_calendar_pois()
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.exception("Kia Access calendar refresh failed")
-            raise HomeAssistantError(
-                f"Kia Access calendar refresh failed: {err}"
-            ) from err
-        try:
-            await coordinator._refresh_drive_times()  # noqa: SLF001
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("drive-time refresh failed", exc_info=True)
+        # Must share coordinator._calendar_lock with _refresh_calendar_and_routes()
+        # (the poll-triggered / 1-min-timer path) -- calling
+        # async_refresh_calendar_pois()/_refresh_drive_times() directly here
+        # bypassed that lock entirely, so this manual service call could
+        # still overlap a scheduled refresh and reintroduce the exact
+        # self._cal_status race the lock exists to prevent.
+        async with coordinator._calendar_lock:  # noqa: SLF001
+            # calendar refresh has no throttle to clear (every poll runs it);
+            # the routing throttle still needs clearing so new/changed POIs route
+            coordinator._route_at = 0.0  # noqa: SLF001 — re-route the new POIs too
+            try:
+                await coordinator.async_refresh_calendar_pois()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.exception("Kia Access calendar refresh failed")
+                raise HomeAssistantError(
+                    f"Kia Access calendar refresh failed: {err}"
+                ) from err
+            try:
+                await coordinator._refresh_drive_times()  # noqa: SLF001
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("drive-time refresh failed", exc_info=True)
         coordinator.async_update_listeners()
 
     hass.services.async_register(
