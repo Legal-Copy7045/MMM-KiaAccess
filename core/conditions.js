@@ -188,7 +188,11 @@
         emit("otp_expiring", cO.level, life - age <= warn,
           remaining > 0
             ? "OTP enrolment expires in ~" + remaining + " day" + (remaining === 1 ? "" : "s")
-            : "OTP enrolment has likely expired — re-run enroll.py",
+            // lifetimeDays is a configured/assumed value (the actual
+            // refresh-token lifetime is controlled by Kia/Hyundai's own
+            // auth backend, which this app has no way to query) -- this is
+            // a heuristic estimate, not a confirmed expiry.
+            : "OTP enrolment is well past its assumed lifetime — if sign-in starts failing, re-run enroll.py",
           { remainingDays: remaining, ageDays: Math.round(age) });
       }
     }

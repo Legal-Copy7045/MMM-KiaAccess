@@ -85,15 +85,15 @@ start_climate:
           integration: kia_access
     set_temp:
       name: "Set temp"
+      description: "°F for USA/Canada vehicles, °C otherwise (matches this vehicle's region) — omit to use its region's default."
       required: false
       default: 70
       selector:
         number:
-          min: 62
+          min: 16
           max: 82
           step: 1
           mode: "box"
-          unit_of_measurement: "°F"
     duration:
       name: "Duration"
       required: false

@@ -303,6 +303,10 @@ class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
         out: dict = {"kia_access_raw": True, "entry_id": self.coordinator.entry.entry_id}
         v = self.coordinator.vehicle
         out["vehicle_name"] = str(v.get("name") or v.get("model") or "Kia")
+        # lets the Lovelace card pick the right climate set_temp unit/bounds
+        # for THIS vehicle instead of assuming USA/Canada Fahrenheit
+        # (climate_temp_unit() is the same source the native climate entity uses)
+        out["region"] = self.coordinator.region
         for key, val in v.items():
             if key == "data" or isinstance(val, (dict, list)):
                 continue

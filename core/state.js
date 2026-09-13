@@ -55,7 +55,12 @@
     );
     if (headlights == null && typeof hs === "string") {
       var t = hs.trim().toLowerCase();
-      headlights = t && t !== "off" && t !== "none" && t !== "0" ? true : false;
+      // allow-list, not a deny-list: an unrecognized string ("unknown",
+      // "unavailable", "error", "not_available", ...) must stay unknown
+      // (null), not silently read as "on".
+      if (["on", "low", "high", "bifunc", "1", "true"].indexOf(t) !== -1) headlights = true;
+      else if (["off", "none", "0", "false"].indexOf(t) !== -1) headlights = false;
+      else headlights = null;
     }
 
     var airTempC = num("air_temperature");       // climate set-point

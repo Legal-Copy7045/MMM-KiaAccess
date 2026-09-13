@@ -42,6 +42,14 @@ assert _vs._bool({"vehicle.x": 0}, "x") is False
 assert _vs._bool({"vehicle.x": True}, "x") is True
 assert _vs._bool({"vehicle.x": "weird"}, "x") is None, "non-numeric unknown strings stay unknown"
 
+# headlamp_status fallback: allow-list, not a deny-list (see test/state.test.js)
+assert _vs.build_state({"vehicle.headlamp_status": "on"}, {})["headlights"] is True
+assert _vs.build_state({"vehicle.headlamp_status": "OFF"}, {})["headlights"] is False
+for _v in ("unknown", "unavailable", "error", "not_available", "unsupported"):
+    assert _vs.build_state({"vehicle.headlamp_status": _v}, {})["headlights"] is None, (
+        f"headlamp_status {_v!r} must stay unknown, not read as on"
+    )
+
 # services.yaml must validate against HA's ACTUAL schema for the whole file,
 # not just parse as YAML -- HA loads it as one document and silently drops
 # EVERY service's description/fields (Developer Tools shows blank options
@@ -133,6 +141,22 @@ assert callable(cf._number)
 # "Poll the car directly" master switch: default off (server cache), and the
 # old seconds-based option is honoured for pre-toggle installs
 co = importlib.import_module(f"{pkg}.coordinator")
+
+# _valid_ll() gates what enters the persistent geocode cache -- must reject
+# NaN/Infinity (isinstance(float("nan"), float) is True, so a naive
+# isinstance-only check lets them through) and out-of-range coordinates,
+# both reachable from a malformed geocoder API response.
+_vll = co.KiaAccessCoordinator._valid_ll
+assert _vll([37.4, -122.1]) is True, "a normal coordinate pair"
+assert _vll([float("nan"), -122.1]) is False, "NaN must be rejected"
+assert _vll([float("inf"), -122.1]) is False, "Infinity must be rejected"
+assert _vll([37.4, float("-inf")]) is False, "-Infinity must be rejected"
+assert _vll([91, 0]) is False, "latitude out of range"
+assert _vll([0, 181]) is False, "longitude out of range"
+assert _vll([True, 1]) is False, "bool must not pass as a coordinate"
+assert _vll(None) is False
+assert _vll([37.4]) is False, "too few elements"
+
 _pcd = co.KiaAccessCoordinator._poll_car_directly
 _mk = lambda opts: type("C", (), {"entry": type("E", (), {"options": opts})()})()
 assert _pcd(_mk({})) is False, "default must be server-cache (no car wake-up)"

@@ -70,5 +70,12 @@ assert.deepStrictEqual(empty.history, []);
 // headlamp_status string fallback
 assert.strictEqual(buildState({ "vehicle.headlamp_status": "on" }, {}).headlights, true);
 assert.strictEqual(buildState({ "vehicle.headlamp_status": "OFF" }, {}).headlights, false);
+// allow-list, not a deny-list: an unrecognized string must stay unknown, not read as "on"
+["unknown", "unavailable", "error", "not_available", "unsupported"].forEach((v) => {
+  assert.strictEqual(
+    buildState({ "vehicle.headlamp_status": v }, {}).headlights, null,
+    `headlamp_status ${JSON.stringify(v)} must stay unknown, not read as on`
+  );
+});
 
 console.log("all state tests passed");

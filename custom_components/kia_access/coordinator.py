@@ -65,6 +65,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._parked: dict | None = None
         self._was_on: bool | None = None
         self._awaiting_park_fix: bool = False
+        self._calendar_lock = asyncio.Lock()
+        # wall-clock (time.time(), not time.monotonic()) so a HA restart mid-
+        # "how long has this been continuously true" window doesn't silently
+        # reset the clock on the not-plugged-in-at-home / moved-while-parked
+        # alert timers -- loaded back in async_load_prefs(), saved in
+        # _emit_alerts() whenever either value actually changes.
+        self._timers_store = Store(hass, 1, f"{DOMAIN}_timers_{entry.entry_id}")
         self._geo_cache: dict = {}
         self._geo_store = Store(hass, 1, f"{DOMAIN}_geocache_{entry.entry_id}")
         self._cal_pois: list[dict] = []
@@ -109,11 +116,21 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _valid_ll(v) -> bool:
-        return (
+        if not (
             isinstance(v, (list, tuple))
             and len(v) >= 2
-            and isinstance(v[0], (int, float))
-            and isinstance(v[1], (int, float))
+            and isinstance(v[0], (int, float)) and not isinstance(v[0], bool)
+            and isinstance(v[1], (int, float)) and not isinstance(v[1], bool)
+        ):
+            return False
+        lat, lon = v[0], v[1]
+        # isinstance(float("nan"), float) and isinstance(float("inf"), float)
+        # are both True -- a malformed geocoder response (e.g. a provider
+        # returning the literal string "NaN"/"Infinity", which float()
+        # happily parses) could otherwise poison the persistent geo cache.
+        return (
+            math.isfinite(lat) and math.isfinite(lon)
+            and -90 <= lat <= 90 and -180 <= lon <= 180
         )
 
     async def async_load_prefs(self) -> None:
@@ -127,6 +144,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         }
         if len(self._geo_cache) != len(raw):
             await self._geo_store.async_save({"geo": self._geo_cache})
+        tmdata = await self._timers_store.async_load() or {}
+        self._home_unplugged_since = tmdata.get("home_unplugged_since")
+        self._moved_since = tmdata.get("moved_since")
 
     async def async_set_pref(self, key: str, value) -> None:
         self.climate_prefs[key] = value
@@ -314,17 +334,26 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             except (TypeError, ValueError):
                 return None
 
+        # carOn (and charging) must use the SAME canonical definition the
+        # rest of the app uses (build_state()'s anyTrue(engine_is_running,
+        # accessory_on, ign3, remote_ignition)) -- a hand-picked
+        # `v.get("engine_is_running")` here would let trip tracking disagree
+        # with the alert engine about whether the car is actually driving.
+        flat = {f"vehicle.{k}": val for k, val in v.items()
+                if not isinstance(val, (dict, list))}
+        state = build_state(flat, {})
+
         opts = self.entry.options
         res = drive_trips.update(
             self._open_trip,
             {
                 "t": time.time() * 1000,
-                "odometerKm": _num(v.get("odometer")),
-                "batteryPct": _num(v.get("ev_battery_percentage")),
-                "charging": v.get("ev_battery_is_charging"),
-                "carOn": v.get("engine_is_running"),
-                "locationLat": _num(v.get("location_latitude")),
-                "locationLon": _num(v.get("location_longitude")),
+                "odometerKm": state.get("odometerKm"),
+                "batteryPct": state.get("batteryPct"),
+                "charging": state.get("charging"),
+                "carOn": state.get("carOn"),
+                "locationLat": state.get("locationLat"),
+                "locationLon": state.get("locationLon"),
             },
             {
                 "pricePerKwh": opts.get("price_per_kwh") or 0,
@@ -969,15 +998,26 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         it hasn't seen before, so back-to-back runs cost nothing extra.
         _refresh_drive_times() is the one with real external API calls
         (routing) and keeps its own separate 600s / car-moved throttle, so
-        calling this every minute doesn't hammer that provider either."""
-        try:
-            await self.async_refresh_calendar_pois()
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("calendar POI refresh failed", exc_info=True)
-        try:
-            await self._refresh_drive_times()
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("drive-time refresh failed", exc_info=True)
+        calling this every minute doesn't hammer that provider either.
+
+        The two callers above mean this can genuinely run concurrently with
+        itself (a poll cycle running long enough to overlap the next 1-min
+        tick) -- and the body below mutates shared, non-atomic state
+        (_cal_pois, _static_pois, _cal_status, _geo_cache, _route_at) across
+        multiple awaits (geocoding, calendar reads, routing calls, store
+        saves). async_refresh_calendar_pois() in particular *reassigns*
+        self._cal_status wholesale at its start, so an overlapping call can
+        make an in-progress call's later writes land in the wrong (newer)
+        dict. Serialize the whole refresh so only one is ever in flight."""
+        async with self._calendar_lock:
+            try:
+                await self.async_refresh_calendar_pois()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("calendar POI refresh failed", exc_info=True)
+            try:
+                await self._refresh_drive_times()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("drive-time refresh failed", exc_info=True)
 
     async def _async_update_data(self) -> dict:
         job = self._job()
@@ -1031,7 +1071,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 f"{type(fetch_err).__name__}: {fetch_err}"
             ) from fetch_err
 
-        self._emit_alerts()
+        await self._emit_alerts()
         return self.vehicle
 
     @staticmethod
@@ -1167,7 +1207,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return rate, label
         return None, None
 
-    def _emit_alerts(self) -> None:
+    async def _emit_alerts(self) -> None:
         """Fire kia_access_alert events on edge-triggered condition changes,
         using the exact same rules as the MagicMirror module (conditions.py)."""
         flat = {f"vehicle.{k}": v for k, v in self.vehicle.items()
@@ -1178,15 +1218,20 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         units = "metric" if self.hass.config.units is METRIC_SYSTEM else "imperial"
         state = build_state(flat, {"units": units})
 
-        # home / not-plugged-in context
+        # home / not-plugged-in context. time.time() (wall clock), not
+        # time.monotonic() -- this measures "how long has this been
+        # continuously true", which must survive a HA restart (routine:
+        # updates, crashes) without silently resetting the clock and
+        # delaying the alert by another full graceMin/sustainedMin.
+        timers_before = (self._home_unplugged_since, self._moved_since)
         state["atHome"] = self._at_home(state)
         home_unplugged = state["atHome"] is True and state.get("plugged") is not True
         if home_unplugged and self._home_unplugged_since is None:
-            self._home_unplugged_since = time.monotonic()
+            self._home_unplugged_since = time.time()
         if not home_unplugged:
             self._home_unplugged_since = None
         state["homeUnpluggedMin"] = (
-            (time.monotonic() - self._home_unplugged_since) / 60
+            (time.time() - self._home_unplugged_since) / 60
             if self._home_unplugged_since is not None
             else None
         )
@@ -1207,9 +1252,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             moved = self._haversine_km(p["lat"], p["lon"], lat, lon)
             if moved is not None and moved >= 0.3048:  # 1000 ft -- real move, not GPS jitter
                 if self._moved_since is None:
-                    self._moved_since = time.monotonic()
+                    self._moved_since = time.time()
                 state["movedWhileParkedKm"] = moved
-                state["movedWhileParkedMin"] = (time.monotonic() - self._moved_since) / 60
+                state["movedWhileParkedMin"] = (time.time() - self._moved_since) / 60
             else:
                 self._moved_since = None
                 state["movedWhileParkedKm"] = 0
@@ -1299,6 +1344,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 self._prev_cond[c["reason"]] = c["active"]
         self._prev_cond["_charging"] = res["meta"]["charging"]
         self._first_alert_run = False
+
+        timers_after = (self._home_unplugged_since, self._moved_since)
+        if timers_after != timers_before:
+            await self._timers_store.async_save({
+                "home_unplugged_since": self._home_unplugged_since,
+                "moved_since": self._moved_since,
+            })
 
     # commands gated by the "block automated climate" option
     _CLIMATE_COMMANDS = frozenset({"start_climate", "stop_climate"})

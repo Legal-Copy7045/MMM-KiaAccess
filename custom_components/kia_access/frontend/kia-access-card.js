@@ -49,8 +49,8 @@ g.KiaAccessEntities={
   ]
 };
 g.KiaAccessCommands={
-  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)); \"poi\" = method(vehicle_id, [POIInfo(...)]) built from name/address or latitude/longitude (address is geocoded). `dormant: true` marks a command whose library method exists but isn't implemented for all regions yet (it returns a clear error until it is). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file. NOTE on start_climate for the USA region (this project's target): the library's KiaUvoApiUSA sends `set_temp` in FAHRENHEIT, valid 62-82 (below/above → \"LOW\"/\"HIGH\"); `climate` is the A/C master switch (must be true to blow air); `defrost` = front windscreen; `heating` is a bit-flag (1 = rear window + mirrors); `steering_wheel` 0-2; `*_seat` levels are KiaUvoApiUSA._seat_settings codes (0 off, 6/7/8 heat lo/md/hi, 3/4/5 cool lo/md/hi). EU/other regions use °C 16-30 and different seat codes — adjust the option bounds if you retarget. The HA integration also exposes native climate/lock/number/switch/select entities for all of this.",
-  "version": 5,
+  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)); \"poi\" = method(vehicle_id, [POIInfo(...)]) built from name/address or latitude/longitude (address is geocoded). `dormant: true` marks a command whose library method exists but isn't implemented for all regions yet (it returns a clear error until it is). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file. NOTE on start_climate for the USA region (this project's target): the library's KiaUvoApiUSA sends `set_temp` in FAHRENHEIT, valid 62-82 (below/above → \"LOW\"/\"HIGH\"); `climate` is the A/C master switch (must be true to blow air); `defrost` = front windscreen; `heating` is a bit-flag (1 = rear window + mirrors); `steering_wheel` 0-2; `*_seat` levels are KiaUvoApiUSA._seat_settings codes (0 off, 6/7/8 heat lo/md/hi, 3/4/5 cool lo/md/hi). EU/other regions use °C 16-30 and different seat codes — adjust the option bounds if you retarget. An option can carry a `metric` sub-object with the non-Fahrenheit-region variant of default/min/max/step/unit (currently just `set_temp`) — anything dispatching this catalogue for a specific vehicle (kia_client.py's default-filling, the Lovelace card's climate panel) must pick `metric` over the top level when that vehicle's region isn't USA/Canada; the raw generated HA service (services.yaml) can't be region-scoped since it's one static file shared by every config entry, so it keeps the top-level (Fahrenheit) numbers as a reasonable default and widens min/max to not reject a metric value passed explicitly. The HA integration also exposes native climate/lock/number/switch/select entities for all of this (already region-aware independent of this catalogue -- see coordinator.py's climate_temp_unit()/build_climate_options()).",
+  "version": 6,
   "commands": [
     { "key": "lock", "name": "Lock", "method": "lock", "call": "bare", "icon": "mdi:lock", "category": "security" },
     { "key": "unlock", "name": "Unlock", "method": "unlock", "call": "bare", "icon": "mdi:lock-open", "category": "security", "confirm": true },
@@ -61,7 +61,8 @@ g.KiaAccessCommands={
     { "key": "start_climate", "name": "Start climate", "method": "start_climate", "call": "climate_options",
       "icon": "mdi:air-conditioner", "category": "climate",
       "options": {
-        "set_temp": { "type": "float", "default": 70, "min": 62, "max": 82, "step": 1, "unit": "°F" },
+        "set_temp": { "type": "float", "default": 70, "min": 62, "max": 82, "step": 1, "unit": "°F",
+          "metric": { "default": 21, "min": 16, "max": 30, "step": 0.5, "unit": "°C" } },
         "duration": { "type": "int", "default": 10, "min": 1, "max": 30, "unit": "min" },
         "climate": { "type": "bool", "default": true },
         "defrost": { "type": "bool", "default": false },
@@ -151,7 +152,12 @@ g.KiaAccessCommands={
     );
     if (headlights == null && typeof hs === "string") {
       var t = hs.trim().toLowerCase();
-      headlights = t && t !== "off" && t !== "none" && t !== "0" ? true : false;
+      // allow-list, not a deny-list: an unrecognized string ("unknown",
+      // "unavailable", "error", "not_available", ...) must stay unknown
+      // (null), not silently read as "on".
+      if (["on", "low", "high", "bifunc", "1", "true"].indexOf(t) !== -1) headlights = true;
+      else if (["off", "none", "0", "false"].indexOf(t) !== -1) headlights = false;
+      else headlights = null;
     }
 
     var airTempC = num("air_temperature");       // climate set-point
@@ -1275,7 +1281,11 @@ g.KiaAccessCommands={
         emit("otp_expiring", cO.level, life - age <= warn,
           remaining > 0
             ? "OTP enrolment expires in ~" + remaining + " day" + (remaining === 1 ? "" : "s")
-            : "OTP enrolment has likely expired — re-run enroll.py",
+            // lifetimeDays is a configured/assumed value (the actual
+            // refresh-token lifetime is controlled by Kia/Hyundai's own
+            // auth backend, which this app has no way to query) -- this is
+            // a heuristic estimate, not a confirmed expiry.
+            : "OTP enrolment is well past its assumed lifetime — if sign-in starts failing, re-run enroll.py",
           { remainingDays: remaining, ageDays: Math.round(age) });
       }
     }
@@ -2256,12 +2266,26 @@ g.KiaAccessCommands={
   }
 
   // ---- climate control panel -------------------------------------------------
-  // The Kia USA API takes the set-point in °F (62–82). We keep the canonical
-  // value in °F and only convert for display when the dashboard is metric.
+  // set_temp's native unit/bounds depend on the VEHICLE's region (USA/Canada
+  // send °F 62-82; everywhere else is °C 16-30, see core/commands.json's
+  // `metric` variant and coordinator.py's climate_temp_unit()) -- NOT on the
+  // dashboard's display preference, which is a separate, independent choice
+  // (_tempUnit()). climTempBounds() picks the vehicle-native set, and the
+  // panel converts only for DISPLAY when that differs from native.
   var CLIM_OPTS = (CMD_BY_KEY.start_climate && CMD_BY_KEY.start_climate.options) || {};
-  var TEMP_F_MIN = (CLIM_OPTS.set_temp && CLIM_OPTS.set_temp.min) || 62;
-  var TEMP_F_MAX = (CLIM_OPTS.set_temp && CLIM_OPTS.set_temp.max) || 82;
-  var TEMP_F_DEF = (CLIM_OPTS.set_temp && CLIM_OPTS.set_temp.default) || 70;
+  var FAHRENHEIT_REGIONS = { USA: true, CA: true };
+  function climTempBounds(region) {
+    var o = CLIM_OPTS.set_temp || {};
+    var fahrenheit = FAHRENHEIT_REGIONS[String(region || "USA").toUpperCase()] !== undefined;
+    var v = (!fahrenheit && o.metric) ? o.metric : o;
+    return {
+      min: v.min != null ? v.min : (fahrenheit ? 62 : 16),
+      max: v.max != null ? v.max : (fahrenheit ? 82 : 30),
+      def: v.default != null ? v.default : (fahrenheit ? 70 : 21),
+      step: v.step || (fahrenheit ? 1 : 0.5),
+      fahrenheit: fahrenheit
+    };
+  }
   var DUR_MIN = (CLIM_OPTS.duration && CLIM_OPTS.duration.min) || 1;
   var DUR_MAX = (CLIM_OPTS.duration && CLIM_OPTS.duration.max) || 30;
   var DUR_DEF = (CLIM_OPTS.duration && CLIM_OPTS.duration.default) || 10;
@@ -2270,12 +2294,23 @@ g.KiaAccessCommands={
   var fToC = function (f) { return (f - 32) * 5 / 9; };
   var cToF = function (c) { return c * 9 / 5 + 32; };
   var clamp = function (n, lo, hi) { return Math.max(lo, Math.min(hi, n)); };
+  // convert a temperature from one unit to another, both expressed as "is it Fahrenheit?"
+  var convertTemp = function (v, fromF, toF) {
+    if (fromF === toF) return v;
+    return fromF ? fToC(v) : cToF(v);
+  };
 
-  function loadClim() {
-    var d = { tempF: TEMP_F_DEF, duration: DUR_DEF, defrost: false, rearDefrost: false, wheel: false };
+  function loadClim(bounds) {
+    var d = { temp: bounds.def, duration: DUR_DEF, defrost: false, rearDefrost: false, wheel: false };
     try {
       var s = JSON.parse(window.localStorage.getItem(CLIM_STORE) || "{}");
-      if (typeof s.tempF === "number") d.tempF = clamp(Math.round(s.tempF), TEMP_F_MIN, TEMP_F_MAX);
+      // a saved value from a previous, differently-unit'd render (e.g. the
+      // vehicle's region changed, which shouldn't normally happen, or an
+      // older card version that only ever stored °F) -- if it's wildly
+      // outside this vehicle's native bounds, don't trust it, start fresh.
+      if (typeof s.temp === "number" && s.temp >= bounds.min - 5 && s.temp <= bounds.max + 5) {
+        d.temp = clamp(s.temp, bounds.min, bounds.max);
+      }
       if (typeof s.duration === "number") d.duration = clamp(Math.round(s.duration), DUR_MIN, DUR_MAX);
       d.defrost = !!s.defrost; d.rearDefrost = !!s.rearDefrost; d.wheel = !!s.wheel;
     } catch (e) { /* first run / private mode */ }
@@ -2294,19 +2329,14 @@ g.KiaAccessCommands={
       "</span></div>";
   }
 
-  // `unit` is "C" or "F"
-  function climateHtml(clim, unit) {
-    var tempTxt, atTMin, atTMax;
-    if (unit === "C") {
-      var tC = Math.round(fToC(clim.tempF));
-      tempTxt = tC + " °C";
-      atTMin = tC <= Math.ceil(fToC(TEMP_F_MIN));
-      atTMax = tC >= Math.floor(fToC(TEMP_F_MAX));
-    } else {
-      tempTxt = Math.round(clim.tempF) + " °F";
-      atTMin = clim.tempF <= TEMP_F_MIN;
-      atTMax = clim.tempF >= TEMP_F_MAX;
-    }
+  // `unit` is "C" or "F" -- the DASHBOARD's display preference, independent
+  // of `bounds.fahrenheit` (the vehicle's own native unit for dispatch)
+  function climateHtml(clim, unit, bounds) {
+    var displayF = unit === "F";
+    var displayVal = convertTemp(clim.temp, bounds.fahrenheit, displayF);
+    var tempTxt = Math.round(displayVal) + (displayF ? " °F" : " °C");
+    var atTMin = clim.temp <= bounds.min;
+    var atTMax = clim.temp >= bounds.max;
     var cb = function (id, lbl, on) {
       return "<label><input type='checkbox' data-clim='" + id + "'" +
         (on ? " checked" : "") + ">" + esc(lbl) + "</label>";
@@ -2578,8 +2608,14 @@ g.KiaAccessCommands={
       return us && us.temperature === "°F" ? "F" : "C";
     }
 
+    // set_temp's native unit/bounds for THIS vehicle (region-derived), not
+    // the dashboard's display preference -- see climTempBounds() above
+    _climBounds() {
+      return climTempBounds(this._region);
+    }
+
     _clim() {
-      if (!this._climState) this._climState = loadClim();
+      if (!this._climState) this._climState = loadClim(this._climBounds());
       return this._climState;
     }
 
@@ -2588,20 +2624,25 @@ g.KiaAccessCommands={
       var panel = this._root && this._root.querySelector(".ka-clim");
       if (!panel) { this._sig = null; this._render(); return; }
       var host = panel.closest(".ka-group");
-      host.outerHTML = climateHtml(this._clim(), this._tempUnit());
+      host.outerHTML = climateHtml(this._clim(), this._tempUnit(), this._climBounds());
       this._wireClimate();
     }
 
     _climStep(id, dir) {
       var c = this._clim();
+      var bounds = this._climBounds();
       if (id === "temp") {
-        if (this._tempUnit() === "C") {
-          // step a whole °C: round the current point to °C, move, convert back
-          var next = clamp(Math.round(fToC(c.tempF)) + dir,
-            Math.ceil(fToC(TEMP_F_MIN)), Math.floor(fToC(TEMP_F_MAX)));
-          c.tempF = clamp(Math.round(cToF(next)), TEMP_F_MIN, TEMP_F_MAX);
+        if (this._tempUnit() !== (bounds.fahrenheit ? "F" : "C")) {
+          // stepping happens in the DISPLAY unit's whole degrees, then
+          // converts back to the vehicle's native storage/dispatch unit
+          var displayF = this._tempUnit() === "F";
+          var next = Math.round(convertTemp(c.temp, bounds.fahrenheit, displayF)) + dir;
+          c.temp = clamp(
+            Math.round(convertTemp(next, displayF, bounds.fahrenheit) * 2) / 2,
+            bounds.min, bounds.max
+          );
         } else {
-          c.tempF = clamp(c.tempF + dir, TEMP_F_MIN, TEMP_F_MAX);
+          c.temp = clamp(c.temp + dir * bounds.step, bounds.min, bounds.max);
         }
       } else if (id === "dur") {
         c.duration = clamp(c.duration + dir, DUR_MIN, DUR_MAX);
@@ -2624,8 +2665,12 @@ g.KiaAccessCommands={
     _startClimate() {
       if (!this._hass || this._tooSoon("start_climate")) return;
       var c = this._clim();
+      var bounds = this._climBounds();
       var data = {
-        set_temp: c.tempF,
+        // always the vehicle's own native unit -- matches what
+        // coordinator.py's build_climate_options() sends for the native
+        // climate entity, and what commands.json's `metric` variant expects
+        set_temp: c.temp,
         duration: c.duration,
         climate: true,
         defrost: !!c.defrost,
@@ -2633,8 +2678,9 @@ g.KiaAccessCommands={
         steering_wheel: c.wheel ? 2 : 0
       };
       if (this._entryId) data.entry_id = this._entryId;
-      var shown = this._tempUnit() === "C"
-        ? Math.round(fToC(c.tempF)) + " °C" : c.tempF + " °F";
+      var displayF = this._tempUnit() === "F";
+      var shown = Math.round(convertTemp(c.temp, bounds.fahrenheit, displayF)) +
+        (displayF ? " °F" : " °C");
       this._hass.callService("kia_access", "start_climate", data);
       this._climNote("Starting climate at " + shown + " for " + c.duration + " min…");
     }
@@ -2768,6 +2814,7 @@ g.KiaAccessCommands={
 
       var st = hass.states[entId];
       this._entryId = st.attributes.entry_id || null;
+      this._region = st.attributes.region || "USA";
       var flat = flatFromAttributes(st.attributes);
       var state = S.buildState(flat, {});
       this._updateHomeAndMoveTracking(state);
@@ -2857,7 +2904,7 @@ g.KiaAccessCommands={
         "</div></div>" +
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
-        climateHtml(this._clim(), this._tempUnit()) +
+        climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
         actionsGroupsHtml() +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
