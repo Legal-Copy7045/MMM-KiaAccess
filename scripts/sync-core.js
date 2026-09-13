@@ -94,7 +94,19 @@ for (const c of commands) {
       )}\n`;
     }
     yaml += `      required: false\n`;
-    if (o.default !== undefined) yaml += `      default: ${JSON.stringify(o.default)}\n`;
+    // An option with a `metric` variant has no single correct default for
+    // this one static, every-vehicle-shared file -- declaring the top-level
+    // (Fahrenheit) default here isn't just documentation, HA's service/
+    // action UI PRE-FILLS this into the form as a live, editable value, and
+    // submitting the form without touching it sends that value explicitly.
+    // kia_client.py's own default-filling (still keyed off this same JSON's
+    // default/metric.default) only kicks in when the field is OMITTED --
+    // so a EU user who doesn't notice "70" already sitting in the box would
+    // genuinely send 70 as their (Fahrenheit) set_temp to a Celsius vehicle.
+    // Omit the field here entirely so the form starts empty.
+    if (o.default !== undefined && !o.metric) {
+      yaml += `      default: ${JSON.stringify(o.default)}\n`;
+    }
     yaml += `      selector:\n`;
     yaml += indentSelector(sel, "        ");
   }

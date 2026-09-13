@@ -87,7 +87,6 @@ start_climate:
       name: "Set temp"
       description: "°F for USA/Canada vehicles, °C otherwise (matches this vehicle's region) — omit to use its region's default."
       required: false
-      default: 70
       selector:
         number:
           min: 16

@@ -278,7 +278,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             cost = float(st.state)
         except (TypeError, ValueError):
             return None
-        if cost <= 0:
+        # NaN/Infinity both fail a plain `<= 0` check (any comparison with
+        # NaN is False) and would otherwise read as "we have a valid cost" --
+        # sessions.py's apply_cost() already rejects them before persisting
+        # (via its own _num() call), so this was never a data-integrity risk,
+        # but returning a non-None "cost" here wrongly skips the caller's
+        # _ext_pending retry path below, permanently missing the real cost
+        # once the entity recovers and reports a proper value.
+        if not math.isfinite(cost) or cost <= 0:
             return None
         grace = float(self.entry.options.get("away_cost_grace_min") or 90) * 60000
         changed_ms = (st.last_changed or dt_util.utcnow()).timestamp() * 1000
@@ -1114,10 +1121,23 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         zone = self.hass.states.get("zone.home")
         if zone is None:
             return None, None, 100.0
+        # This is called from _emit_alerts(), inside the locked update body
+        # with no surrounding guard -- an unhandled ValueError from a
+        # malformed radius (a bad template, a broken zone integration) would
+        # fail the ENTIRE coordinator update, not just the home-distance
+        # calc that needs it. Same defensive pattern as _charge_at_home()/
+        # _charge_rate()'s zone-radius parsing just below.
+        try:
+            raw_radius = zone.attributes.get("radius", 100)
+            radius_m = 100.0 if raw_radius is None else float(raw_radius)
+            if not math.isfinite(radius_m) or radius_m < 0:
+                radius_m = 100.0
+        except (TypeError, ValueError):
+            radius_m = 100.0
         return (
             zone.attributes.get("latitude"),
             zone.attributes.get("longitude"),
-            float(zone.attributes.get("radius", 100)),
+            radius_m,
         )
 
     def _at_home(self, state: dict) -> bool | None:
@@ -1185,7 +1205,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 rate = float(str(val).strip().lstrip("$").strip())
             except (TypeError, ValueError):
                 continue
-            if zid and rate >= 0:
+            # float("Infinity")/float("inf") both parse successfully and are
+            # >= 0 -- reject here rather than relying on sessions.py's own
+            # _num() to filter it back out downstream (it does, but this
+            # function's contract shouldn't depend on that).
+            if zid and math.isfinite(rate) and rate >= 0:
                 out.append((zid, rate))
         return out
 

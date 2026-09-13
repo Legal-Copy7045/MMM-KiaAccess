@@ -205,4 +205,63 @@ two2 = [_CmdVeh("VIN1"), _CmdVeh("VIN2")]
 _run_command({"command": "lock", "vin": "VIN2"}, two2)
 assert two2[0].locked is False and two2[1].locked is True
 
+# --- run_command(): a region-ambiguous option (set_temp) must reject an
+# explicit value that's wrong for the vehicle's actual region, not just
+# silently pass it through. The generated HA service schema can't be
+# region-scoped (see core/commands.json's $comment), so this backend check
+# is the second of two defense-in-depth layers -- the first (removing the
+# static "70" default from services.yaml) only stops the ACCIDENTAL case. ---
+class _ClimateVeh(_CmdVeh):
+    def start_climate(self, options):
+        self.set_temp = getattr(options, "set_temp", None)
+
+
+class _ClimateVM(_CmdVM):
+    def start_climate(self, vehicle_id, options):
+        self._vehicles[vehicle_id].start_climate(options)
+
+
+def _run_climate(job, vehicles):
+    vm = _ClimateVM(vehicles)
+    orig = kia_client.connect
+    kia_client.connect = lambda *a, **k: (vm, None)
+    try:
+        return kia_client.run_command(job)
+    finally:
+        kia_client.connect = orig
+
+
+usa_car = [_ClimateVeh("VIN1")]
+_run_climate({"command": "start_climate", "region": "USA", "options": {"set_temp": 70}}, usa_car)
+assert usa_car[0].set_temp == 70, "a real Fahrenheit value for a USA vehicle must pass"
+
+eu_car = [_ClimateVeh("VIN1")]
+_run_climate({"command": "start_climate", "region": "EU", "options": {"set_temp": 21}}, eu_car)
+assert eu_car[0].set_temp == 21, "a real Celsius value for an EU vehicle must pass"
+
+# the exact accidental-default scenario this whole fix is about: a stale/
+# UI-leftover Fahrenheit value explicitly sent to a metric-region vehicle
+bad_eu_car = [_ClimateVeh("VIN1")]
+try:
+    _run_climate({"command": "start_climate", "region": "EU", "options": {"set_temp": 70}}, bad_eu_car)
+    raise AssertionError("70 (Fahrenheit-shaped) must be rejected for an EU/metric vehicle")
+except kia_client.ClientError as e:
+    assert "set_temp" in str(e)
+assert bad_eu_car[0].id and not hasattr(bad_eu_car[0], "set_temp"), (
+    "the vehicle must never receive the out-of-region value"
+)
+
+# and the inverse: a Celsius-shaped value sent to a USA/Fahrenheit vehicle
+bad_usa_car = [_ClimateVeh("VIN1")]
+try:
+    _run_climate({"command": "start_climate", "region": "USA", "options": {"set_temp": 21}}, bad_usa_car)
+    raise AssertionError("21 (Celsius-shaped) must be rejected for a USA/Fahrenheit vehicle")
+except kia_client.ClientError:
+    pass
+
+# omitting it entirely still falls back to the region-correct default
+default_eu_car = [_ClimateVeh("VIN1")]
+_run_climate({"command": "start_climate", "region": "EU"}, default_eu_car)
+assert default_eu_car[0].set_temp == 21, "omitted set_temp must use the metric default for an EU vehicle"
+
 print("dump_vehicle tests passed")

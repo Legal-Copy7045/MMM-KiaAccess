@@ -235,6 +235,50 @@ assert _pcr("zone.work = 0.19\nHome = 0.185\n# note\n\nbad line") == [
     ("zone.work", 0.19), ("zone.home", 0.185)
 ]
 assert _pcr("") == [] and _pcr(None) == []
+# float("Infinity") parses successfully and is >= 0 -- must still be rejected
+assert _pcr("zone.home = Infinity") == [], "an infinite rate must be rejected"
+assert _pcr("zone.home = -1") == [], "a negative rate must be rejected"
+
+# _home_point() must never raise out of a malformed zone.home radius --
+# it's called from _emit_alerts() with no surrounding guard, so an
+# unhandled ValueError here would fail the entire coordinator update
+_hp = co.KiaAccessCoordinator._home_point
+_fake_zone_coord = lambda radius: type("C", (), {"hass": type("H", (), {
+    "states": type("S", (), {"get": lambda self, eid: type("Z", (), {
+        "attributes": {"latitude": 1.0, "longitude": 2.0, "radius": radius}
+    })()})()
+})()})()
+assert _hp(_fake_zone_coord(100))[2] == 100.0, "a normal radius"
+assert _hp(_fake_zone_coord("not a number"))[2] == 100.0, "malformed radius must not raise"
+assert _hp(_fake_zone_coord(float("nan")))[2] == 100.0, "NaN radius must fall back"
+assert _hp(_fake_zone_coord(float("inf")))[2] == 100.0, "Infinite radius must fall back"
+assert _hp(_fake_zone_coord(-5))[2] == 100.0, "negative radius must fall back"
+assert _hp(_fake_zone_coord(None))[2] == 100.0, "missing radius must fall back"
+
+# _external_away_cost() must treat NaN/Infinity as "no valid reading yet"
+# (None), not as a real cost -- returning non-None here wrongly skips the
+# caller's _ext_pending retry path, permanently missing the real cost once
+# the entity recovers.
+_eac = co.KiaAccessCoordinator._external_away_cost
+_dt_util = importlib.import_module("homeassistant.util.dt")
+
+
+def _fake_cost_coord(state_value):
+    st = type("St", (), {"state": state_value, "last_changed": _dt_util.utcnow()})()
+    return type("C", (), {
+        "entry": type("E", (), {"options": {"away_cost_entity": "sensor.cost"}})(),
+        "hass": type("H", (), {"states": type("S", (), {
+            "get": lambda self, eid: st
+        })()})(),
+    })()
+
+
+_session = {"startedAt": _dt_util.utcnow().timestamp() * 1000, "endedAt": _dt_util.utcnow().timestamp() * 1000}
+assert _eac(_fake_cost_coord("12.34"), _session) == 12.34, "a real cost must pass through"
+assert _eac(_fake_cost_coord("nan"), _session) is None, "NaN must read as no-valid-reading-yet"
+assert _eac(_fake_cost_coord("inf"), _session) is None, "Infinity must read as no-valid-reading-yet"
+assert _eac(_fake_cost_coord("-5"), _session) is None, "a non-positive cost must be rejected"
+assert _eac(_fake_cost_coord("unknown"), _session) is None, "a non-numeric state must be rejected"
 _sess = importlib.import_module(f"{pkg}.sessions")
 _scl = _sess.update(None, {"t": 0, "charging": True, "batteryPct": 10, "atHome": False},
                     {"pricePerKwh": 0.2, "awayPricePerKwh": 0.6})["open"]
