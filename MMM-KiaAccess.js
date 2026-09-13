@@ -714,7 +714,8 @@ Module.register("MMM-KiaAccess", {
     const km = this.haversineKm(
       st.locationLat, st.locationLon, Number(loc.homeLat), Number(loc.homeLon)
     );
-    return km <= (Number(loc.homeRadiusKm) || 0.2);
+    const radiusKm = Number(loc.homeRadiusKm);
+    return km <= (isFinite(radiusKm) ? radiusKm : 0.2);
   },
 
   // edge-triggered vehicle-state notifications
@@ -851,11 +852,21 @@ Module.register("MMM-KiaAccess", {
           // that one dims the whole mirror, so it's opt-in (cfg.criticalPopup).
           // Otherwise a still-active critical lives in the in-module banner
           // (see getDom) and only throws a brief corner growl as it fires.
-          const wantsModal = critical && !(secs > 0) && cfg.criticalPopup === true;
+          // MM's default alert module shows one type:"alert" modal at a time
+          // and queues any more behind it; HIDE_ALERT is untargeted (it just
+          // dismisses whatever is currently on screen). So only one reason
+          // may "own" the modal at once (this._modalReason) — a second
+          // reason that wants one while another already owns it falls back
+          // to a plain timed growl instead of being queued, so its later
+          // "cleared" can never wrongly HIDE_ALERT a *different*, still-
+          // active reason's modal that's genuinely on screen.
+          const wantsModal = critical && !(secs > 0) && cfg.criticalPopup === true &&
+            (this._modalReason == null || this._modalReason === c.reason);
           if (becameActive) {
             const alert = { title: c.title, message: c.message };
             if (wantsModal) {
               alert.type = "alert"; // centre popup, stays until HIDE_ALERT
+              this._modalReason = c.reason;
             } else {
               alert.type = "notification"; // corner growl
               alert.timer = (secs > 0 ? secs : 15) * 1000;
@@ -863,10 +874,12 @@ Module.register("MMM-KiaAccess", {
             this.sendNotification("SHOW_ALERT", alert);
             this._alertShown = this._alertShown || {};
             if (wantsModal) this._alertShown[c.reason] = true;
-          } else if (cleared && this._alertShown && this._alertShown[c.reason]) {
-            // a persistent modal's condition cleared — dismiss it
+          } else if (cleared && this._alertShown && this._alertShown[c.reason] &&
+              this._modalReason === c.reason) {
+            // this reason genuinely owns the modal currently on screen — safe to dismiss
             this.sendNotification("HIDE_ALERT");
             this._alertShown[c.reason] = false;
+            this._modalReason = null;
           }
         }
       }

@@ -194,22 +194,26 @@
     }
 
     // ---- unlocked ----
+    // (emits `active: null` while driving instead of being omitted entirely,
+    // so a caller iterating `out` sees an explicit "not evaluated right now"
+    // rather than the reason silently vanishing from the list)
     var cU = checkCfg(cfg, "unlocked");
-    if (cU.enabled && !driving) {
-      emit("unlocked", cU.level, triState(s.locked === false ? true : s.locked === true ? false : null),
+    if (cU.enabled) {
+      emit("unlocked", cU.level,
+        driving ? null : triState(s.locked === false ? true : s.locked === true ? false : null),
         "Vehicle is unlocked");
     }
 
     // ---- open parts ----
     function openBool(reason, cKey, message, raw) {
       var c = checkCfg(cfg, cKey);
-      if (!c.enabled || driving) return;
-      emit(reason, c.level, triState(raw), message);
+      if (!c.enabled) return;
+      emit(reason, c.level, driving ? null : triState(raw), message);
     }
     var cD = checkCfg(cfg, "doorOpen");
-    if (cD.enabled && !driving) {
+    if (cD.enabled) {
       var doors = openList(s, "door");
-      emit("door_open", cD.level, anyOpen(s, "door"),
+      emit("door_open", cD.level, driving ? null : anyOpen(s, "door"),
         doors.length === 1
           ? CORNER[doors[0]] + " door is open"
           : doors.length > 1
@@ -218,9 +222,9 @@
         { corners: doors });
     }
     var cW = checkCfg(cfg, "windowOpen");
-    if (cW.enabled && !driving) {
+    if (cW.enabled) {
       var wins = openList(s, "win");
-      emit("window_open", cW.level, anyOpen(s, "win"),
+      emit("window_open", cW.level, driving ? null : anyOpen(s, "win"),
         wins.length === 1
           ? CORNER[wins[0]] + " window is open"
           : wins.length > 1
@@ -310,7 +314,7 @@
     // needs s.atHome (bool) + s.homeUnpluggedMin (minutes home+unplugged) from
     // the caller; inert when s.atHome isn't provided.
     var cHP = checkCfg(cfg, "notPluggedInHome");
-    if (cHP.enabled && !driving) {
+    if (cHP.enabled) {
       var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
       var homeMin = num(s.homeUnpluggedMin);
       var hr = new Date().getHours();
@@ -321,7 +325,7 @@
       if (s.plugged === true || s.atHome !== true) hpActive = false;
       else if (homeMin != null && homeMin >= grace && inWindow) hpActive = true;
       else hpActive = prev.not_plugged_home === true; // home+unplugged, pre-grace: hold
-      emit("not_plugged_home", cHP.level, hpActive,
+      emit("not_plugged_home", cHP.level, driving ? null : hpActive,
         "Home and not plugged in",
         { minutesHome: homeMin });
     }
@@ -355,7 +359,12 @@
     // needs s.atHome (false when away) + s.homeDistanceKm (car->home, km) +
     // s.rangeKm from the caller. Level escalates warning -> critical.
     var cGH = checkCfg(cfg, "cantGetHome");
-    if (cGH.enabled && s.atHome === false) {
+    if (cGH.enabled && s.atHome === true) {
+      // arrived home -- explicitly clear rather than just going silent, so a
+      // caller relying on an active:false edge (not just the reason vanishing
+      // from `out`) actually sees the alert clear and resets its hysteresis.
+      emit("cant_get_home", "warning", false, "Arrived home", {});
+    } else if (cGH.enabled && s.atHome === false) {
       var dHome = num(s.homeDistanceKm);
       var rng = num(s.rangeKm);
       if (dHome != null && rng != null && rng > 0) {

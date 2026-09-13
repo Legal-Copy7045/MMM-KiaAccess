@@ -35,7 +35,11 @@ assert.strictEqual(find(r, "ev_battery_low"), undefined);
 r = C.evaluate({ locked: false }, {}, {});
 assert.strictEqual(find(r, "unlocked").active, true);
 r = C.evaluate({ locked: false, carOn: true }, {}, {});
-assert.strictEqual(find(r, "unlocked"), undefined, "muted while driving");
+assert.strictEqual(
+  find(r, "unlocked").active, null,
+  "still emitted while driving, but explicitly inert (not just absent) so a " +
+  "caller's hysteresis/announced state doesn't go stale on the guard edge"
+);
 r = C.evaluate({ locked: false, carOn: true }, { quietWhileDriving: false }, {});
 assert.strictEqual(find(r, "unlocked").active, true);
 
@@ -168,8 +172,15 @@ assert.strictEqual(find(r, "cant_get_home").active, false);
 r = C.evaluate({ atHome: false, homeDistanceKm: 150, rangeKm: 250 }, {}, {});
 const gh = find(r, "cant_get_home");
 assert.strictEqual(gh.level, "warning");
-// at home -> not evaluated
+// at home -> explicitly cleared (not just absent), so a caller relying on an
+// active:false edge to reset its hysteresis/announced state actually gets one
 r = C.evaluate({ atHome: true, homeDistanceKm: 200, rangeKm: 50 }, {}, {});
+assert.strictEqual(find(r, "cant_get_home").active, false);
+// ... including resetting a stale "true" left over from a prior trip
+r = C.evaluate({ atHome: true, homeDistanceKm: 200, rangeKm: 50 }, {}, { cant_get_home: true });
+assert.strictEqual(find(r, "cant_get_home").active, false, "arriving home always clears, never holds");
+// home status truly unknown (no home configured / no fix) -> stays inert
+r = C.evaluate({ atHome: null, homeDistanceKm: 200 }, {}, {});
 assert.strictEqual(find(r, "cant_get_home"), undefined);
 // away but no range data -> not evaluated
 r = C.evaluate({ atHome: false, homeDistanceKm: 200 }, {}, {});

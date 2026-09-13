@@ -193,32 +193,35 @@ def evaluate(s, cfg, prev):
                  {"remainingDays": remaining, "ageDays": round(age)})
 
     # ---- unlocked ----
+    # (emits active=None while driving instead of being omitted entirely, so
+    # a caller iterating `out` sees an explicit "not evaluated right now"
+    # rather than the reason silently vanishing from the list)
     c_u = _check_cfg(cfg, "unlocked")
-    if c_u.get("enabled") and not driving:
+    if c_u.get("enabled"):
         locked = s.get("locked")
         emit("unlocked", c_u.get("level"),
-             _tri(True if locked is False else False if locked is True else None),
+             None if driving else _tri(True if locked is False else False if locked is True else None),
              "Vehicle is unlocked")
 
     # ---- open parts ----
     def open_bool(reason, c_key, message, raw):
         c = _check_cfg(cfg, c_key)
-        if not c.get("enabled") or driving:
+        if not c.get("enabled"):
             return
-        emit(reason, c.get("level"), _tri(raw), message)
+        emit(reason, c.get("level"), None if driving else _tri(raw), message)
 
     c_d = _check_cfg(cfg, "doorOpen")
-    if c_d.get("enabled") and not driving:
+    if c_d.get("enabled"):
         doors = _open_list(s, "door")
-        emit("door_open", c_d.get("level"), _any_open(s, "door"),
+        emit("door_open", c_d.get("level"), None if driving else _any_open(s, "door"),
              (f"{CORNER[doors[0]]} door is open" if len(doors) == 1
               else f"{len(doors)} doors are open" if len(doors) > 1 else "Doors closed"),
              {"corners": doors})
 
     c_w = _check_cfg(cfg, "windowOpen")
-    if c_w.get("enabled") and not driving:
+    if c_w.get("enabled"):
         wins = _open_list(s, "win")
-        emit("window_open", c_w.get("level"), _any_open(s, "win"),
+        emit("window_open", c_w.get("level"), None if driving else _any_open(s, "win"),
              (f"{CORNER[wins[0]]} window is open" if len(wins) == 1
               else f"{len(wins)} windows are open" if len(wins) > 1 else "Windows closed"),
              {"corners": wins})
@@ -300,7 +303,7 @@ def evaluate(s, cfg, prev):
 
     # ---- home but not plugged in ----
     c_hp = _check_cfg(cfg, "notPluggedInHome")
-    if c_hp.get("enabled") and not driving:
+    if c_hp.get("enabled"):
         grace = _num(c_hp.get("graceMin")) if c_hp.get("graceMin") is not None else 20
         home_min = _num(s.get("homeUnpluggedMin"))
         hr = time.localtime().tm_hour
@@ -313,7 +316,7 @@ def evaluate(s, cfg, prev):
             hp_active = True
         else:
             hp_active = prev.get("not_plugged_home") is True
-        emit("not_plugged_home", c_hp.get("level"), hp_active,
+        emit("not_plugged_home", c_hp.get("level"), None if driving else hp_active,
              "Home and not plugged in", {"minutesHome": home_min})
 
     # ---- moved while parked (tow / theft) ----
@@ -341,7 +344,13 @@ def evaluate(s, cfg, prev):
 
     # ---- not enough range to get home ----
     c_gh = _check_cfg(cfg, "cantGetHome")
-    if c_gh.get("enabled") and s.get("atHome") is False:
+    if c_gh.get("enabled") and s.get("atHome") is True:
+        # arrived home -- explicitly clear rather than just going silent, so a
+        # caller relying on an active=False edge (not just the reason
+        # vanishing from `out`) actually sees the alert clear and resets its
+        # hysteresis.
+        emit("cant_get_home", "warning", False, "Arrived home", {})
+    elif c_gh.get("enabled") and s.get("atHome") is False:
         d_home = _num(s.get("homeDistanceKm"))
         rng = _num(s.get("rangeKm"))
         if d_home is not None and rng is not None and rng > 0:
