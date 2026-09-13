@@ -396,11 +396,33 @@ def run_command(job, token_file=None):
     fahrenheit = str(job.get("region", "USA")).upper() in ("USA", "CA")
 
     def _with_default(key):
-        if key in opts:
-            return opts[key]
         spec_for_key = opt_specs.get(key) or {}
-        if not fahrenheit and spec_for_key.get("metric"):
-            return spec_for_key["metric"].get("default")
+        metric = spec_for_key.get("metric")
+        if key in opts:
+            val = opts[key]
+            # Defense in depth for a region-ambiguous option (currently just
+            # set_temp): the HA service schema's min/max is a UNION of both
+            # regions' ranges (it can't be region-scoped, see core/commands.
+            # json's $comment), so schema validation alone lets a Fahrenheit
+            # value through to a metric vehicle and vice versa. The native
+            # climate entity's build_climate_options() always sends an
+            # already-correctly-converted value for THIS vehicle's region,
+            # so it will never trip this; a raw/automation service call
+            # sending the wrong region's value now gets a clear error
+            # instead of silently reaching the vehicle wrong.
+            if metric and isinstance(val, (int, float)) and not isinstance(val, bool):
+                bounds = spec_for_key if fahrenheit else metric
+                lo, hi = bounds.get("min"), bounds.get("max")
+                if (lo is not None and val < lo) or (hi is not None and val > hi):
+                    unit = bounds.get("unit") or ""
+                    raise ClientError(
+                        f"{key}={val!r} is outside the valid range for this "
+                        f"vehicle's region ({lo}-{hi}{' ' + unit if unit else ''})"
+                        " -- omit it to use the region's default"
+                    )
+            return val
+        if not fahrenheit and metric:
+            return metric.get("default")
         return spec_for_key.get("default")
 
     try:
