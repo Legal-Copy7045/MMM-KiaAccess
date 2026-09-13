@@ -652,7 +652,8 @@
           state.locationLat, state.locationLon,
           zone.attributes.latitude, zone.attributes.longitude
         );
-        var radiusKm = (Number(zone.attributes.radius) || 100) / 1000;
+        var rawRadius = Number(zone.attributes.radius);
+        var radiusKm = (isFinite(rawRadius) ? rawRadius : 100) / 1000;
         state.atHome = km != null ? km <= radiusKm : undefined;
         state.homeDistanceKm = km;
       } else {
@@ -716,11 +717,20 @@
       this._updateHomeAndMoveTracking(state);
       if (C) {
         try {
-          var cres = C.evaluate(state, {}, {});
+          // prev must persist across renders (not a fresh {} each time) --
+          // otherwise every hysteresis dead-band and one-shot charge event
+          // in conditions.js silently breaks on this surface only. Mirrors
+          // MMM-KiaAccess.js's this.prevCond / coordinator.py's _prev_cond.
+          this._prevCond = this._prevCond || {};
+          var cres = C.evaluate(state, {}, this._prevCond);
           state.critical = cres.conditions.some(function (c) {
             return c.level === "critical" && c.active === true;
           });
           state.alerts = V.alertLabels ? V.alertLabels(cres.conditions) : [];
+          cres.conditions.forEach(function (c) {
+            if (c.active !== null) this._prevCond[c.reason] = c.active;
+          }, this);
+          this._prevCond._charging = cres.meta.charging;
         } catch (e) { /* ignore */ }
       }
       state.flashing = this._flashing === true;

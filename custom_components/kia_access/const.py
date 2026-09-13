@@ -55,7 +55,9 @@ CONF_GEOCODE = "geocode"
 DEFAULT_SCAN_INTERVAL_MINUTES = 30
 DEFAULT_FORCE_REFRESH_TIMEOUT = 45
 
-EVENT_STATE_CHANGED = "kia_access_alert"
+# Named to avoid colliding with homeassistant.const.EVENT_STATE_CHANGED
+# ("state_changed") -- this is our own custom bus event, unrelated to HA's.
+EVENT_KIA_ACCESS_ALERT = "kia_access_alert"
 
 _HERE = Path(__file__).parent
 

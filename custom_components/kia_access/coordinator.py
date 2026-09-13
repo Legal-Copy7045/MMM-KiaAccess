@@ -32,7 +32,7 @@ from .const import (
     DEFAULT_FORCE_REFRESH_TIMEOUT,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
-    EVENT_STATE_CHANGED,
+    EVENT_KIA_ACCESS_ALERT,
 )
 
 _FAHRENHEIT_REGIONS = {"USA", "CA"}
@@ -64,6 +64,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._moved_since: float | None = None
         self._parked: dict | None = None
         self._was_on: bool | None = None
+        self._awaiting_park_fix: bool = False
         self._geo_cache: dict = {}
         self._geo_store = Store(hass, 1, f"{DOMAIN}_geocache_{entry.entry_id}")
         self._cal_pois: list[dict] = []
@@ -992,6 +993,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         except Exception as err:  # noqa: BLE001
             fetch_err = err
 
+        # A 200 response with an empty vehicle list is a fetch failure, not a
+        # real "no vehicle" state -- treat it like any other ClientError so
+        # DataUpdateCoordinator keeps the last good self.vehicle instead of
+        # silently blanking every entity.
+        vehicles = result.get("vehicles") if fetch_err is None else None
+        if fetch_err is None and not vehicles:
+            fetch_err = kia_client.ClientError("Kia API returned no vehicles")
+
         if fetch_err is None:
             self.meta = result.get("meta", {}) or {}
             # persist a rotated refresh token back into the config entry.
@@ -1004,7 +1013,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     self.entry,
                     data={**self.entry.data, CONF_TOKEN: new_token},
                 )
-            self.vehicle = (result.get("vehicles") or [{}])[0]
+            self.vehicle = vehicles[0]
             await self._update_sessions()
             await self._update_trips()
 
@@ -1068,7 +1077,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         if st is None:
             return None
         try:
-            radius_m = float(st.attributes.get("radius", 100) or 100)
+            raw_radius = st.attributes.get("radius", 100)
+            radius_m = 100.0 if raw_radius is None else float(raw_radius)
         except (TypeError, ValueError):
             radius_m = 100.0
 
@@ -1140,7 +1150,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             if st is None:
                 continue
             try:
-                radius_m = float(st.attributes.get("radius", 100) or 100)
+                raw_radius = st.attributes.get("radius", 100)
+                radius_m = 100.0 if raw_radius is None else float(raw_radius)
             except (TypeError, ValueError):
                 radius_m = 100.0
             km = self._haversine_km(
@@ -1211,10 +1222,20 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             state["movedWhileParkedMin"] = 0
 
         # "where did I park" — snapshot on the drive->park transition (and once
-        # on startup if the car is already parked with a fix)
+        # on startup if the car is already parked with a fix). If the car
+        # turns off with no GPS fix yet (weak signal, e.g. entering an
+        # underground/covered garage — exactly where this matters most),
+        # `just_parked` would only be true for that one cycle and then be
+        # lost forever once `_was_on` flips to False; `_awaiting_park_fix`
+        # keeps the transition "pending" until a fix actually arrives.
         car_on = state.get("carOn") is True
         just_parked = self._was_on is True and not car_on
-        if (just_parked or self._parked is None) and not car_on and lat is not None:
+        if just_parked and lat is None:
+            self._awaiting_park_fix = True
+        if (
+            (just_parked or self._parked is None or self._awaiting_park_fix)
+            and not car_on and lat is not None
+        ):
             self._parked = {
                 "lat": lat,
                 "lon": lon,
@@ -1222,6 +1243,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "address": self.vehicle.get("location_name")
                 or self.vehicle.get("geocode"),
             }
+            self._awaiting_park_fix = False
         self._was_on = car_on
 
         try:
@@ -1257,7 +1279,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 self._announced[reason] = False
             if fire:
                 self.hass.bus.async_fire(
-                    EVENT_STATE_CHANGED,
+                    EVENT_KIA_ACCESS_ALERT,
                     {
                         "entry_id": self.entry.entry_id,
                         "reason": reason,

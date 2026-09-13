@@ -18,7 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import COMMANDS, DOMAIN, EVENT_STATE_CHANGED, PLATFORMS, VERSION
+from .const import COMMANDS, DOMAIN, EVENT_KIA_ACCESS_ALERT, PLATFORMS, VERSION
 from .coordinator import KiaAccessCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -288,7 +288,7 @@ def _register_services(hass: HomeAssistant) -> None:
         active = call.data.get("active", True)
         label = reason.replace("_", " ")
         hass.bus.async_fire(
-            EVENT_STATE_CHANGED,
+            EVENT_KIA_ACCESS_ALERT,
             {
                 "entry_id": coordinator.entry.entry_id,
                 "reason": reason,
