@@ -157,6 +157,19 @@ assert _vll([True, 1]) is False, "bool must not pass as a coordinate"
 assert _vll(None) is False
 assert _vll([37.4]) is False, "too few elements"
 
+# _haversine_km() is the one choke point every distance calc in coordinator.py
+# funnels through -- it must reject the same bad inputs _valid_ll() does,
+# since live vehicle/zone coordinates reach it via a bare float() with no
+# validation of their own.
+_hk = co.KiaAccessCoordinator._haversine_km
+assert isinstance(_hk(37.4, -122.1, 37.5, -122.2), float), "a normal pair returns a distance"
+assert _hk(None, -122.1, 37.5, -122.2) is None
+assert _hk(float("nan"), -122.1, 37.5, -122.2) is None, "NaN must be rejected"
+assert _hk(float("inf"), -122.1, 37.5, -122.2) is None, "Infinity must be rejected"
+assert _hk(91, 0, 37.5, -122.2) is None, "latitude out of range"
+assert _hk(37.4, 181, 37.5, -122.2) is None, "longitude out of range"
+assert _hk(True, -122.1, 37.5, -122.2) is None, "bool must not pass as a coordinate"
+
 _pcd = co.KiaAccessCoordinator._poll_car_directly
 _mk = lambda opts: type("C", (), {"entry": type("E", (), {"options": opts})()})()
 assert _pcd(_mk({})) is False, "default must be server-cache (no car wake-up)"
@@ -269,6 +282,34 @@ assert manifest.get("after_dependencies") == ["lovelace"], (
     "_ensure_lovelace_resource reads hass.data[LOVELACE_DATA]; without this "
     "hint lovelace may not have set up yet when we look for it"
 )
+
+# _register_services()'s voluptuous schema is registered ONCE, globally,
+# before any vehicle/entry_id (and therefore region) is known -- an option
+# with a `metric` variant (currently just start_climate's set_temp) must
+# validate the UNION of both ranges, or a real EU/Celsius value would be
+# hard-rejected by vol.Range() before ever reaching the region-aware
+# default-filling in kia_client.py.
+class _FakeServices:
+    def __init__(self):
+        self.registered = {}
+
+    def has_service(self, domain, key):
+        return False
+
+    def async_register(self, domain, key, handler, schema=None):
+        self.registered[key] = schema
+
+
+_fake_services_hass = type("H", (), {"services": _FakeServices()})()
+init._register_services(_fake_services_hass)
+_climate_schema = _fake_services_hass.services.registered["start_climate"]
+_climate_schema({"set_temp": 70})  # USA/Canada value must still pass
+_climate_schema({"set_temp": 21})  # a real EU/Celsius value must not be rejected
+try:
+    _climate_schema({"set_temp": 200})
+    raise AssertionError("a wildly out-of-range set_temp should still be rejected")
+except init.vol.Invalid:  # same voluptuous module __init__.py itself uses
+    pass
 
 # _ensure_lovelace_resource (auto-registers the card as a real Lovelace
 # resource so the frontend awaits it, instead of racing add_extra_js_url on a

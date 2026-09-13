@@ -66,6 +66,16 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._was_on: bool | None = None
         self._awaiting_park_fix: bool = False
         self._calendar_lock = asyncio.Lock()
+        # DataUpdateCoordinator's debouncer only serializes debounced
+        # async_request_refresh() calls against EACH OTHER -- the scheduled
+        # interval timer calls _async_refresh()/_async_update_data() directly,
+        # bypassing that debouncer entirely. So a manual "Refresh now" (which
+        # goes through async_request_refresh()) landing while a scheduled
+        # poll is already mid-flight can genuinely run this method
+        # concurrently with itself, racing self.vehicle / self._force_next_
+        # refresh / _update_sessions() / _update_trips() / _emit_alerts()'s
+        # shared state. Serialize the whole update instead.
+        self._update_lock = asyncio.Lock()
         # wall-clock (time.time(), not time.monotonic()) so a HA restart mid-
         # "how long has this been continuously true" window doesn't silently
         # reset the clock on the not-plugged-in-at-home / moved-while-parked
@@ -543,12 +553,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._cal_status["static_parsed"] = len(pairs)
         self._cal_status["static_geocoded"] = len(pois)
         if pairs:
+            # richer form (matches the sibling _cal_status["pois"] convention);
+            # a prior version overwrote this with a bare name list right after
+            # assigning it, silently discarding the per-entry "geocoded" flag
             self._cal_status["static"] = [
                 {"name": n, "geocoded": any(p["name"] == n[:40] for p in pois)}
                 for n, _ in pairs
             ]
-        if pairs:
-            self._cal_status["static"] = [p["name"] for p in pois]
 
     async def async_refresh_calendar_pois(self) -> None:
         """Pull locations off the configured calendars for the next N hours,
@@ -1020,63 +1031,76 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("drive-time refresh failed", exc_info=True)
 
     async def _async_update_data(self) -> dict:
-        job = self._job()
-        fetch_err: Exception | None = None
-        otp_required = False
-        try:
-            result = await self.hass.async_add_executor_job(kia_client.fetch, job)
-        except kia_client.OtpRequired as err:
-            otp_required = True
-            fetch_err = err
-        except kia_client.ClientError as err:
-            fetch_err = err
-        except Exception as err:  # noqa: BLE001
-            fetch_err = err
+        async with self._update_lock:
+            job = self._job()
+            fetch_err: Exception | None = None
+            otp_required = False
+            try:
+                result = await self.hass.async_add_executor_job(kia_client.fetch, job)
+            except kia_client.OtpRequired as err:
+                otp_required = True
+                fetch_err = err
+            except kia_client.ClientError as err:
+                fetch_err = err
+            except Exception as err:  # noqa: BLE001
+                fetch_err = err
 
-        # A 200 response with an empty vehicle list is a fetch failure, not a
-        # real "no vehicle" state -- treat it like any other ClientError so
-        # DataUpdateCoordinator keeps the last good self.vehicle instead of
-        # silently blanking every entity.
-        vehicles = result.get("vehicles") if fetch_err is None else None
-        if fetch_err is None and not vehicles:
-            fetch_err = kia_client.ClientError("Kia API returned no vehicles")
+            # A 200 response with an empty vehicle list is a fetch failure, not
+            # a real "no vehicle" state -- treat it like any other ClientError
+            # so DataUpdateCoordinator keeps the last good self.vehicle instead
+            # of silently blanking every entity.
+            vehicles = result.get("vehicles") if fetch_err is None else None
+            if fetch_err is None and not vehicles:
+                fetch_err = kia_client.ClientError("Kia API returned no vehicles")
 
-        if fetch_err is None:
-            self.meta = result.get("meta", {}) or {}
-            # persist a rotated refresh token back into the config entry.
-            # async_update_entry fires the update listener, but
-            # _async_options_updated ignores data-only changes so this does
-            # not reload the integration.
-            new_token = self.meta.pop("token", None)
-            if new_token and new_token != self.entry.data.get(CONF_TOKEN):
-                self.hass.config_entries.async_update_entry(
-                    self.entry,
-                    data={**self.entry.data, CONF_TOKEN: new_token},
-                )
-            self.vehicle = vehicles[0]
-            await self._update_sessions()
-            await self._update_trips()
+            if fetch_err is None:
+                self.meta = result.get("meta", {}) or {}
+                # persist a rotated refresh token back into the config entry.
+                # async_update_entry fires the update listener, but
+                # _async_options_updated ignores data-only changes so this
+                # does not reload the integration.
+                new_token = self.meta.pop("token", None)
+                if new_token and new_token != self.entry.data.get(CONF_TOKEN):
+                    self.hass.config_entries.async_update_entry(
+                        self.entry,
+                        data={**self.entry.data, CONF_TOKEN: new_token},
+                    )
+                self.vehicle = vehicles[0]
+                await self._update_sessions()
+                await self._update_trips()
 
-        await self._refresh_calendar_and_routes()
+            await self._refresh_calendar_and_routes()
 
-        if fetch_err is not None:
-            if otp_required:
-                # triggers HA's reauth flow instead of an endless retry
-                raise ConfigEntryAuthFailed(
-                    "Kia needs re-enrollment (one-time code)."
+            if fetch_err is not None:
+                if otp_required:
+                    # triggers HA's reauth flow instead of an endless retry
+                    raise ConfigEntryAuthFailed(
+                        "Kia needs re-enrollment (one-time code)."
+                    ) from fetch_err
+                if isinstance(fetch_err, kia_client.ClientError):
+                    raise UpdateFailed(str(fetch_err)) from fetch_err
+                raise UpdateFailed(
+                    f"{type(fetch_err).__name__}: {fetch_err}"
                 ) from fetch_err
-            if isinstance(fetch_err, kia_client.ClientError):
-                raise UpdateFailed(str(fetch_err)) from fetch_err
-            raise UpdateFailed(
-                f"{type(fetch_err).__name__}: {fetch_err}"
-            ) from fetch_err
 
-        await self._emit_alerts()
-        return self.vehicle
+            await self._emit_alerts()
+            return self.vehicle
 
     @staticmethod
     def _haversine_km(a_lat, a_lon, b_lat, b_lon) -> float | None:
-        if None in (a_lat, a_lon, b_lat, b_lon):
+        # Single choke point for every distance calc in this file -- harden
+        # here rather than at each of the many call sites that independently
+        # float()-parse a raw vehicle/zone coordinate. float("nan")/float("inf")
+        # both pass a bare `is None` check (and isinstance(x, float)), so a
+        # malformed live GPS reading could otherwise silently propagate NaN
+        # through every downstream distance/range comparison.
+        for v in (a_lat, a_lon, b_lat, b_lon):
+            if v is None or not isinstance(v, (int, float)) or isinstance(v, bool) \
+                    or not math.isfinite(v):
+                return None
+        if not (-90 <= a_lat <= 90 and -90 <= b_lat <= 90):
+            return None
+        if not (-180 <= a_lon <= 180 and -180 <= b_lon <= 180):
             return None
         r, p = 6371.0, math.pi / 180.0
         a = (
