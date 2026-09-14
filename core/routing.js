@@ -21,7 +21,15 @@
     return { lat: Number(p && (p.lat != null ? p.lat : p[0])),
              lon: Number(p && (p.lon != null ? p.lon : p[1])) };
   }
-  function _ok(p) { return isFinite(p.lat) && isFinite(p.lon); }
+  // isFinite() already excludes NaN/Infinity; also reject an out-of-range-
+  // but-finite coordinate (e.g. lat 500) -- this is the one gate every
+  // point goes through before it's included in a request sent to an
+  // external routing provider, so this is the right place to also reject a
+  // geographically nonsensical coordinate rather than forwarding it.
+  function _ok(p) {
+    return isFinite(p.lat) && isFinite(p.lon) &&
+      p.lat >= -90 && p.lat <= 90 && p.lon >= -180 && p.lon <= 180;
+  }
 
   /**
    * Build the matrix request for one origin -> many targets.
@@ -117,7 +125,13 @@
   }
 
   /**
-   * Build a forward-geocode request (address string -> lat/lon), US-biased.
+   * Build a forward-geocode request (address string -> lat/lon), global --
+   * not region-restricted at the request level. A previous version
+   * hardcoded countrycode:us/countrySet=US here, which would have silently
+   * failed to resolve any non-US address; a caller that needs to judge
+   * plausibility should do it by distance from a known point after the
+   * fact (see coordinator.py's _plausible_destination()), not by
+   * restricting the geocoder itself to one country.
    * @returns {{url, method:"GET"}|null}
    */
   function geocodeRequest(provider, text, apiKey) {
@@ -126,14 +140,14 @@
     if (provider === "geoapify") {
       return {
         url: "https://api.geoapify.com/v1/geocode/search?text=" + q +
-          "&limit=1&filter=countrycode:us&apiKey=" + encodeURIComponent(apiKey),
+          "&limit=1&apiKey=" + encodeURIComponent(apiKey),
         method: "GET"
       };
     }
     if (provider === "tomtom") {
       return {
         url: "https://api.tomtom.com/search/2/geocode/" + q +
-          ".json?limit=1&countrySet=US&key=" + encodeURIComponent(apiKey),
+          ".json?limit=1&key=" + encodeURIComponent(apiKey),
         method: "GET"
       };
     }

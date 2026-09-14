@@ -69,6 +69,21 @@ _LOGGER = logging.getLogger(__name__)
 REGIONS = ["USA", "CA", "EU", "AU", "NZ", "IN", "BR", "CN"]
 BRANDS = ["KIA", "HYUNDAI", "GENESIS"]
 
+def _account_uid(region: str, brand: str, username: str, vin: str) -> str:
+    """The config-entry identity: one entry per account, VIN-scoped once a
+    VIN is set (needed so a multi-vehicle account can have one entry per
+    vehicle -- see kia_client.fetch()/run_command()'s VIN-required guards).
+    A blank VIN keeps the original account-only form, so an ordinary
+    single-vehicle setup is unaffected. Shared by the initial setup flow
+    and the options flow's VIN-change handler so the two can never compute
+    this differently."""
+    uid = f"{region}:{brand}:{username.lower()}"
+    vin = (vin or "").strip().upper()
+    if vin:
+        uid += f":{vin}"
+    return uid
+
+
 USER_SCHEMA = vol.Schema(
     {
         vol.Required("username"): str,
@@ -141,14 +156,12 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # single-vehicle setup (still the common case) behaves exactly
             # as before and a second blank-VIN attempt still correctly
             # aborts as a real duplicate.
-            uid = (
-                f"{user_input[CONF_REGION]}:{user_input[CONF_BRAND]}:"
-                f"{user_input['username'].lower()}"
+            await self.async_set_unique_id(
+                _account_uid(
+                    user_input[CONF_REGION], user_input[CONF_BRAND],
+                    user_input["username"], user_input.get(CONF_VIN, ""),
+                )
             )
-            vin = (user_input.get(CONF_VIN) or "").strip().upper()
-            if vin:
-                uid += f":{vin}"
-            await self.async_set_unique_id(uid)
             self._abort_if_unique_id_configured()
             try:
                 result = await self.hass.async_add_executor_job(self._try_login)
@@ -248,6 +261,8 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
         self._entry = config_entry
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+        vin_default = self._entry.data.get(CONF_VIN, "")
         if user_input is not None:
             # VIN lives in entry.data (set at initial setup), not
             # entry.options like everything else this flow edits -- pull it
@@ -256,22 +271,50 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
             # without a VIN (or with the wrong one) had no way to fix that
             # short of deleting and recreating the whole config entry.
             new_vin = (user_input.pop(CONF_VIN, "") or "").strip().upper()
+            vin_default = new_vin
             if new_vin != (self._entry.data.get(CONF_VIN) or "").strip().upper():
-                self.hass.config_entries.async_update_entry(
-                    self._entry, data={**self._entry.data, CONF_VIN: new_vin}
+                target_uid = _account_uid(
+                    self._entry.data.get(CONF_REGION, "USA"),
+                    self._entry.data.get(CONF_BRAND, "KIA"),
+                    self._entry.data.get("username", ""),
+                    new_vin,
                 )
-            return self.async_create_entry(title="", data=user_input)
+                # Updating entry.data[VIN] alone does NOT update entry.
+                # unique_id -- HA's own duplicate-unique_id guard inside
+                # async_update_entry is (as of when this was checked) only a
+                # deprecated warning-log, not an actual block. Without this
+                # explicit check, changing this entry's VIN to match one
+                # already used by another entry would leave two coordinators
+                # silently polling/alerting/logging sessions for the exact
+                # same physical vehicle.
+                other = next(
+                    (
+                        e for e in self.hass.config_entries.async_entries(DOMAIN)
+                        if e.entry_id != self._entry.entry_id
+                        and e.unique_id == target_uid
+                    ),
+                    None,
+                )
+                if other is not None:
+                    errors[CONF_VIN] = "vin_in_use"
+                else:
+                    self.hass.config_entries.async_update_entry(
+                        self._entry,
+                        data={**self._entry.data, CONF_VIN: new_vin},
+                        unique_id=target_uid,
+                    )
+            if not errors:
+                return self.async_create_entry(title="", data=user_input)
         opts = dict(self._entry.options)
         return self.async_show_form(
             step_id="init",
+            errors=errors,
             data_schema=vol.Schema(
                 {
                     vol.Optional(
                         CONF_VIN,
-                        default=self._entry.data.get(CONF_VIN, ""),
-                        description={
-                            "suggested_value": self._entry.data.get(CONF_VIN, "")
-                        },
+                        default=vin_default,
+                        description={"suggested_value": vin_default},
                     ): str,
                     vol.Optional(
                         "scan_interval",

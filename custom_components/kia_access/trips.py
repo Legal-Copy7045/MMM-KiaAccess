@@ -32,7 +32,18 @@ def _round(n, dp=2):
 
 
 def haversine_km(a_lat, a_lon, b_lat, b_lon):
-    if None in (a_lat, a_lon, b_lat, b_lon):
+    # None already handled; also reject NaN/Infinity (both are real floats
+    # that pass a bare None check, and their trig math can raise a "math
+    # domain error" downstream) and an out-of-range-but-finite lat/lon --
+    # the one caller here (_close()) already passes a None result through
+    # _round() safely, so extending this is a no-op for that call site and
+    # closes the gap for anything else that might reach this function.
+    for v in (a_lat, a_lon, b_lat, b_lon):
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
+            return None
+    if not (-90 <= a_lat <= 90 and -90 <= b_lat <= 90):
+        return None
+    if not (-180 <= a_lon <= 180 and -180 <= b_lon <= 180):
         return None
     r, p = 6371, math.pi / 180
     d_lat = (b_lat - a_lat) * p

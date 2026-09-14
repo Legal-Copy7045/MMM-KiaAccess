@@ -45,6 +45,7 @@
         "title": "Kia Access options",
         "description": "By default every update reads Kia's server-side cache, which is gentle on the car's 12V battery. Turn on 'Poll the car directly' only if you need up-to-the-minute data — it wakes the vehicle on every poll and can flatten the 12V battery if the car is parked for long periods.",
         "data": {
+          "vin": "VIN",
           "scan_interval": "Poll interval (minutes)",
           "poll_car_directly": "Poll the car directly (wakes the vehicle — drains the 12V battery)",
           "force_refresh_timeout": "Live wake-up wait (seconds) — only used when polling directly",
@@ -68,15 +69,16 @@
           "away_cost_grace_min": "Away cost grace (minutes)"
         },
         "data_description": {
+          "vin": "Which vehicle this entry tracks. Required once the account has more than one vehicle (each needs its own config entry) — blank is fine for a single-vehicle account. Changing this moves the entry to a different vehicle; it's rejected if another Kia Access entry already uses that VIN.",
           "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
           "force_refresh_timeout": "How long to wait for the car to answer before falling back to the cached copy for that poll.",
-          "calendar_entities": "Events with a location on these calendars are geocoded and added to the reachable-destinations list / range-map pins. US locations only.",
+          "calendar_entities": "Events with a location on these calendars are geocoded and added to the reachable-destinations list / range-map pins. Destinations more than ~500 km from zone.home are skipped as implausible.",
           "drive_time_provider": "Estimate (default) uses straight-line distance. Geoapify or TomTom return real road distance and live-traffic drive time via one matrix call per poll (free tiers are plenty; needs the matching API key).",
           "routing_api_key": "Used for live drive times AND for geocoding calendar event locations. A Geoapify key works for both even if the drive-time provider is left on “estimate” (Nominatim increasingly blocks Home Assistant).",
           "drive_time_routes": "TomTom only: one routing call per destination each refresh so the reachable list can show “via <roads>” and colour the ETA by traffic delay. Turn off for one cheap matrix call (time + distance only).",
           "static_destinations": "Always-shown destinations for the reachable list / driving-times panel, one per line as \"Name | address\" — e.g. \"White House | 1600 Pennsylvania Ave NW, Washington, DC\". Geocoded once and cached.",
           "geocoding_api_key": "A Geoapify key used only to turn calendar / static addresses into coordinates. Set this if your routing provider is TomTom (TomTom's Search API is not on every key) or you left the provider on “estimate”.",
-          "zone_entities": "Narrows which Home Assistant zones appear on the MagicMirror driving-times panel. One per line by entity id or name (“zone.home” / “Work”); a line starting with “-” excludes that zone. Blank = show every US zone. The dashboard and sensor always show every US zone.",
+          "zone_entities": "Narrows which Home Assistant zones appear on the MagicMirror driving-times panel. One per line by entity id or name (“zone.home” / “Work”); a line starting with “-” excludes that zone. Blank = show every zone within ~500 km of zone.home. The dashboard and sensor always show every such zone.",
           "block_automated_climate": "Reject start_climate / stop_climate unless the call comes straight from a person (the card, the button, Developer Tools, a script you run by hand). Automations, scripts triggered by automations, scenes and the preconditioning blueprints are blocked. Does not touch the car's own scheduled climate set in the Kia app.",
           "away_price_per_kwh": "Rate for charge sessions that start outside the home-charging zone (public chargers). 0 = fall back to the home rate.",
           "home_charge_zone": "The zone that counts as “home” for charging costs — e.g. zone.home, or a dedicated zone around your charger. Leave blank to cost every session at the home rate.",
@@ -85,6 +87,9 @@
           "away_cost_grace_min": "How long after unplugging the away cost sensor may still update — public networks often bill a few minutes to an hour later."
         }
       }
+    },
+    "error": {
+      "vin_in_use": "Another Kia Access entry already uses this VIN — each vehicle needs its own entry."
     }
   }
 }

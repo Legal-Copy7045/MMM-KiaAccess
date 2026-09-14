@@ -32,6 +32,17 @@
   }
   function haversineKm(aLat, aLon, bLat, bLon) {
     if (aLat == null || aLon == null || bLat == null || bLon == null) return null;
+    // null already handled; also reject NaN/Infinity (both pass a bare
+    // != null check and their trig math can produce NaN/Infinity results)
+    // and an out-of-range-but-finite lat/lon -- the one caller here
+    // (close()) already passes a null result through round() safely, so
+    // extending this is a no-op for that call site and closes the gap for
+    // anything else that might reach this function.
+    if (typeof aLat !== "number" || typeof aLon !== "number" ||
+        typeof bLat !== "number" || typeof bLon !== "number") return null;
+    if (!isFinite(aLat) || !isFinite(aLon) || !isFinite(bLat) || !isFinite(bLon)) return null;
+    if (aLat < -90 || aLat > 90 || bLat < -90 || bLat > 90) return null;
+    if (aLon < -180 || aLon > 180 || bLon < -180 || bLon > 180) return null;
     var R = 6371, p = Math.PI / 180;
     var dLat = (bLat - aLat) * p, dLon = (bLon - aLon) * p;
     var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +

@@ -562,4 +562,79 @@ assert _uid_vin1 != _uid_vin2, (
 )
 assert _uid_no_vin != _uid_vin1, "a blank-VIN entry and a VIN-scoped entry for the same account must differ"
 
+# Options flow VIN edit: changing entry.data[VIN] must ALSO keep entry.
+# unique_id in sync, and must be REJECTED (not silently allowed) if another
+# entry already owns the target VIN -- otherwise two entries could end up
+# silently targeting the same physical vehicle (two coordinators polling/
+# alerting/logging sessions for one car). HA's own async_update_entry
+# duplicate-unique_id guard is (as of the HA version this was checked
+# against) only a deprecated warning log, not an actual block, so this
+# project's own explicit check is load-bearing, not a redundant safety net.
+class _FakeConfigEntries:
+    def __init__(self, entries):
+        self._entries = entries
+        self.updates = []
+
+    def async_entries(self, domain):
+        return list(self._entries)
+
+    def async_update_entry(self, entry, data=None, unique_id=None, **kw):
+        self.updates.append({"entry": entry, "data": data, "unique_id": unique_id})
+        if data is not None:
+            object.__setattr__(entry, "data", data)
+        if unique_id is not None:
+            object.__setattr__(entry, "unique_id", unique_id)
+        return True
+
+
+def _fake_entry(entry_id, unique_id, data):
+    return type("Entry", (), {
+        "entry_id": entry_id, "unique_id": unique_id, "data": dict(data), "options": {},
+    })()
+
+
+def _run_options_vin_change(new_vin, other_entries):
+    entry_a = _fake_entry(
+        "a", "USA:KIA:user@example.com:VIN1",
+        {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+    )
+    flow = object.__new__(cf_mod.KiaAccessOptionsFlow)
+    flow._entry = entry_a
+    flow.flow_id = "test"
+    flow.handler = "kia_access"
+    flow.hass = type("H", (), {
+        "config_entries": _FakeConfigEntries([entry_a, *other_entries])
+    })()
+    user_input = {"vin": new_vin, "scan_interval": 30, "poll_car_directly": False,
+                  "force_refresh_timeout": 45, "block_automated_climate": False,
+                  "price_per_kwh": 0, "away_price_per_kwh": 0, "home_charge_zone": "",
+                  "charge_rates": "", "away_cost_grace_min": 90, "capacity_kwh": 0,
+                  "range_factor": 1, "range_reserve_pct": 15, "calendar_entities": "",
+                  "calendar_lookahead_hours": 24, "drive_time_provider": "estimate",
+                  "routing_api_key": "", "drive_time_routes": True,
+                  "static_destinations": "", "geocoding_api_key": "", "zone_entities": "",
+                  "away_cost_entity": ""}
+    result = asyncio.run(cf_mod.KiaAccessOptionsFlow.async_step_init(flow, user_input))
+    return result, entry_a, flow.hass.config_entries
+
+
+# a VIN that's free must succeed and update BOTH data and unique_id together
+res, entry_a, ce = _run_options_vin_change("VIN2", [])
+assert res["type"] == "create_entry", "a free VIN must be accepted"
+assert entry_a.data["vin"] == "VIN2"
+assert entry_a.unique_id == "USA:KIA:user@example.com:VIN2", (
+    "unique_id must be updated alongside data -- leaving it stale is exactly "
+    "the bug this fix closes"
+)
+
+# a VIN already owned by ANOTHER entry must be rejected, not silently allowed
+entry_b = _fake_entry("b", "USA:KIA:user@example.com:VIN2", {"vin": "VIN2"})
+res2, entry_a2, ce2 = _run_options_vin_change("VIN2", [entry_b])
+assert res2["type"] == "form" and res2.get("errors", {}).get("vin") == "vin_in_use", (
+    "changing to a VIN already used by another entry must be rejected with a "
+    "form error, not silently accepted"
+)
+assert entry_a2.data.get("vin") != "VIN2", "the collision must not have been applied"
+assert not ce2.updates, "no update should have been attempted once a collision was detected"
+
 print("ha_import_check: ok")
