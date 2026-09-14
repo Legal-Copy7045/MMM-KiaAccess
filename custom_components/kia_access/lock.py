@@ -41,11 +41,25 @@ class KiaAccessLock(KiaAccessEntity, LockEntity):
     async def async_lock(self, **kwargs) -> None:
         self._optimistic = True
         self.async_write_ha_state()
-        await self.coordinator.async_run_command("lock")
-        self._optimistic = None
+        try:
+            await self.coordinator.async_run_command("lock")
+        finally:
+            # Must run even when the command raises (a real failure, or a
+            # CommandUnconfirmed timeout) -- without this, is_locked() keeps
+            # returning the OPTIMISTIC value forever (it's checked before
+            # the real data unconditionally), showing "Locked" even though
+            # the command may never have reached the car. async_run_command
+            # itself already triggers a coordinator refresh in its own
+            # finally block before this one runs, so the real state is
+            # already current by the time _optimistic clears here.
+            self._optimistic = None
+            self.async_write_ha_state()
 
     async def async_unlock(self, **kwargs) -> None:
         self._optimistic = False
         self.async_write_ha_state()
-        await self.coordinator.async_run_command("unlock")
-        self._optimistic = None
+        try:
+            await self.coordinator.async_run_command("unlock")
+        finally:
+            self._optimistic = None
+            self.async_write_ha_state()

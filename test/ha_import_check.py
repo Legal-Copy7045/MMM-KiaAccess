@@ -300,6 +300,54 @@ assert _ent.device_info["name"] == "My EV9", (
 assert _ent.device_info["model"] == "EV9"
 assert _ent.device_info["serial_number"] == "5XY123"
 
+# lock.py: a FAILED lock/unlock command must not leave is_locked stuck at
+# the optimistic value forever -- is_locked checks _optimistic before the
+# real data unconditionally, so if _optimistic never clears (no try/finally
+# around the command await), a failed "lock" call would show "Locked" in
+# HA indefinitely even if the car never actually received it.
+lock_mod = importlib.import_module(f"{pkg}.lock")
+
+
+class _FakeLockCoordinator:
+    def __init__(self):
+        self.vehicle = {"is_locked": False}
+        self.fail_next = False
+
+    async def async_run_command(self, command, *a, **kw):
+        if self.fail_next:
+            raise RuntimeError("simulated command failure")
+
+
+class _FakeLock(lock_mod.KiaAccessLock):
+    def __init__(self, coordinator):
+        self.coordinator = coordinator
+        self._optimistic = None
+
+    def async_write_ha_state(self):
+        pass
+
+
+_lock_coord = _FakeLockCoordinator()
+_lock = _FakeLock(_lock_coord)
+
+asyncio.run(_lock.async_lock())
+assert _lock._optimistic is None, "optimistic flag must clear after a successful command"
+assert _lock.is_locked is False, (
+    "with _optimistic cleared, is_locked must read the real (still-False) "
+    "data, not stay stuck at the optimistic True"
+)
+
+_lock_coord.fail_next = True
+try:
+    asyncio.run(_lock.async_lock())
+    raise AssertionError("expected the simulated failure to propagate")
+except RuntimeError:
+    pass
+assert _lock._optimistic is None, (
+    "a FAILED lock command must not leave is_locked stuck showing the "
+    "optimistic value forever -- _optimistic must clear even on failure"
+)
+
 _btn = importlib.import_module(f"{pkg}.button")
 assert hasattr(_btn, "KiaAccessRefreshButton")
 
