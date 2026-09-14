@@ -36,6 +36,20 @@ assert.strictEqual(
 const g2 = R.matrixRequest("geoapify", origin, [targets[0], { lat: null, lon: 2 }], "KEY");
 assert.strictEqual(JSON.parse(g2.body).targets.length, 1);
 
+// _ok() must reject an out-of-range-but-finite coordinate too, not just
+// null -- these would otherwise be forwarded into a request sent to an
+// external routing provider
+assert.strictEqual(
+  R.matrixRequest("geoapify", { lat: 500, lon: 1 }, targets, "KEY"), null,
+  "out-of-range origin latitude");
+assert.strictEqual(
+  R.matrixRequest("geoapify", { lat: 1, lon: 500 }, targets, "KEY"), null,
+  "out-of-range origin longitude");
+const g3 = R.matrixRequest("geoapify", origin, [targets[0], { lat: 500, lon: 2 }], "KEY");
+assert.strictEqual(
+  JSON.parse(g3.body).targets.length, 1,
+  "an out-of-range target must be filtered out, not just a null one");
+
 // ---- parseMatrix: geoapify ----
 const gResp = {
   sources_to_targets: [[
@@ -68,12 +82,19 @@ assert.deepStrictEqual(R.parseMatrix("tomtom", {}, 1), [null]);
 assert.deepStrictEqual(R.parseMatrix("nope", tResp, 2), [null, null]);
 
 // ---- geocodeRequest / parseGeocode ----
+// global, not region-restricted at the request level -- a caller judges
+// plausibility by distance after the fact (coordinator.py's
+// _plausible_destination()), not by the geocoder itself refusing non-US
+// addresses (a previous version hardcoded countrycode:us/countrySet=US,
+// which silently failed to resolve any non-US address)
 const gg = R.geocodeRequest("geoapify", "100 Main St, Saxonburg PA", "K");
 assert.strictEqual(gg.method, "GET");
 assert.ok(gg.url.includes("geocode/search?text=100%20Main"));
-assert.ok(gg.url.includes("countrycode:us") && gg.url.includes("apiKey=K"));
+assert.ok(gg.url.includes("apiKey=K"));
+assert.ok(!gg.url.includes("countrycode"), "must not be region-restricted");
 const tg = R.geocodeRequest("tomtom", "100 Main St", "K2");
-assert.ok(tg.url.includes("/geocode/100%20Main%20St.json") && tg.url.includes("countrySet=US"));
+assert.ok(tg.url.includes("/geocode/100%20Main%20St.json") && tg.url.includes("key=K2"));
+assert.ok(!tg.url.includes("countrySet"), "must not be region-restricted");
 assert.strictEqual(R.geocodeRequest("geoapify", "", "K"), null);
 assert.strictEqual(R.geocodeRequest("nope", "x", "K"), null);
 

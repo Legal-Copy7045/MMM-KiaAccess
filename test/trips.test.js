@@ -5,6 +5,15 @@ const T = require("../core/trips.js");
 const MIN = 60000;
 const near = (a, b, tol) => Math.abs(a - b) <= (tol || 0.1);
 
+// haversineKm must never throw or propagate NaN/Infinity/out-of-range --
+// the one caller (close()) already passes a null result through round()
+// safely, so it degrades to null (matching the existing null-input case)
+assert.ok(T.haversineKm(40.7539, -79.8103, 40.4406, -79.9959) !== null);
+assert.strictEqual(T.haversineKm(NaN, -79.8, 40.4, -79.9), null);
+assert.strictEqual(T.haversineKm(Infinity, -79.8, 40.4, -79.9), null);
+assert.strictEqual(T.haversineKm(500, -79.8, 40.4, -79.9), null, "out-of-range latitude");
+assert.strictEqual(T.haversineKm(40.7, -200, 40.4, -79.9), null, "out-of-range longitude");
+
 // feed a list of samples through update(), collect the closed trips
 function run(samples, opts) {
   let open = null;

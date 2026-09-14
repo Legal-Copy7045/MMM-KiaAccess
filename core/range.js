@@ -44,6 +44,19 @@
 
   /** great-circle distance in km */
   function haversineKm(lat1, lon1, lat2, lon2) {
+    // NaN/Infinity are real numbers that would otherwise reach the trig
+    // math below, and an out-of-range-but-finite value would produce a
+    // geometrically nonsensical distance. Every current caller does direct
+    // arithmetic/comparison on this return value with no null-handling, so
+    // (unlike trips.js's haversineKm) this can't safely return null here --
+    // 0 ("distance unknown, don't treat it as huge or throw") is the
+    // non-crashing fallback that keeps every existing caller working
+    // unchanged.
+    if (typeof lat1 !== "number" || typeof lon1 !== "number" ||
+        typeof lat2 !== "number" || typeof lon2 !== "number") return 0;
+    if (!isFinite(lat1) || !isFinite(lon1) || !isFinite(lat2) || !isFinite(lon2)) return 0;
+    if (lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90) return 0;
+    if (lon1 < -180 || lon1 > 180 || lon2 < -180 || lon2 > 180) return 0;
     var dLat = (lat2 - lat1) * D2R;
     var dLon = (lon2 - lon1) * D2R;
     var a =

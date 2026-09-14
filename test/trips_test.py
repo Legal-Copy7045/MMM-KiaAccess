@@ -13,6 +13,17 @@ def near(a, b, tol=0.1):
     return abs(a - b) <= tol
 
 
+# haversine_km must never raise or propagate NaN/Infinity/out-of-range --
+# the one caller (_close()) already passes a None result through _round()
+# safely, so it degrades to None (matching the existing None-input case)
+assert T.haversine_km(40.7539, -79.8103, 40.4406, -79.9959) is not None
+assert T.haversine_km(float("nan"), -79.8, 40.4, -79.9) is None
+assert T.haversine_km(float("inf"), -79.8, 40.4, -79.9) is None
+assert T.haversine_km(500, -79.8, 40.4, -79.9) is None, "out-of-range latitude"
+assert T.haversine_km(40.7, -200, 40.4, -79.9) is None, "out-of-range longitude"
+assert T.haversine_km(True, -79.8, 40.4, -79.9) is None, "bool must not pass as a coordinate"
+
+
 def run(samples, opts=None):
     open_t = None
     closed = []

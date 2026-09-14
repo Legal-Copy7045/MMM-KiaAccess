@@ -34,7 +34,15 @@ def _pt(p):
 
 
 def _ok(pt):
-    return pt[0] is not None and pt[1] is not None
+    # _num() already excludes NaN/Infinity, but not an out-of-range-but-
+    # finite value (e.g. lat 500) -- _ok() is the one gate every point goes
+    # through before it's included in a request sent to an external routing
+    # provider, so this is the right place to also reject a geographically
+    # nonsensical coordinate rather than forwarding it to that API.
+    return (
+        pt[0] is not None and pt[1] is not None
+        and -90 <= pt[0] <= 90 and -180 <= pt[1] <= 180
+    )
 
 
 def matrix_request(provider, origin, targets, api_key, o=None):
@@ -131,7 +139,16 @@ def parse_matrix(provider, data, target_count):
 
 
 def geocode_request(provider, text, api_key):
-    """Forward-geocode request (address -> lat/lon), US-biased.
+    """Forward-geocode request (address -> lat/lon), global.
+
+    Not region-restricted at the request level -- the caller (coordinator.py
+    _plausible_destination()) already filters an implausible result by
+    distance from home after the fact, so restricting the geocoder itself
+    to one country would only ever break it for every other region this
+    project supports, for no benefit (a previous version hardcoded
+    countrycode:us/countrySet=US here, silently failing to resolve any
+    non-US address for a EU/AU/etc. user even before the coordinator ever
+    got a chance to judge plausibility).
 
     Returns {"url", "method": "GET"} or None.
     """
@@ -141,13 +158,13 @@ def geocode_request(provider, text, api_key):
     if provider == "geoapify":
         return {
             "url": "https://api.geoapify.com/v1/geocode/search?text=" + q
-            + "&limit=1&filter=countrycode:us&apiKey=" + str(api_key),
+            + "&limit=1&apiKey=" + str(api_key),
             "method": "GET",
         }
     if provider == "tomtom":
         return {
             "url": "https://api.tomtom.com/search/2/geocode/" + q
-            + ".json?limit=1&countrySet=US&key=" + str(api_key),
+            + ".json?limit=1&key=" + str(api_key),
             "method": "GET",
         }
     return None

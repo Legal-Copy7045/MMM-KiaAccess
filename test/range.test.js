@@ -26,6 +26,15 @@ assert.ok(dHome > 28 && dHome < 40, dHome);
 const b = R.bearingDeg(40.7539, -79.8103, 40.4406, -79.9959);
 assert.ok(b > 180 && b < 260, "bearing SW-ish: " + b);
 
+// haversineKm must never throw or propagate NaN/Infinity/out-of-range --
+// every current caller does direct arithmetic on its return value with no
+// null-handling, so it degrades to 0 (not null, not a crash) instead
+assert.strictEqual(R.haversineKm(NaN, -79.8, 40.4, -79.9), 0);
+assert.strictEqual(R.haversineKm(Infinity, -79.8, 40.4, -79.9), 0);
+assert.strictEqual(R.haversineKm(500, -79.8, 40.4, -79.9), 0, "out-of-range latitude");
+assert.strictEqual(R.haversineKm(40.7, -200, 40.4, -79.9), 0, "out-of-range longitude");
+assert.strictEqual(R.haversineKm(null, -79.8, 40.4, -79.9), 0);
+
 // ---- poiStatus: sorted, reachable flag, margin ----
 const car = [40.7539, -79.8103];
 const pois = [

@@ -51,6 +51,22 @@ D2R = math.pi / 180
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
+    # NaN/Infinity are real floats that would otherwise reach the trig math
+    # below (risking a "math domain error" from math.sqrt on a pathological
+    # input) and an out-of-range-but-finite value would produce a
+    # geometrically nonsensical distance. Every current caller does direct
+    # arithmetic/comparison on this return value with no None-handling, so
+    # (unlike trips.py's / coordinator.py's haversine_km) this can't safely
+    # return None here -- 0.0 ("distance unknown, don't treat it as huge or
+    # crash") is the non-crashing fallback that keeps every existing caller
+    # working unchanged.
+    for v in (lat1, lon1, lat2, lon2):
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
+            return 0.0
+    if not (-90 <= lat1 <= 90 and -90 <= lat2 <= 90):
+        return 0.0
+    if not (-180 <= lon1 <= 180 and -180 <= lon2 <= 180):
+        return 0.0
     d_lat = (lat2 - lat1) * D2R
     d_lon = (lon2 - lon1) * D2R
     a = (

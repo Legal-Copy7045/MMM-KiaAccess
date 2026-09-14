@@ -35,6 +35,22 @@ assert R.matrix_request("geoapify", {"lat": None, "lon": 1}, targets, "KEY") is 
 g2 = R.matrix_request("geoapify", origin, [targets[0], {"lat": None, "lon": 2}], "KEY")
 assert len(json.loads(g2["body"])["targets"]) == 1
 
+# _ok() must reject an out-of-range-but-finite coordinate, not just None --
+# these would otherwise be forwarded straight into a request sent to an
+# external routing provider
+assert R.matrix_request("geoapify", {"lat": 500, "lon": 1}, targets, "KEY") is None, (
+    "out-of-range origin latitude"
+)
+assert R.matrix_request("geoapify", {"lat": 1, "lon": 500}, targets, "KEY") is None, (
+    "out-of-range origin longitude"
+)
+g3 = R.matrix_request(
+    "geoapify", origin, [targets[0], {"lat": 500, "lon": 2}], "KEY"
+)
+assert len(json.loads(g3["body"])["targets"]) == 1, (
+    "an out-of-range target must be filtered out, not just an all-None one"
+)
+
 # parse_matrix: geoapify
 g_resp = {
     "sources_to_targets": [[
@@ -66,13 +82,19 @@ assert R.parse_matrix("geoapify", None, 2) == [None, None]
 assert R.parse_matrix("tomtom", {}, 1) == [None]
 assert R.parse_matrix("nope", t_resp, 2) == [None, None]
 
-# geocode_request / parse_geocode
+# geocode_request / parse_geocode -- global, not region-restricted at the
+# request level (a caller judges plausibility by distance after the fact,
+# via coordinator.py's _plausible_destination(); a previous version
+# hardcoded countrycode:us/countrySet=US, silently failing to resolve any
+# non-US address)
 gg = R.geocode_request("geoapify", "100 Main St, Saxonburg PA", "K")
 assert gg["method"] == "GET"
 assert "geocode/search?text=100%20Main" in gg["url"]
-assert "countrycode:us" in gg["url"] and "apiKey=K" in gg["url"]
+assert "apiKey=K" in gg["url"]
+assert "countrycode" not in gg["url"], "must not be region-restricted"
 tg = R.geocode_request("tomtom", "100 Main St", "K2")
-assert "/geocode/100%20Main%20St.json" in tg["url"] and "countrySet=US" in tg["url"]
+assert "/geocode/100%20Main%20St.json" in tg["url"] and "key=K2" in tg["url"]
+assert "countrySet" not in tg["url"], "must not be region-restricted"
 assert R.geocode_request("geoapify", "", "K") is None
 assert R.geocode_request("nope", "x", "K") is None
 
