@@ -106,6 +106,42 @@ assert _run_fetch({"refresh": True, "forceRefreshTimeout": -1}).woke is False
 assert _run_fetch({"forceRefreshTimeout": None}).woke is True, "legacy default wakes"
 
 
+# --- fetch(): multiple vehicles + no VIN must refuse the read, not silently
+# pick [0] -- which physical car that is isn't guaranteed stable between
+# polls (the account API's own vehicle order isn't guaranteed), so reads
+# get the same "explicit VIN required" treatment run_command() already has
+# for control commands. A single vehicle, or a VIN that's already narrowed
+# _select_vehicles() down to one match, must still work exactly as before. ---
+def _run_fetch_with_vehicles(job, veh_list):
+    vm = _VM()
+    orig_connect = kia_client.connect
+    orig_select = kia_client._select_vehicles
+    kia_client.connect = lambda *a, **k: (vm, None)
+    kia_client._select_vehicles = lambda *a, **k: veh_list
+    try:
+        return kia_client.fetch(job)
+    finally:
+        kia_client.connect = orig_connect
+        kia_client._select_vehicles = orig_select
+
+
+one_veh = [_Veh(last_updated_at="x", VIN="VIN1")]
+res = _run_fetch_with_vehicles({}, one_veh)
+assert res["ok"] is True and len(res["vehicles"]) == 1, "a single vehicle must still work with no VIN"
+
+two_veh = [_Veh(last_updated_at="x", VIN="VIN1"), _Veh(last_updated_at="y", VIN="VIN2")]
+try:
+    _run_fetch_with_vehicles({}, two_veh)
+    raise AssertionError("fetch() should refuse an ambiguous multi-vehicle read with no VIN")
+except kia_client.ClientError as e:
+    assert "VIN" in str(e)
+
+# a VIN already narrows _select_vehicles() itself down to one match in the
+# real implementation -- this fake stands in for that already-filtered result
+res2 = _run_fetch_with_vehicles({"vin": "VIN2"}, [_Veh(last_updated_at="y", VIN="VIN2")])
+assert res2["ok"] is True and len(res2["vehicles"]) == 1, "an explicit VIN must still work"
+
+
 # --- fetch(): a still-running wake-up thread past the timeout must NOT be
 # read from -- it may still be mutating `vm` in place (a data race), so
 # fetch() must raise instead of racily calling update_all_vehicles_with_cached_
@@ -174,6 +210,7 @@ class _CmdVM:
 
     def lock(self, vehicle_id):
         self._vehicles[vehicle_id].lock()
+        return "fake-xid-123"  # VehicleManager's real methods return Kia's job id
 
 
 def _run_command(job, vehicles):
@@ -188,8 +225,11 @@ def _run_command(job, vehicles):
 
 # single vehicle, no VIN configured -> fine, defaults to it
 one = [_CmdVeh("VIN1")]
-_run_command({"command": "lock"}, one)
+res = _run_command({"command": "lock"}, one)
 assert one[0].locked is True
+assert res["actionId"] == "fake-xid-123", (
+    "the job id VehicleManager's real methods return must be captured, not discarded"
+)
 
 # two vehicles, no VIN configured -> must refuse rather than guess
 two = [_CmdVeh("VIN1"), _CmdVeh("VIN2")]
@@ -204,6 +244,43 @@ assert two[0].locked is False and two[1].locked is False, "neither vehicle shoul
 two2 = [_CmdVeh("VIN1"), _CmdVeh("VIN2")]
 _run_command({"command": "lock", "vin": "VIN2"}, two2)
 assert two2[0].locked is False and two2[1].locked is True
+
+# a request timeout mid-command is genuinely ambiguous (the vehicle may or
+# may not have received it) -- must raise CommandUnconfirmed, not a flat
+# ClientError, so a caller can distinguish "definitely failed" from
+# "unknown, don't assume a retry is free"
+from hyundai_kia_connect_api.exceptions import RequestTimeoutError  # noqa: E402
+
+
+class _TimeoutVeh(_CmdVeh):
+    def lock(self):
+        raise RequestTimeoutError("simulated read timeout")
+
+
+timeout_veh = [_TimeoutVeh("VIN1")]
+try:
+    _run_command({"command": "lock"}, timeout_veh)
+    raise AssertionError("a request timeout must raise CommandUnconfirmed")
+except kia_client.CommandUnconfirmed as e:
+    assert isinstance(e, kia_client.ClientError), (
+        "CommandUnconfirmed must still be catchable as a plain ClientError"
+    )
+    assert "unknown" in str(e).lower() or "timed out" in str(e).lower()
+
+# a real, unambiguous rejection must NOT be reported as unconfirmed
+class _RejectVeh(_CmdVeh):
+    def lock(self):
+        raise ValueError("simulated hard rejection (e.g. bad PIN)")
+
+
+reject_veh = [_RejectVeh("VIN1")]
+try:
+    _run_command({"command": "lock"}, reject_veh)
+    raise AssertionError("a clear rejection must raise plain ClientError")
+except kia_client.CommandUnconfirmed:
+    raise AssertionError("a clear rejection must NOT be reported as unconfirmed")
+except kia_client.ClientError:
+    pass
 
 # --- run_command(): a region-ambiguous option (set_temp) must reject an
 # explicit value that's wrong for the vehicle's actual region, not just
