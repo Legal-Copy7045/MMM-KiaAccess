@@ -54,6 +54,41 @@ assert.ok(pt.includes('kia_stale{vin="ABC"} 1'));
   assert.ok(body.d.includes('kia_ev_battery_percentage{vin="Z"} 63'), body.d);
   assert.ok(body.d.includes("kia_stale{vin=\"Z\"} 0"));
 
+  // ---- PromServer, rotate mode: several vehicles sharing one server/port
+  // must each keep their own label-series -- the last vehicle processed
+  // must NOT silently overwrite the others' numbers (nor appear mislabeled
+  // under whichever vehicle's vin happened to create the server first). ----
+  const srv2 = new E.PromServer({ port: 9273, prefix: "kia", labels: {} });
+  srv2.start();
+  const flatA = { "vehicle.ev_battery_percentage": 40 };
+  const flatB = { "vehicle.ev_battery_percentage": 90 };
+  srv2.setSnapshot(flatA, { stale: false }, "VIN1");
+  srv2.setSnapshot(flatB, { stale: true }, "VIN2");
+  await new Promise((r) => setTimeout(r, 150));
+  const body2 = await new Promise((resolve, reject) => {
+    http.get("http://127.0.0.1:9273/metrics", (res) => {
+      let d = "";
+      res.on("data", (c) => (d += c));
+      res.on("end", () => resolve(d));
+    }).on("error", reject);
+  });
+  srv2.stop();
+  assert.ok(body2.includes('kia_ev_battery_percentage{vin="VIN1"} 40'), body2);
+  assert.ok(body2.includes('kia_ev_battery_percentage{vin="VIN2"} 90'), body2);
+  assert.ok(body2.includes('kia_stale{vin="VIN2"} 1'), body2);
+  // exactly one TYPE line per metric name, not one per vehicle -- Prometheus
+  // exposition format expects a metric's TYPE declared once
+  assert.strictEqual(
+    (body2.match(/# TYPE kia_ev_battery_percentage gauge/g) || []).length, 1,
+    body2
+  );
+
+  // updating one vehicle's snapshot again must not disturb the other's
+  srv2.setSnapshot({ "vehicle.ev_battery_percentage": 41 }, { stale: false }, "VIN1");
+  const text3 = srv2._text;
+  assert.ok(text3.includes('kia_ev_battery_percentage{vin="VIN1"} 41'), text3);
+  assert.ok(text3.includes('kia_ev_battery_percentage{vin="VIN2"} 90'), text3);
+
   // ---- pushInflux hits /api/v2/write with the token header + line body ----
   const seen = {};
   const mock = http.createServer((req, res) => {

@@ -126,7 +126,55 @@ function promText(flat, meta, prefix, labels) {
   return lines.join("\n") + "\n";
 }
 
-/** A minimal always-on /metrics server. Call setSnapshot() after each fetch. */
+/** Combine multiple labeled snapshots into one exposition, emitting each
+ *  metric's `# TYPE` line once (not once per snapshot) with every
+ *  snapshot's sample for that metric grouped underneath it -- the format
+ *  a rotate-mode MM instance's multiple vehicles need to appear as
+ *  distinct label-series of the SAME metric, not overwrite one another. */
+function promTextMulti(snapshots, prefix) {
+  prefix = prefix || "kia";
+  const order = [];
+  const linesByName = {};
+  const ensure = (name) => {
+    if (!linesByName[name]) { linesByName[name] = []; order.push(name); }
+    return linesByName[name];
+  };
+  Object.keys(snapshots).forEach((key) => {
+    const snap = snapshots[key];
+    if (!snap) return;
+    const lbl = Object.keys(snap.labels || {})
+      .filter((k) => snap.labels[k] != null && snap.labels[k] !== "")
+      .map((k) => k + '="' + String(snap.labels[k]).replace(/["\\\n]/g, "") + '"')
+      .join(",");
+    const suffix = lbl ? "{" + lbl + "}" : "";
+    numericFields(snap.flat).forEach((x) => {
+      const name = prefix + "_" + x.key;
+      ensure(name).push(name + suffix + " " + x.value);
+    });
+    if (snap.meta && snap.meta.stale != null) {
+      const name = prefix + "_stale";
+      ensure(name).push(name + suffix + " " + (snap.meta.stale ? 1 : 0));
+    }
+  });
+  const out = [];
+  order.forEach((name) => {
+    out.push("# TYPE " + name + " gauge");
+    linesByName[name].forEach((l) => out.push(l));
+  });
+  return out.length ? out.join("\n") + "\n" : "# no data yet\n";
+}
+
+/** A minimal always-on /metrics server. Call setSnapshot() after each fetch.
+ *
+ *  `vin` (optional) is what lets one server/port serve several vehicles at
+ *  once, as MM's rotate-within-one-module feature does -- one bridge call
+ *  fetches every vehicle, and each calls setSnapshot() with its own VIN, so
+ *  /metrics ends up with one label-series per car instead of the LAST
+ *  vehicle processed silently overwriting every other one's numbers (while
+ *  labeled, misleadingly, as whichever vehicle happened to create the
+ *  server first). A caller that only ever has one vehicle (the common
+ *  case, and every pre-rotate-mode setup) simply never passes `vin`, and
+ *  behaves exactly as before -- `labels` from the constructor is used as-is. */
 class PromServer {
   constructor(opts) {
     opts = opts || {};
@@ -134,12 +182,19 @@ class PromServer {
     this.path = opts.path || "/metrics";
     this.prefix = opts.prefix || "kia";
     this.labels = opts.labels || {};
+    this._snapshots = {}; // key ("" for a single, unkeyed vehicle) -> {flat, meta, labels}
     this._text = "# no data yet\n";
     this._server = null;
   }
 
-  setSnapshot(flat, meta) {
-    this._text = promText(flat, meta, this.prefix, this.labels);
+  setSnapshot(flat, meta, vin) {
+    const key = vin || "";
+    this._snapshots[key] = {
+      flat: flat,
+      meta: meta,
+      labels: vin ? Object.assign({}, this.labels, { vin: vin }) : this.labels
+    };
+    this._text = promTextMulti(this._snapshots, this.prefix);
   }
 
   start() {
@@ -163,4 +218,4 @@ class PromServer {
   }
 }
 
-module.exports = { numericFields, lineProtocol, pushInflux, promText, PromServer };
+module.exports = { numericFields, lineProtocol, pushInflux, promText, promTextMulti, PromServer };

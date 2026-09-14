@@ -1147,6 +1147,17 @@ to individual retained topics; set `mqtt.publishRaw: true` if you want it. The
 `kia/ev9/state` JSON blob still contains everything (turn it off with
 `publishJson: false`).
 
+**Using `vehicles: [...]` to rotate through multiple cars?** Every topic above
+gets the vehicle's VIN inserted (`kia/ev9/VIN1/ev_battery_percentage`,
+`kia/ev9/VIN2/ev_battery_percentage`, …) instead of all cars sharing one set
+of topics — otherwise the last-processed vehicle would silently overwrite
+every other one's retained state. Each vehicle also publishes its own
+`kia/ev9/<VIN>/status` (`online`, refreshed on every poll — there's no single
+Last-Will-and-Testament that can represent N cars, so this one doesn't flip to
+`offline` on disconnect the way the plain single-vehicle status topic does).
+Not rotating (a single `vin:`, or one module block per car)? Topics are
+unchanged from before this existed.
+
 ### Home Assistant discovery (mode B only)
 
 **Skip this if you use the native integration (mode A/C)** — it already gives
@@ -1187,7 +1198,10 @@ exporter: {
 
 Influx: one line-protocol `POST` per update (`kia_vehicle,vin=… ev_battery_percentage=63,…`).
 Prometheus: an always-on `/metrics` endpoint — `kia_ev_battery_percentage{vin="…"} 63`,
-plus `kia_stale`. Strings are skipped; booleans become `1`/`0`.
+plus `kia_stale`. Strings are skipped; booleans become `1`/`0`. Rotating through
+multiple `vehicles:`? Every car's samples carry its own `vin` tag/label — the
+Prometheus endpoint shows one series per vehicle rather than one server
+sharing a single, last-writer-wins snapshot.
 
 ## Reliability
 
