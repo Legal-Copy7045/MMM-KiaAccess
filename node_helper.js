@@ -265,6 +265,15 @@ module.exports = NodeHelper.create({
     s.reqTimes.push(now);
     this.inFlight[id] = true;
 
+    // "rotate within one module": config.vehicles is a list of {vin, header}
+    // to cycle through on-screen. One bridge call fetches every vehicle at
+    // once (allVehicles:true, see kia_client.fetch()) instead of running
+    // one bridge process per car -- cheaper on Kia's servers, and each
+    // vehicle still gets its own isolated history/session/trip/cache/mqtt
+    // identity below (see child.on("close") and onPayload()'s `id` param),
+    // exactly like a dedicated single-vehicle module instance would.
+    const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
+
     const pythonBin = resolvePython(config.pythonBin);
     const script = path.join(__dirname, "kia_bridge.py");
     const job = {
@@ -273,7 +282,8 @@ module.exports = NodeHelper.create({
       pin: config.pin,
       brand: config.brand || "KIA",
       region: config.region || "USA",
-      vin: config.vin || "",
+      vin: rotating ? "" : config.vin || "",
+      allVehicles: rotating,
       refresh: config.refresh !== false,
       geocode: config.geocode === true,
       // honour an explicit 0 (cache-only) — don't let `|| 45` clobber it
@@ -314,13 +324,35 @@ module.exports = NodeHelper.create({
         return this.fail(id, config, `bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`);
       }
       // kia_client.fetch() itself now refuses (result.ok === false) a
-      // multi-vehicle account with no VIN configured -- rather than warning
+      // multi-vehicle account with no VIN configured, UNLESS this is a
+      // rotate instance (job.allVehicles:true above) -- rather than warning
       // here and silently picking [0], which physical car that was could
-      // change between polls. So by the time we reach this line,
-      // result.vehicles is guaranteed to have exactly one entry.
+      // change between polls. So outside rotate mode, result.vehicles is
+      // guaranteed to have exactly one entry by the time we reach this line.
       if (!result.ok) return this.fail(id, config, result.error || "unknown bridge error");
       if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
         return this.fail(id, config, "bridge returned no vehicles");
+      }
+
+      if (rotating) {
+        // Route each vehicle through the exact same per-id pipeline a
+        // dedicated single-vehicle module instance uses (onPayload() reads
+        // everything -- history, sessions, trips, cache, mqtt, exporter --
+        // off `this.st(id)`, so giving each vehicle its own subId here is
+        // what keeps two cars' trip/charge logs from ever mixing).
+        result.vehicles.forEach((vehicle) => {
+          const vin = String(vehicle.VIN || vehicle.vin || "").toUpperCase();
+          if (!vin) return; // can't isolate history for a vehicle with no VIN
+          const subId = this.identifierFor(Object.assign({}, config, { vin }));
+          this.onPayload(subId, config, {
+            vehicle: vehicle,
+            _meta: Object.assign(
+              { fetchedAt: new Date().toISOString(), vehicleCount: result.vehicles.length, failStreak: 0 },
+              result.meta || {}
+            )
+          });
+        });
+        return;
       }
 
       const vehicle = result.vehicles[0];

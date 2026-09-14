@@ -20,6 +20,16 @@ Module.register("MMM-KiaAccess", {
     region: "USA", // "USA" | "CA" | "EU" | "AU" | "CN" | "IN" | "NZ" | "BR"
     vin: "", // optional; first vehicle on the account is used when blank
 
+    // Multiple cars on one account, shown by ONE module instance that
+    // rotates between them (instead of one `vin:` per module block/
+    // position): [{ vin: "5XY...", header: "My EV9" }, { vin: "KND..." }].
+    // `header` is optional -- falls back to the vehicle's own name/model.
+    // Leave empty (the default) for the plain single-vehicle `vin:` above,
+    // or add the module more than once (each with its own `vin:`) if you'd
+    // rather see every car on screen at once instead of rotating.
+    vehicles: [],
+    vehicleRotateInterval: 20 * 1000, // how long each vehicle stays on screen
+
     // ---- data source ----
     source: "kia", // "kia" = poll Kia directly (default)
                    // "homeassistant" = read from the Kia Access HA integration instead
@@ -335,6 +345,17 @@ Module.register("MMM-KiaAccess", {
     this.errorMessage = null;
     this.loading = true;
     this.lastUpdated = null;
+    // rotate-within-one-module state (see this.config.vehicles) -- n cars,
+    // each keyed by its own uppercased VIN
+    this.activeVehicleIndex = 0;
+    this.vehiclePayloads = {}; // vin -> last KIA_DATA payload for that car
+    this.vehicleErrors = {}; // vin -> last error message for that car
+    // prevCond/firstConditionRun (used below) are hysteresis/one-shot state
+    // for the alert engine -- swapping in the WRONG car's state before
+    // evaluating conditions would compare car B's reading against car A's
+    // previous reading and could misfire a one-shot event (e.g. a bogus
+    // "charging started"). Keyed per VIN so rotating never crosses that.
+    this.vehicleCondState = {}; // vin -> { prevCond, firstConditionRun }
     this.utils = typeof KiaAccessUtils !== "undefined" ? KiaAccessUtils : null;
     this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
     this.conditions = typeof KiaConditions !== "undefined" ? KiaConditions : null;
@@ -387,10 +408,21 @@ Module.register("MMM-KiaAccess", {
     this.config.visuals.scale = Math.max(
       0.5, Math.min(3, Number(this.config.visuals.scale) || 1)
     );
+    // rotate-within-one-module: normalise to {vin (uppercased), header};
+    // Kia source only -- an "homeassistant" source module already gets
+    // per-account vehicle switching for free from the HA Lovelace card, so
+    // `vehicles` here is simply ignored in that mode.
+    this.config.vehicles = (Array.isArray(this.config.vehicles) ? this.config.vehicles : [])
+      .map((v) => ({
+        vin: String((v && v.vin) || "").toUpperCase(),
+        header: (v && v.header) || ""
+      }))
+      .filter((v) => v.vin);
 
     const src = String(this.config.source || "kia").toLowerCase();
     let configErr = null;
     if (src === "homeassistant") {
+      this.config.vehicles = []; // see the note above the normalisation
       const ha = this.config.homeassistant || {};
       if (!ha.url || !ha.token) {
         configErr = "Set homeassistant.url and homeassistant.token in config.js";
@@ -412,7 +444,97 @@ Module.register("MMM-KiaAccess", {
       this.loading = false;
     } else {
       this.scheduleFetch(0);
+      this.scheduleRotate();
     }
+  },
+
+  // Which vehicle is currently on screen, in rotate mode. null outside it.
+  activeVin() {
+    const v = this.config.vehicles;
+    return v && v.length ? v[this.activeVehicleIndex % v.length].vin : null;
+  },
+
+  // header for the active vehicle in rotate mode: the per-vehicle `header:`
+  // override if given, else that vehicle's own reported name -- null
+  // outside rotate mode (getHeader() then falls back to config.header).
+  rotateHeader() {
+    const v = this.config.vehicles;
+    if (!(v && v.length)) return null;
+    const cfg = v[this.activeVehicleIndex % v.length];
+    if (cfg.header) return cfg.header;
+    const payload = this.vehiclePayloads[cfg.vin];
+    return (payload && payload.vehicle &&
+      (payload.vehicle.name || payload.vehicle.model)) || null;
+  },
+
+  // Switches which cached vehicle is displayed on a timer -- does NOT
+  // trigger a new fetch (doFetch()/scheduleFetch() run on their own,
+  // account-wide cadence and refresh every configured vehicle in one poll,
+  // see node_helper.js's handleFetch()). A no-op outside rotate mode, and
+  // with only one vehicle configured (nothing to rotate to).
+  scheduleRotate() {
+    clearInterval(this._rotateTimer);
+    if (!(this.config.vehicles && this.config.vehicles.length > 1)) return;
+    const ms = Math.max(3000, Number(this.config.vehicleRotateInterval) || 20000);
+    this._rotateTimer = setInterval(() => {
+      this.activeVehicleIndex = (this.activeVehicleIndex + 1) % this.config.vehicles.length;
+      this.showActiveVehicle();
+    }, ms);
+  },
+
+  // vehicleCondState swap -- see the comment on that map in start(). Every
+  // processConditions() call must be bracketed by these when rotating, so
+  // hysteresis/one-shot state never leaks between two different cars.
+  _loadCondState(vin) {
+    if (!vin) return; // not rotating: this.prevCond etc are already correct
+    if (!this.vehicleCondState[vin]) {
+      this.vehicleCondState[vin] = { prevCond: {}, firstConditionRun: true };
+    }
+    this.prevCond = this.vehicleCondState[vin].prevCond;
+    this.firstConditionRun = this.vehicleCondState[vin].firstConditionRun;
+  },
+  _saveCondState(vin) {
+    if (!vin) return;
+    this.vehicleCondState[vin] = {
+      prevCond: this.prevCond,
+      firstConditionRun: this.firstConditionRun
+    };
+  },
+
+  // identifierFor() in node_helper.js is `[region,brand,username,vin].join
+  // ("|")` -- region/brand/username never contain "|", so vin is always the
+  // final segment.
+  vinFromIdentifier(identifier) {
+    const parts = String(identifier || "").split("|");
+    return parts.length ? parts[parts.length - 1] : null;
+  },
+
+  // Renders whichever vehicle's data is currently cached for the active
+  // slot -- from a fresh KIA_DATA for that vehicle, or from scheduleRotate()
+  // switching onto one that already has cached data from an earlier poll.
+  // Falls back to "Loading…" (not the previous car's data) if this vehicle
+  // hasn't reported in yet.
+  showActiveVehicle() {
+    const vin = this.activeVin();
+    const cached = vin && this.vehiclePayloads[vin];
+    this.loading = !cached;
+    this.rawPayload = cached || null;
+    if (cached) {
+      this.history = cached.history || [];
+      this.sessions = cached.sessions || [];
+      this.openSession = cached.openSession || null;
+      this.trips = cached.trips || [];
+      this.openTrip = cached.openTrip || null;
+      if (cached.rangeMap) this.rangeMap = cached.rangeMap;
+      if (cached.rangeReach) this.rangeReach = cached.rangeReach;
+    }
+    this.errorMessage = (vin && this.vehicleErrors[vin]) || null;
+    this.liveChargeTimer();
+    this.rebuildView();
+    this._loadCondState(vin);
+    this.processConditions();
+    this._saveCondState(vin);
+    this.updateDom(this.config.animationSpeed);
   },
 
   scheduleFetch(delay) {
@@ -443,7 +565,11 @@ Module.register("MMM-KiaAccess", {
       pin: c.pin,
       brand: c.brand,
       region: c.region,
-      vin: c.vin,
+      // rotate mode: node_helper fetches every configured vehicle in one
+      // call (job.vin blank + job.vehicles set -- see handleFetch()), not
+      // just the one this.config.vin would otherwise pick
+      vin: (c.vehicles && c.vehicles.length) ? "" : c.vin,
+      vehicles: c.vehicles && c.vehicles.length ? c.vehicles : undefined,
       source: c.source,
       homeassistant: c.homeassistant,
       refresh: c.refresh,
@@ -516,10 +642,29 @@ Module.register("MMM-KiaAccess", {
     if (!data || !this.isForMe(data.identifier)) return;
     clearTimeout(this._watchdog);
 
+    // rotate mode: every configured vehicle reports every poll, but only
+    // the one currently on screen should touch rawPayload/rendering -- the
+    // rest are cached silently and shown on their own turn (see
+    // scheduleRotate()/showActiveVehicle()). Not rotating -> vin is null
+    // and every branch below behaves exactly as it always has.
+    const rotating = this.config.vehicles && this.config.vehicles.length > 0;
+    const vin = rotating ? this.vinFromIdentifier(data.identifier) : null;
+    const isActive = !rotating || vin === this.activeVin();
+
     if (notification === "KIA_DATA") {
       this.loading = false;
-      this.rawPayload = data.payload;
+      if (rotating && vin) {
+        this.vehiclePayloads[vin] = data.payload;
+        delete this.vehicleErrors[vin];
+      }
       const m = data.payload._meta || {};
+      if (!isActive) {
+        // cached above; keep the account-wide poll cadence moving without
+        // touching what's currently on screen
+        this.scheduleFetch(this.nextDelay(m.failStreak || 0, m.retryAfterMs));
+        return;
+      }
+      this.rawPayload = data.payload;
       this.history = data.payload.history || [];
       this.sessions = data.payload.sessions || [];
       this.openSession = data.payload.openSession || null;
@@ -543,17 +688,28 @@ Module.register("MMM-KiaAccess", {
       if (sig !== this._lastSig) {
         this._lastSig = sig;
         this.rebuildView();
+        this._loadCondState(vin);
         this.processConditions();
+        this._saveCondState(vin);
         this.updateDom(this.config.animationSpeed);
       }
       this.scheduleFetch(this.nextDelay(m.failStreak || 0, m.retryAfterMs));
     } else if (notification === "KIA_ERROR") {
+      if (rotating && vin) this.vehicleErrors[vin] = data.error || "Unknown error";
+      if (!isActive) {
+        this.scheduleFetch(this.nextDelay(data.failStreak || 1, data.retryAfterMs));
+        return;
+      }
       this.loading = false;
       this.errorMessage = data.error || "Unknown error";
       Log.error("[MMM-KiaAccess] " + this.errorMessage);
       this.updateDom(this.config.animationSpeed);
       this.scheduleFetch(this.nextDelay(data.failStreak || 1, data.retryAfterMs));
     } else if (notification === "KIA_RANGE_MAP") {
+      if (rotating && vin && this.vehiclePayloads[vin]) {
+        this.vehiclePayloads[vin].rangeMap = data.rangeMap;
+      }
+      if (!isActive) return;
       this.rangeMap = data.rangeMap || this.rangeMap;
       this.updateDom(0);
     }
@@ -569,6 +725,14 @@ Module.register("MMM-KiaAccess", {
   isForMe(identifier) {
     // node_helper builds the identifier the same way from our serialisable config
     const c = this.serialisableConfig();
+    if (c.vehicles && c.vehicles.length) {
+      // rotate mode: node_helper reports each configured vehicle under its
+      // own real-VIN identifier (see handleFetch()'s per-vehicle subId) --
+      // accept any of them, not just whichever is on screen right now.
+      return c.vehicles.some(
+        (v) => identifier === [c.region, c.brand, c.username, v.vin].join("|")
+      );
+    }
     const mine = [c.region, c.brand, c.username, c.vin || "auto"].join("|");
     return identifier === mine;
   },
@@ -1550,7 +1714,7 @@ Module.register("MMM-KiaAccess", {
   },
 
   getHeader() {
-    let h = this.data.header || this.config.header || "";
+    let h = this.data.header || this.rotateHeader() || this.config.header || "";
     if (this.config.showReportedInHeader) {
       const at = this.reportedAt();
       if (at) h += " - as of: " + at;

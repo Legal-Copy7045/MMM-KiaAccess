@@ -340,7 +340,7 @@ def fetch(job, token_file=None):
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
         raise ClientError("no matching vehicles on the account")
-    if not job.get("vin") and len(selected) > 1:
+    if not job.get("vin") and not job.get("allVehicles") and len(selected) > 1:
         # Reads used to silently fall back to "vehicle 1" here, same as the
         # control path used to before it was locked down (see run_command()).
         # Without an explicit VIN, which physical car that is can change
@@ -349,6 +349,12 @@ def fetch(job, token_file=None):
         # of entities/history/sessions/trips/alerts is worse than a clear,
         # one-time setup error asking for a VIN. Fail loudly instead of
         # guessing, for both callers of this shared function (MM and HA).
+        #
+        # allVehicles is the one deliberate opt-in bypass: MM's rotate-
+        # within-one-module feature WANTS every vehicle back in one call, and
+        # keeps them apart itself (one cache/history/session id per VIN --
+        # see node_helper.js's handleFetch()), so there's no ambiguity here,
+        # just an explicit "give me all of them."
         raise ClientError(
             f"{len(selected)} vehicles on this account — set a VIN in the "
             "config to pick one (reads need an explicit target, same as "

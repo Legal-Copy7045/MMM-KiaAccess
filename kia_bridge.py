@@ -5,6 +5,11 @@ Reads a JSON job on stdin:
     {"username": "...", "password": "...", "pin": "...",
      "brand": "KIA", "region": "USA", "vin": "", "refresh": true}
 
+  ... "vin": "" with "allVehicles": true returns every vehicle on the
+  account instead of erroring on the ambiguity (used by MM's rotate-within-
+  one-module feature; every other caller leaves this unset/false):
+    {"username": "...", ..., "vin": "", "allVehicles": true}
+
   ... or a control job (used by the Home Assistant integration, not MM):
     {"command": "lock", ...credentials...}
     {"command": "start_climate", "options": {"set_temp": 21}, ...}

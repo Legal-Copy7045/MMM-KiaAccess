@@ -195,16 +195,15 @@ API, not from Kia. So:
 3. You now have one **device per vehicle** with all the entities, controls and
    events listed under [**What you get**](#what-you-get). **If your account has
    more than one vehicle**, one config entry only ever tracks one of them —
-   run **+ Add Integration → "Kia Access"** again for each additional vehicle,
-   filling in that vehicle's **VIN** field on the setup form. A blank VIN
-   is only accepted when the account has exactly one vehicle; with more than
-   one, it's required (setup fails with a clear error otherwise) — which
-   physical car "the first one" means isn't guaranteed stable from one poll to
-   the next, so this is deliberate rather than a bug. Each vehicle's VIN also
-   uniquely identifies its config entry, so two entries for the same account
-   (one per vehicle) can coexist — and if you set one up without a VIN before
-   realizing you needed one, it's editable afterward too, in that entry's
-   **Configure → VIN**. A few notes:
+   after you sign in, a **"Choose a vehicle"** step appears automatically
+   listing every car on the account (name, model, VIN); pick the one this
+   entry should track. A single-vehicle account never sees this step — it's
+   set up exactly as before. Run **+ Add Integration → "Kia Access"** again
+   for each additional vehicle. Each vehicle's VIN uniquely identifies its
+   config entry, so two entries for the same account (one per vehicle) can
+   coexist — and the VIN is editable afterward too, in that entry's
+   **Configure → VIN**, if you ever need to move an entry to a different car.
+   A few notes:
    - `Last charge` / `Charge session` need a price — **Configure → Price per kWh**.
    - The **seat / wheel-heat `select`s and `Climate run time` are stored
      preferences**: there's no API to set them alone, so `climate.turn_on` and
@@ -225,6 +224,14 @@ API, not from Kia. So:
    The same bundle also provides **`custom:kia-range-map-card`** — an interactive
    map of how far you can drive (see [Location](#location--map)).
    The integration serves and auto-registers `/kia_access/kia-access-card.js`.
+
+   **More than one vehicle on the account?** Leave `entity:` unset (the
+   default) and the card shows a small vehicle dropdown next to the car's
+   name — one card, switch between your cars, no extra config. It only
+   appears once you actually have 2+ vehicles' worth of config entries; a
+   single-vehicle setup looks exactly as before. Set `entity:` explicitly
+   instead if you'd rather pin a card to one specific vehicle (e.g. one card
+   per vehicle across different dashboard views).
    If the card doesn't show up, hard-refresh the browser, or add that path as a
    **Lovelace resource** (type: JavaScript Module) manually.
 
@@ -462,6 +469,19 @@ cache when the data actually changed, so a fast rate costs almost nothing.
     brand: "KIA",            // KIA | HYUNDAI | GENESIS
     region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
     vin: "",                 // blank = fine for a single-vehicle account; required if you have more than one
+
+    // --- multiple cars on one account (optional) ---
+    // Two ways to show more than one vehicle:
+    //  1. Add this module more than once, each with its own `vin:` above --
+    //     every car gets its own fixed position on screen.
+    //  2. Leave `vin:` blank and list every car here instead -- ONE module
+    //     instance rotates through them on screen (each still gets its own
+    //     isolated trip/charge-session history, exactly like option 1 does):
+    // vehicles: [
+    //   { vin: "5XY...", header: "My EV9" },
+    //   { vin: "KND..." }            // header optional -- falls back to the car's own name
+    // ],
+    // vehicleRotateInterval: 20 * 1000,  // how long each vehicle stays on screen
 
     // --- runtime ---
     pythonBin: "python3",    // command that runs kia_bridge.py

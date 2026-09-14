@@ -43,6 +43,10 @@
     ".ka-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}" +
     ".ka-title{min-width:0}" +
     ".ka-name{font-size:1.1em;font-weight:500}" +
+    ".ka-vehicle-select{font:inherit;font-size:1.1em;font-weight:500;color:inherit;" +
+    "background:transparent;border:0;border-radius:4px;padding:2px 4px;margin:-2px -4px;" +
+    "max-width:100%;cursor:pointer}" +
+    ".ka-vehicle-select:hover,.ka-vehicle-select:focus{background:var(--secondary-background-color)}" +
     ".ka-sub{color:var(--secondary-text-color);font-size:.85em}" +
     ".ka-refresh{flex:none;background:none;border:0;cursor:pointer;padding:4px;" +
     "border-radius:50%;color:var(--secondary-text-color);display:flex}" +
@@ -155,13 +159,34 @@
     return Math.round(h / 24) + "d ago";
   }
 
-  function findRawEntity(hass, configured) {
-    if (configured) return configured;
-    var ids = Object.keys(hass.states).filter(function (id) {
+  // every raw summary sensor on the account (one per config entry / vehicle),
+  // sorted for a stable order across renders
+  function findAllRawEntities(hass) {
+    return Object.keys(hass.states).filter(function (id) {
       var a = hass.states[id].attributes;
       return id.indexOf("sensor.") === 0 && a && a.kia_access_raw === true;
-    });
-    return ids[0] || null;
+    }).sort();
+  }
+
+  function findRawEntity(hass, configured) {
+    if (configured) return configured;
+    return findAllRawEntities(hass)[0] || null;
+  }
+
+  // Shared across every auto-discovering card on the dashboard (one that
+  // has no explicit `entity:` pinned in its config) so picking a vehicle in
+  // one card's selector is reflected by every other one on reload/re-render
+  // -- a card WITH an explicit `entity:` never reads this, it always shows
+  // that one vehicle (the "one card per vehicle" setup still works exactly
+  // as before).
+  var VEHICLE_SEL_STORE = "kia-access-selected-vehicle";
+  function loadSelectedVehicle() {
+    try { return window.localStorage.getItem(VEHICLE_SEL_STORE) || ""; }
+    catch (e) { return ""; }
+  }
+  function saveSelectedVehicle(entId) {
+    try { window.localStorage.setItem(VEHICLE_SEL_STORE, entId || ""); }
+    catch (e) { /* ignore */ }
   }
 
   function flatFromAttributes(attrs) {
@@ -333,11 +358,31 @@
       clearTimeout(this._flashT);
     }
 
+    // Which vehicle's raw sensor this card instance shows. An explicit
+    // `entity:` in the card config always wins (unchanged "one card per
+    // vehicle" behaviour). Otherwise: keep whatever's already selected if
+    // it's still a real vehicle on this account; else fall back to the
+    // dashboard-wide last pick (shared across every auto-discovering card,
+    // see VEHICLE_SEL_STORE); else the first vehicle alphabetically. Single-
+    // vehicle accounts always resolve to that one entity, so nothing about
+    // this changes behaviour for the common case.
+    _activeEntityId(hass) {
+      if (this._config && this._config.entity) return this._config.entity;
+      var all = findAllRawEntities(hass);
+      if (!all.length) return null;
+      if (this._selectedEntity && all.indexOf(this._selectedEntity) !== -1) {
+        return this._selectedEntity;
+      }
+      var stored = loadSelectedVehicle();
+      this._selectedEntity = (stored && all.indexOf(stored) !== -1) ? stored : all[0];
+      return this._selectedEntity;
+    }
+
     set hass(hass) {
       this._hass = hass;
       // HA sets `hass` on every state change anywhere — only re-render when the
       // vehicle entity we care about actually changed
-      var entId = findRawEntity(hass, this._config && this._config.entity);
+      var entId = this._activeEntityId(hass);
       var st = entId && hass.states[entId];
       var sig = st ? entId + "|" + st.state + "|" + st.last_updated : "none";
       if (sig === this._sig) return;
@@ -757,7 +802,7 @@
       var root = this._root;
       if (!hass || !root) return;
 
-      var entId = findRawEntity(hass, this._config && this._config.entity);
+      var entId = this._activeEntityId(hass);
       if (!entId || !hass.states[entId]) {
         root.innerHTML =
           "<ha-card><div class='ka-wrap'>Kia Access: no vehicle entity found. " +
@@ -799,6 +844,25 @@
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";
       var updated = st.state && st.state !== "unknown" && st.state !== "unavailable"
         ? "Updated " + relTime(st.state) : "";
+
+      // Vehicle selector: only when this card auto-discovers (no explicit
+      // `entity:` pinned) AND the account actually has more than one
+      // vehicle -- a single-vehicle account, or a card pinned to one
+      // vehicle, sees the plain name exactly as before, no dropdown.
+      var allVehicles = (this._config && this._config.entity)
+        ? [entId] : findAllRawEntities(hass);
+      var vehicleSelectHtml = "";
+      if (allVehicles.length > 1) {
+        var vOpts = allVehicles.map(function (id) {
+          var vst = hass.states[id];
+          var vname = (vst && vst.attributes &&
+            (vst.attributes.vehicle_name || vst.attributes.friendly_name)) || id;
+          return "<option value='" + esc(id) + "'" +
+            (id === entId ? " selected" : "") + ">" + esc(vname) + "</option>";
+        }).join("");
+        vehicleSelectHtml = "<select class='ka-vehicle-select' aria-label='Vehicle'>" +
+          vOpts + "</select>";
+      }
 
       // "Refresh now" icon next to the name/updated line -- only shown when
       // the integration is new enough to have registered the button entity
@@ -860,7 +924,7 @@
         "<div class='ka-side'>" +
         "<div class='ka-head'>" +
         "<div class='ka-title'>" +
-        "<div class='ka-name'>" + esc(name) + "</div>" +
+        "<div class='ka-name'>" + (vehicleSelectHtml || esc(name)) + "</div>" +
         "<div class='ka-sub'>" + esc(updated) + "</div>" +
         "</div>" + refreshBtnHtml +
         "</div>" +
@@ -885,6 +949,15 @@
       });
       var refreshBtn = root.querySelector(".ka-refresh");
       if (refreshBtn) refreshBtn.addEventListener("click", function () { card._refreshNow(); });
+      var vehicleSelect = root.querySelector(".ka-vehicle-select");
+      if (vehicleSelect) {
+        vehicleSelect.addEventListener("change", function () {
+          card._selectedEntity = vehicleSelect.value;
+          saveSelectedVehicle(vehicleSelect.value);
+          card._sig = null;
+          card._render();
+        });
+      }
       this._wireClimate();
     }
   }

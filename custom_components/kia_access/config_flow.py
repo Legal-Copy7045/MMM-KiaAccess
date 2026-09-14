@@ -91,10 +91,14 @@ USER_SCHEMA = vol.Schema(
         vol.Optional(CONF_PIN, default=""): str,
         vol.Optional(CONF_REGION, default="USA"): vol.In(REGIONS),
         vol.Optional(CONF_BRAND, default="KIA"): vol.In(BRANDS),
-        vol.Optional(CONF_VIN, default=""): str,
         vol.Optional(CONF_GEOCODE, default=False): bool,
     }
 )
+# VIN is deliberately not in USER_SCHEMA -- which vehicle to use is only
+# knowable AFTER login (it comes from the account's own vehicle list, via
+# async_step_vehicle() below), so asking for it up front would mean asking
+# the user to already know and correctly type a VIN. A single-vehicle
+# account never sees that step at all (see async_step_vehicle's caller).
 
 
 class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -106,6 +110,8 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._job: dict[str, Any] = {}
         self._vm = None
         self._reauth_entry = None
+        self._token: dict | None = None
+        self._vehicles: list[dict] = []
 
     async def async_step_reauth(self, entry_data: dict) -> FlowResult:
         self._reauth_entry = self.hass.config_entries.async_get_entry(
@@ -146,23 +152,12 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             self._job = dict(user_input)
-            # VIN-scoped when given, so a multi-vehicle account can have one
-            # config entry per vehicle -- without this, the second "Add
-            # Integration" attempt for the same account's other vehicle
-            # would always abort on a unique-ID collision with the first,
-            # even though the whole point of requiring a VIN (see kia_client
-            # .fetch()/run_command()) is to let more than one entry coexist.
-            # A blank VIN keeps the original account-only ID, so a genuine
-            # single-vehicle setup (still the common case) behaves exactly
-            # as before and a second blank-VIN attempt still correctly
-            # aborts as a real duplicate.
-            await self.async_set_unique_id(
-                _account_uid(
-                    user_input[CONF_REGION], user_input[CONF_BRAND],
-                    user_input["username"], user_input.get(CONF_VIN, ""),
-                )
-            )
-            self._abort_if_unique_id_configured()
+            # Unique-ID is deliberately NOT set here -- it's VIN-scoped (see
+            # _account_uid()), and which VIN this entry is for isn't knowable
+            # until after login, when the account's own vehicle list is
+            # available (async_step_vehicle() below picks it, or _after_
+            # login() auto-picks the sole vehicle). _finish_with_uid() sets
+            # it once that's resolved, right before creating the entry.
             try:
                 result = await self.hass.async_add_executor_job(self._try_login)
             except _NeedOtp:
@@ -171,7 +166,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("Kia login failed: %s", type(err).__name__)
                 errors["base"] = "auth"
             else:
-                return self._finish(result)
+                return await self._after_login(result)
 
         return self.async_show_form(
             step_id="user", data_schema=USER_SCHEMA, errors=errors
@@ -188,7 +183,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("OTP verify failed", exc_info=True)
                 errors["base"] = "otp"
             else:
-                return self._finish(token)
+                return await self._after_login(token)
 
         return self.async_show_form(
             step_id="otp",
@@ -196,6 +191,69 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={"dest": getattr(self, "_otp_dest", "")},
         )
+
+    async def _after_login(self, token: dict | None) -> FlowResult:
+        """Login (password or OTP) just succeeded -- self._vm.vehicles is
+        already populated (VehicleManager.login()/verify_otp_and_complete_
+        login() both call initialize_vehicles() internally). A single-
+        vehicle account is auto-picked and never sees a vehicle step at
+        all; only a genuine multi-vehicle account is asked to choose."""
+        self._token = token
+        vehicles = await self.hass.async_add_executor_job(self._list_vehicles)
+        if len(vehicles) <= 1:
+            self._job[CONF_VIN] = vehicles[0]["vin"] if vehicles else ""
+            return await self._finish_with_uid()
+        self._vehicles = vehicles
+        return await self.async_step_vehicle()
+
+    async def async_step_vehicle(self, user_input: dict | None = None) -> FlowResult:
+        if user_input is not None:
+            self._job[CONF_VIN] = user_input[CONF_VIN]
+            return await self._finish_with_uid()
+
+        choices = {
+            v["vin"]: (
+                f"{v['name']} ({v['model']} · {v['vin']})" if v["name"]
+                else f"{v['model'] or 'Vehicle'} · {v['vin']}"
+            )
+            for v in self._vehicles
+        }
+        return self.async_show_form(
+            step_id="vehicle",
+            data_schema=vol.Schema({vol.Required(CONF_VIN): vol.In(choices)}),
+        )
+
+    async def _finish_with_uid(self) -> FlowResult:
+        # VIN-scoped when set, so a multi-vehicle account can have one config
+        # entry per vehicle -- without this, a second entry for the same
+        # account's other vehicle would always abort on a unique-ID
+        # collision with the first. A blank VIN (no vehicles returned, or a
+        # single-vehicle account) keeps the original account-only ID, so a
+        # genuine single-vehicle setup behaves exactly as before and a
+        # second blank-VIN attempt still correctly aborts as a real
+        # duplicate.
+        await self.async_set_unique_id(
+            _account_uid(
+                self._job.get(CONF_REGION, "USA"), self._job.get(CONF_BRAND, "KIA"),
+                self._job["username"], self._job.get(CONF_VIN, ""),
+            )
+        )
+        self._abort_if_unique_id_configured()
+        return self._finish(self._token)
+
+    def _list_vehicles(self) -> list[dict]:
+        out = []
+        for v in (getattr(self._vm, "vehicles", None) or {}).values():
+            vin = str(getattr(v, "VIN", "") or "").strip().upper()
+            if not vin:
+                continue
+            out.append({
+                "vin": vin,
+                "name": str(getattr(v, "name", "") or ""),
+                "model": str(getattr(v, "model", "") or ""),
+            })
+        out.sort(key=lambda d: d["vin"])
+        return out
 
     # -- executor helpers ---------------------------------------------------
     def _try_login(self) -> dict:

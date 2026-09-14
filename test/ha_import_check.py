@@ -513,7 +513,11 @@ for _f in ("icon.png", "icon@2x.png"):
 s = json.load(open(os.path.join(ROOT, "custom_components/kia_access/strings.json"), encoding="utf-8"))
 e = json.load(open(os.path.join(ROOT, "custom_components/kia_access/translations/en.json"), encoding="utf-8"))
 assert s == e, "strings.json and translations/en.json differ"
-assert {"user", "otp", "reauth_confirm"} <= set(s["config"]["step"])
+assert {"user", "otp", "vehicle", "reauth_confirm"} <= set(s["config"]["step"])
+assert "vin" not in s["config"]["step"]["user"]["data"], (
+    "VIN must not be collected on the initial form -- it's only knowable "
+    "after login, from the account's own vehicle list (async_step_vehicle)"
+)
 
 # Multi-vehicle unique-id scoping: without a VIN, two "Add Integration"
 # attempts for the same account must still collide (a real duplicate) --
@@ -521,18 +525,43 @@ assert {"user", "otp", "reauth_confirm"} <= set(s["config"]["step"])
 # config entries (one per vehicle), or a multi-vehicle account could never
 # be fully set up (each vehicle needs its own VIN-scoped entry once
 # kia_client.fetch()/run_command() refuse to guess which car to use).
+#
+# VIN is no longer typed on the initial form -- it comes from the account's
+# own vehicle list (self._vm.vehicles, populated by login()/verify_otp_
+# and_complete_login() before async_step_user()/async_step_otp() hand off
+# to _after_login()). These fakes drive the real flow through _try_login()
+# and _list_vehicles() rather than a hand-typed VIN field.
 cf_mod = importlib.import_module(f"{pkg}.config_flow")
 
 
 class _StopEarly(Exception):
     """Raised from the patched async_set_unique_id to short-circuit the
-    flow right after capturing the uid it computed, before it would try a
-    real Kia login."""
+    flow right after capturing the uid it computed, before it would try
+    self._finish() (which needs a real HA config-entry machinery)."""
+
+
+class _FakeVehicle:
+    def __init__(self, vin, name="", model=""):
+        self.VIN = vin
+        self.name = name
+        self.model = model
+
+
+class _FakeHass:
+    async def async_add_executor_job(self, fn, *args):
+        return fn(*args)
 
 
 def _captured_uid(vin):
+    """Single-vehicle-account case (or no vehicles yet): auto-picked, no
+    vehicle-choice step, uid resolved directly off the account + that VIN."""
     flow = object.__new__(cf_mod.KiaAccessConfigFlow)
     flow._reauth_entry = None
+    flow._vm = type("VM", (), {
+        "vehicles": {"1": _FakeVehicle(vin)} if vin else {}
+    })()
+    flow.hass = _FakeHass()
+    flow._try_login = lambda: {"access_token": "tok"}
     captured = {}
 
     async def _fake_set_unique_id(uid):
@@ -542,7 +571,7 @@ def _captured_uid(vin):
     flow.async_set_unique_id = _fake_set_unique_id
     user_input = {
         "username": "user@example.com", "password": "x", "pin": "",
-        "region": "USA", "brand": "KIA", "vin": vin, "geocode": False,
+        "region": "USA", "brand": "KIA", "geocode": False,
     }
     try:
         asyncio.run(cf_mod.KiaAccessConfigFlow.async_step_user(flow, user_input))
@@ -561,6 +590,58 @@ assert _uid_vin1 != _uid_vin2, (
     "or a second vehicle could never be added as its own config entry"
 )
 assert _uid_no_vin != _uid_vin1, "a blank-VIN entry and a VIN-scoped entry for the same account must differ"
+
+# Multi-vehicle account: login succeeding must show the vehicle-choice step
+# (not auto-pick vehicle 1, which would make it impossible to ever set up
+# the second/third car) -- and picking one there must resolve to the SAME
+# uid a single-vehicle account setup with that VIN would get.
+_multi_flow = object.__new__(cf_mod.KiaAccessConfigFlow)
+_multi_flow._reauth_entry = None
+_multi_flow._vm = type("VM", (), {
+    "vehicles": {
+        "1": _FakeVehicle("vin1", name="Work Car", model="EV6"),
+        "2": _FakeVehicle("vin2", name="", model="Niro"),
+    }
+})()
+_multi_flow.hass = _FakeHass()
+_multi_flow._try_login = lambda: {"access_token": "tok"}
+_shown = {}
+
+
+def _fake_show_form(*, step_id, data_schema=None, **kw):
+    _shown["step_id"] = step_id
+    _shown["schema"] = data_schema
+    return {"type": "form", "step_id": step_id}
+
+
+_multi_flow.async_show_form = _fake_show_form
+_user_input = {
+    "username": "user@example.com", "password": "x", "pin": "",
+    "region": "USA", "brand": "KIA", "geocode": False,
+}
+_res = asyncio.run(cf_mod.KiaAccessConfigFlow.async_step_user(_multi_flow, _user_input))
+assert _res["step_id"] == "vehicle", (
+    "a multi-vehicle account must be asked to choose, not silently default "
+    "to whichever vehicle the account API happened to list first"
+)
+_vin_field_key = next(k for k in _shown["schema"].schema if str(k) == cf_mod.CONF_VIN)
+_choice_keys = set(_shown["schema"].schema[_vin_field_key].container)
+assert _choice_keys == {"VIN1", "VIN2"}, _choice_keys
+
+_multi_captured = {}
+
+
+async def _fake_set_unique_id2(uid):
+    _multi_captured["uid"] = uid
+    raise _StopEarly()
+
+
+_multi_flow.async_set_unique_id = _fake_set_unique_id2
+try:
+    asyncio.run(cf_mod.KiaAccessConfigFlow.async_step_vehicle(_multi_flow, {"vin": "vin2"}))
+except _StopEarly:
+    pass
+assert _multi_captured["uid"] == "USA:KIA:user@example.com:VIN2"
 
 # Options flow VIN edit: changing entry.data[VIN] must ALSO keep entry.
 # unique_id in sync, and must be REJECTED (not silently allowed) if another
