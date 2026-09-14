@@ -62,8 +62,13 @@ module.exports = NodeHelper.create({
     this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
     this.rotateVins = {}; // account-level id -> Set of VINs configured as of the last fetch
     this.accountMissStreak = {}; // account-level id -> { vin: consecutive successful fetches missing it }
+    // An instance field (defaulting to the real module-level CACHE_DIR)
+    // rather than reading the module constant directly everywhere below --
+    // lets a test point a helper instance at a throwaway temp directory
+    // instead of writing into this repo's real cache/ folder.
+    this.cacheDir = CACHE_DIR;
     try {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      fs.mkdirSync(this.cacheDir, { recursive: true });
     } catch (e) {
       /* ignore */
     }
@@ -134,7 +139,7 @@ module.exports = NodeHelper.create({
   },
 
   cacheFile(id) {
-    const file = path.join(CACHE_DIR, this._idHash(id) + ".json");
+    const file = path.join(this.cacheDir, this._idHash(id) + ".json");
     // one-time migration off the older (pre-v2.43.1) filename so
     // charge-session / trip history carries over on upgrade
     if (!fs.existsSync(file)) {
@@ -160,18 +165,18 @@ module.exports = NodeHelper.create({
   // fresh. Ambiguous (0 or 2+ untagged leftovers) also falls through to a
   // fresh cache, as before.
   migrateLegacyCache(file) {
-    const leftovers = fs.readdirSync(CACHE_DIR)
-      .filter((f) => f.endsWith(".json") && path.join(CACHE_DIR, f) !== file)
+    const leftovers = fs.readdirSync(this.cacheDir)
+      .filter((f) => f.endsWith(".json") && path.join(this.cacheDir, f) !== file)
       .filter((f) => {
         try {
-          const parsed = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, f), "utf8"));
+          const parsed = JSON.parse(fs.readFileSync(path.join(this.cacheDir, f), "utf8"));
           return !(parsed && typeof parsed === "object" && parsed._kiaAccessIdHash);
         } catch (e) {
           return false; // unreadable/corrupt -- not a safe migration candidate
         }
       });
     if (leftovers.length === 1) {
-      fs.renameSync(path.join(CACHE_DIR, leftovers[0]), file);
+      fs.renameSync(path.join(this.cacheDir, leftovers[0]), file);
     }
   },
 
@@ -397,106 +402,7 @@ module.exports = NodeHelper.create({
       clearTimeout(killTimer);
       this.inFlight[id] = false;
       if (settled) return; // "error" already reported this exact failure
-
-      let result;
-      try {
-        result = JSON.parse(lastJsonLine(stdout));
-      } catch (e) {
-        return reportOnce(`bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`);
-      }
-      // kia_client.fetch() itself now refuses (result.ok === false) a
-      // multi-vehicle account with no VIN configured, UNLESS this is a
-      // rotate instance (job.allVehicles:true above) -- rather than warning
-      // here and silently picking [0], which physical car that was could
-      // change between polls. So outside rotate mode, result.vehicles is
-      // guaranteed to have exactly one entry by the time we reach this line.
-      if (!result.ok) {
-        return reportOnce(result.error || "unknown bridge error");
-      }
-      if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
-        return reportOnce("bridge returned no vehicles");
-      }
-
-      if (rotating) {
-        // job.allVehicles:true (above) tells kia_client.fetch() to return
-        // EVERY vehicle on the account, not just the ones this module
-        // config lists -- config.vehicles is what actually scopes "the
-        // cars this module rotates through" (it's also the exact list the
-        // frontend indexes into for its own rotation), so an account with
-        // more cars than are configured here must not let the extra ones
-        // through: they'd get cache/history/session/trip files created,
-        // publish to MQTT/Influx/Prometheus, and trigger range-map fetches
-        // for a vehicle nothing asked this module to track.
-        const configuredVins = new Set(
-          config.vehicles.map((v) => String(v.vin || "").toUpperCase())
-        );
-        const seenVins = new Set();
-        // Route each vehicle through the exact same per-id pipeline a
-        // dedicated single-vehicle module instance uses (onPayload() reads
-        // everything -- history, sessions, trips, cache, mqtt, exporter --
-        // off `this.st(id)`, so giving each vehicle its own subId here is
-        // what keeps two cars' trip/charge logs from ever mixing).
-        result.vehicles.forEach((vehicle) => {
-          const vin = String(vehicle.VIN || vehicle.vin || "").toUpperCase();
-          if (!vin || !configuredVins.has(vin)) return;
-          seenVins.add(vin);
-          const subId = this.identifierFor(Object.assign({}, config, { vin }));
-          this.onPayload(subId, config, {
-            vehicle: vehicle,
-            _meta: Object.assign(
-              { fetchedAt: new Date().toISOString(), vehicleCount: result.vehicles.length, failStreak: 0 },
-              result.meta || {}
-            )
-          });
-        });
-
-        // Retire any vehicle that WAS configured on a previous fetch but no
-        // longer is (removed from vehicles: since then) -- otherwise its
-        // MQTT status stays retained "online" and its Prometheus series
-        // keeps reporting its last-known numbers forever, indistinguishable
-        // from a car that's still actually being polled.
-        const prevVins = this.rotateVins[id];
-        if (prevVins) {
-          prevVins.forEach((vin) => {
-            if (!configuredVins.has(vin)) this._retireVehicle(config, vin);
-          });
-        }
-        this.rotateVins[id] = configuredVins;
-
-        // Separately: a vehicle can stay in vehicles: but drop out of the
-        // ACCOUNT's own response (sold, removed from the Kia app, etc.) --
-        // same stale-forever problem, different cause, so it needs its own
-        // retirement path rather than piggybacking on the config diff
-        // above. Debounced across several consecutive SUCCESSFUL fetches
-        // (not just polls -- a failed fetch never reaches this line at
-        // all) specifically because a single incomplete/flaky account
-        // response missing one car is a known, ordinary occurrence; only a
-        // sustained absence should be treated as "this vehicle is gone."
-        const miss = this.accountMissStreak[id] || {};
-        configuredVins.forEach((vin) => {
-          if (seenVins.has(vin)) {
-            delete miss[vin];
-          } else {
-            miss[vin] = (miss[vin] || 0) + 1;
-            if (miss[vin] >= ACCOUNT_MISS_RETIRE_AFTER) {
-              this._retireVehicle(config, vin);
-              delete miss[vin];
-            }
-          }
-        });
-        this.accountMissStreak[id] = miss;
-        return;
-      }
-
-      const vehicle = result.vehicles[0];
-      const payload = {
-        vehicle: vehicle,
-        _meta: Object.assign(
-          { fetchedAt: new Date().toISOString(), vehicleCount: result.vehicles.length, failStreak: 0 },
-          result.meta || {}
-        )
-      };
-      this.onPayload(id, config, payload);
+      this._handleBridgeClose(id, config, rotating, code, stdout, stderr, reportOnce);
     });
 
     // a broken pipe (child died before reading stdin) must not crash the helper
@@ -507,6 +413,114 @@ module.exports = NodeHelper.create({
     } catch (e) {
       /* 'error' handler + child.on('close'/'error') take it from here */
     }
+  },
+
+  // Extracted from handleFetch()'s child.on("close", ...) purely so it's
+  // directly unit-testable without spawning a real kia_bridge.py process --
+  // pass a fake stdout/JSON result and a spy in place of reportOnce, and
+  // this can be exercised exactly like a real bridge response. No behaviour
+  // change from when this lived inline; same parameters the closure over
+  // handleFetch's local scope used to provide.
+  _handleBridgeClose(id, config, rotating, code, stdout, stderr, reportOnce) {
+    let result;
+    try {
+      result = JSON.parse(lastJsonLine(stdout));
+    } catch (e) {
+      return reportOnce(`bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`);
+    }
+    // kia_client.fetch() itself now refuses (result.ok === false) a
+    // multi-vehicle account with no VIN configured, UNLESS this is a
+    // rotate instance (job.allVehicles:true above) -- rather than warning
+    // here and silently picking [0], which physical car that was could
+    // change between polls. So outside rotate mode, result.vehicles is
+    // guaranteed to have exactly one entry by the time we reach this line.
+    if (!result.ok) {
+      return reportOnce(result.error || "unknown bridge error");
+    }
+    if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
+      return reportOnce("bridge returned no vehicles");
+    }
+
+    if (rotating) {
+      // job.allVehicles:true (above) tells kia_client.fetch() to return
+      // EVERY vehicle on the account, not just the ones this module
+      // config lists -- config.vehicles is what actually scopes "the
+      // cars this module rotates through" (it's also the exact list the
+      // frontend indexes into for its own rotation), so an account with
+      // more cars than are configured here must not let the extra ones
+      // through: they'd get cache/history/session/trip files created,
+      // publish to MQTT/Influx/Prometheus, and trigger range-map fetches
+      // for a vehicle nothing asked this module to track.
+      const configuredVins = new Set(
+        config.vehicles.map((v) => String(v.vin || "").toUpperCase())
+      );
+      const seenVins = new Set();
+      // Route each vehicle through the exact same per-id pipeline a
+      // dedicated single-vehicle module instance uses (onPayload() reads
+      // everything -- history, sessions, trips, cache, mqtt, exporter --
+      // off `this.st(id)`, so giving each vehicle its own subId here is
+      // what keeps two cars' trip/charge logs from ever mixing).
+      result.vehicles.forEach((vehicle) => {
+        const vin = String(vehicle.VIN || vehicle.vin || "").toUpperCase();
+        if (!vin || !configuredVins.has(vin)) return;
+        seenVins.add(vin);
+        const subId = this.identifierFor(Object.assign({}, config, { vin }));
+        this.onPayload(subId, config, {
+          vehicle: vehicle,
+          _meta: Object.assign(
+            { fetchedAt: new Date().toISOString(), vehicleCount: result.vehicles.length, failStreak: 0 },
+            result.meta || {}
+          )
+        });
+      });
+
+      // Retire any vehicle that WAS configured on a previous fetch but no
+      // longer is (removed from vehicles: since then) -- otherwise its
+      // MQTT status stays retained "online" and its Prometheus series
+      // keeps reporting its last-known numbers forever, indistinguishable
+      // from a car that's still actually being polled.
+      const prevVins = this.rotateVins[id];
+      if (prevVins) {
+        prevVins.forEach((vin) => {
+          if (!configuredVins.has(vin)) this._retireVehicle(config, vin);
+        });
+      }
+      this.rotateVins[id] = configuredVins;
+
+      // Separately: a vehicle can stay in vehicles: but drop out of the
+      // ACCOUNT's own response (sold, removed from the Kia app, etc.) --
+      // same stale-forever problem, different cause, so it needs its own
+      // retirement path rather than piggybacking on the config diff
+      // above. Debounced across several consecutive SUCCESSFUL fetches
+      // (not just polls -- a failed fetch never reaches this line at
+      // all) specifically because a single incomplete/flaky account
+      // response missing one car is a known, ordinary occurrence; only a
+      // sustained absence should be treated as "this vehicle is gone."
+      const miss = this.accountMissStreak[id] || {};
+      configuredVins.forEach((vin) => {
+        if (seenVins.has(vin)) {
+          delete miss[vin];
+        } else {
+          miss[vin] = (miss[vin] || 0) + 1;
+          if (miss[vin] >= ACCOUNT_MISS_RETIRE_AFTER) {
+            this._retireVehicle(config, vin);
+            delete miss[vin];
+          }
+        }
+      });
+      this.accountMissStreak[id] = miss;
+      return;
+    }
+
+    const vehicle = result.vehicles[0];
+    const payload = {
+      vehicle: vehicle,
+      _meta: Object.assign(
+        { fetchedAt: new Date().toISOString(), vehicleCount: result.vehicles.length, failStreak: 0 },
+        result.meta || {}
+      )
+    };
+    this.onPayload(id, config, payload);
   },
 
   /** common success path: record history, cache, emit, publish. */

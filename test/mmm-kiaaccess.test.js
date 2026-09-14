@@ -1,0 +1,268 @@
+/* node test/mmm-kiaaccess.test.js
+ *
+ * MMM-KiaAccess.js (the frontend module) had no direct test coverage in
+ * production -- it's a MagicMirror frontend module, coupled to browser
+ * globals (`Module`, `Log`, `document`) rather than `require()`, and every
+ * rotate-mode bug in it (per-vehicle state bleed, wrong routing of
+ * KIA_DATA/KIA_ERROR to the active vs. cached vehicle, cache-identifier
+ * construction) was previously verified only by a throwaway script during
+ * that one fix. This file loads the real MMM-KiaAccess.js (see
+ * require-mm-module.js for how it substitutes the browser globals) and
+ * exercises the highest-risk, DOM-independent logic directly: per-vehicle
+ * condition-state swapping (_loadCondState/_saveCondState/_CTX_FIELDS),
+ * identifier construction (_fullIdentifier/vinFromIdentifier/isForMe), and
+ * socketNotificationReceived()'s active-vs-cached vehicle routing.
+ *
+ * getDom() and the *El() rendering helpers are NOT covered here -- they
+ * need a real DOM and are addressed separately (see the core/visuals.js
+ * split).
+ */
+const assert = require("assert");
+const loadMMModule = require("./require-mm-module.js");
+
+// Builds a fresh module instance, runs start() (which schedules real
+// timers -- fetch watchdog, vehicle-rotate interval), then immediately
+// clears every timer start() may have armed so `node` can exit and so
+// scheduleFetch()'s 0ms KIA_FETCH doesn't fire mid-test. Tests that
+// specifically want a timer (scheduleRotate()) re-arm and re-clear it
+// themselves.
+function freshModule(overrides) {
+  const mod = loadMMModule();
+  mod.sendSocketNotification = () => {};
+  mod.updateDom = () => {};
+  mod.config = Object.assign({}, mod.defaults, overrides);
+  mod.start();
+  clearTimeout(mod._timer);
+  clearTimeout(mod._watchdog);
+  clearInterval(mod._rotateTimer);
+  return mod;
+}
+
+// ---- _fullIdentifier / vinFromIdentifier: must build exactly the same
+// shape node_helper.js's identifierFor() does, so KIA_LAST_PARKED and
+// KIA_DATA/KIA_ERROR for one vehicle always land in the same slot ----
+{
+  const mod = freshModule({
+    region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1"
+  });
+  assert.strictEqual(mod._fullIdentifier(null), "USA|KIA|u@e.com|VIN1", (
+    "non-rotating: falls back to config.vin"
+  ));
+  assert.strictEqual(mod._fullIdentifier("VIN2"), "USA|KIA|u@e.com|VIN2", (
+    "an explicit vin overrides config.vin (rotate mode)"
+  ));
+  assert.strictEqual(mod.vinFromIdentifier("USA|KIA|u@e.com|VIN1"), "VIN1");
+  // String(identifier || "").split("|") always yields at least one (possibly
+  // empty) segment, so both a missing and an empty identifier come back as ""
+  assert.strictEqual(mod.vinFromIdentifier(""), "");
+  assert.strictEqual(mod.vinFromIdentifier(undefined), "");
+}
+
+// ---- isForMe(): non-rotating mode accepts only its own account+vin
+// identifier; rotate mode accepts any configured vehicle's, rejects one
+// that was never configured ----
+{
+  const single = freshModule({
+    region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1"
+  });
+  assert.strictEqual(single.isForMe("USA|KIA|u@e.com|VIN1"), true);
+  assert.strictEqual(single.isForMe("USA|KIA|u@e.com|VIN2"), false);
+  assert.strictEqual(single.isForMe("EU|KIA|u@e.com|VIN1"), false, "region mismatch must be rejected");
+
+  const rotating = freshModule({
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  });
+  assert.strictEqual(rotating.isForMe("USA|KIA|u@e.com|VIN_A"), true);
+  assert.strictEqual(rotating.isForMe("USA|KIA|u@e.com|VIN_B"), true);
+  assert.strictEqual(rotating.isForMe("USA|KIA|u@e.com|VIN_C"), false, (
+    "a vehicle the account has but that isn't configured here must be rejected"
+  ));
+}
+
+// ---- activeVin() / rotateHeader(): pure functions of activeVehicleIndex,
+// null outside rotate mode ----
+{
+  const single = freshModule({ vin: "VIN1" });
+  assert.strictEqual(single.activeVin(), null, "no `vehicles:` configured -- not rotating");
+
+  const rotating = freshModule({
+    vehicles: [{ vin: "VIN_A", header: "Car A" }, { vin: "VIN_B" }]
+  });
+  assert.strictEqual(rotating.activeVin(), "VIN_A");
+  assert.strictEqual(rotating.rotateHeader(), "Car A", "explicit header: wins");
+  rotating.activeVehicleIndex = 1;
+  assert.strictEqual(rotating.activeVin(), "VIN_B");
+  assert.strictEqual(rotating.rotateHeader(), null, (
+    "no header: override and no cached payload yet -- falls back to null (caller uses config.header)"
+  ));
+  rotating.vehiclePayloads.VIN_B = { vehicle: { name: "My EV9" } };
+  assert.strictEqual(rotating.rotateHeader(), "My EV9", "falls back to the vehicle's own reported name");
+}
+
+// ---- scheduleRotate(): only arms an interval with 2+ configured vehicles;
+// a no-op (no timer) with 0 or 1 ----
+{
+  const single = freshModule({ vin: "VIN1" });
+  single.scheduleRotate();
+  assert.strictEqual(single._rotateTimer, undefined, "a single (or zero) vehicle must never arm a rotate timer");
+
+  const rotating = freshModule({
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }],
+    vehicleRotateInterval: 20000
+  });
+  rotating.scheduleRotate();
+  assert.ok(rotating._rotateTimer, "2+ configured vehicles must arm a rotate timer");
+  clearInterval(rotating._rotateTimer); // avoid keeping the test process alive
+}
+
+// ---- _loadCondState / _saveCondState / _CTX_FIELDS: the per-vehicle
+// context swap that stops one car's hysteresis/alert/tow-detection state
+// from leaking onto another car when rotating. This is the exact class of
+// bug described in the code's own comment above _CTX_FIELDS: switching
+// cars must never compare car B's GPS reading against car A's parked
+// anchor. ----
+{
+  const mod = freshModule({
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  });
+
+  // car A: parks in Pittsburgh, one-shot alert already announced
+  mod._loadCondState("VIN_A");
+  mod._lastParked = { lat: 40.44, lon: -79.99, odo: 12345 };
+  mod._homeUnpluggedSince = 1000;
+  mod.announcedActive = { batteryLow: true };
+  mod._saveCondState("VIN_A");
+
+  // car B: fresh state, never touched this session yet -- must NOT see any
+  // of car A's values, not even as defaults
+  mod._loadCondState("VIN_B");
+  assert.strictEqual(mod._lastParked, null, "car B must start with no parked anchor, not car A's");
+  assert.strictEqual(mod._homeUnpluggedSince, null);
+  assert.deepStrictEqual(mod.announcedActive, {});
+  mod._lastParked = { lat: 41.5, lon: -81.7, odo: 500 }; // Cleveland
+  mod._saveCondState("VIN_B");
+
+  // back to car A: must restore EXACTLY what was saved, unaffected by B
+  mod._loadCondState("VIN_A");
+  assert.deepStrictEqual(mod._lastParked, { lat: 40.44, lon: -79.99, odo: 12345 }, (
+    "switching back to car A must restore its own anchor, not car B's Cleveland position " +
+    "(the exact bug this state-swap exists to prevent)"
+  ));
+  assert.strictEqual(mod._homeUnpluggedSince, 1000);
+  assert.deepStrictEqual(mod.announcedActive, { batteryLow: true });
+
+  // every _CTX_FIELDS entry must round-trip, not just the ones asserted above
+  mod._CTX_FIELDS.forEach((f) => {
+    assert.notStrictEqual(mod[f], undefined, `_CTX_FIELDS entry "${f}" must be defined on \`this\` after _loadCondState`);
+  });
+}
+
+// ---- _loadCondState(vin): first touch this session seeds _lastParked from
+// that vehicle's own cached KIA_DATA payload (survives a MagicMirror
+// restart), not from whatever car was active before it ----
+{
+  const mod = freshModule({
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  });
+  mod.vehiclePayloads.VIN_B = { lastParked: { lat: 9, lon: 9, odo: 9 } };
+  mod._loadCondState("VIN_B");
+  assert.deepStrictEqual(mod._lastParked, { lat: 9, lon: 9, odo: 9 }, (
+    "a vehicle's first-touch state must seed from ITS OWN cached payload's lastParked"
+  ));
+}
+
+// ---- _loadCondState(null) (non-rotating mode): one-time restore of
+// _lastParked from rawPayload, and only ever once (undefined vs. legitimate
+// null must be distinguishable) ----
+{
+  const mod = freshModule({ vin: "VIN1" });
+  mod.rawPayload = { lastParked: { lat: 5, lon: 5, odo: 5 } };
+  assert.strictEqual(mod._lastParked, undefined, "never touched yet this session");
+  mod._loadCondState(null);
+  assert.deepStrictEqual(mod._lastParked, { lat: 5, lon: 5, odo: 5 });
+
+  // now a legitimate null (car has no anchor yet) must NOT be silently
+  // overwritten by a stale rawPayload on the next poll
+  mod._lastParked = null;
+  mod.rawPayload = { lastParked: { lat: 99, lon: 99, odo: 99 } };
+  mod._loadCondState(null);
+  assert.strictEqual(mod._lastParked, null, (
+    "a legitimate null anchor must not be re-fetched from a later, unrelated payload"
+  ));
+}
+
+// ---- socketNotificationReceived(): rotate mode must only touch
+// rawPayload/rendering for the ACTIVE vehicle; a non-active vehicle's
+// KIA_DATA/KIA_ERROR is cached silently and must not disturb what's on
+// screen ----
+{
+  const mod = freshModule({
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  });
+  // VIN_A is active (activeVehicleIndex 0 from start())
+  assert.strictEqual(mod.activeVin(), "VIN_A");
+  mod.rawPayload = { vehicle: { VIN: "VIN_A" }, _meta: {} };
+  const sentinelRawPayload = mod.rawPayload;
+
+  const idB = mod._fullIdentifier("VIN_B");
+  mod.socketNotificationReceived("KIA_DATA", {
+    identifier: idB,
+    payload: { vehicle: { VIN: "VIN_B", ev_battery_percentage: 42 }, _meta: {} }
+  });
+
+  assert.strictEqual(mod.rawPayload, sentinelRawPayload, (
+    "a non-active vehicle's KIA_DATA must never touch rawPayload (the active vehicle's own data)"
+  ));
+  assert.strictEqual(mod.vehiclePayloads.VIN_B.vehicle.ev_battery_percentage, 42, (
+    "the non-active vehicle's payload must still be cached for when it becomes active"
+  ));
+
+  // now KIA_DATA for the ACTIVE vehicle must update rawPayload
+  const idA = mod._fullIdentifier("VIN_A");
+  mod.socketNotificationReceived("KIA_DATA", {
+    identifier: idA,
+    payload: { vehicle: { VIN: "VIN_A", ev_battery_percentage: 77 }, _meta: {} }
+  });
+  assert.strictEqual(mod.rawPayload.vehicle.ev_battery_percentage, 77, (
+    "the active vehicle's own KIA_DATA must update rawPayload"
+  ));
+
+  // an identifier for a vehicle that was never configured must be ignored
+  // entirely (isForMe() gate) -- must not throw, must not create a cache entry
+  mod.socketNotificationReceived("KIA_DATA", {
+    identifier: "USA|KIA|u@e.com|VIN_UNCONFIGURED",
+    payload: { vehicle: { VIN: "VIN_UNCONFIGURED" }, _meta: {} }
+  });
+  assert.strictEqual(mod.vehiclePayloads.VIN_UNCONFIGURED, undefined, (
+    "an unconfigured vehicle's data must be dropped by the isForMe() gate, not cached"
+  ));
+
+  clearTimeout(mod._timer);
+  clearTimeout(mod._watchdog);
+}
+
+// ---- socketNotificationReceived(): KIA_ERROR follows the same
+// active-vs-cached routing as KIA_DATA ----
+{
+  const mod = freshModule({
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  });
+  mod.errorMessage = null;
+
+  const idB = mod._fullIdentifier("VIN_B");
+  mod.socketNotificationReceived("KIA_ERROR", { identifier: idB, error: "auth failed for B" });
+  assert.strictEqual(mod.errorMessage, null, "a non-active vehicle's error must not surface on screen");
+  assert.strictEqual(mod.vehicleErrors.VIN_B, "auth failed for B");
+
+  const idA = mod._fullIdentifier("VIN_A");
+  mod.socketNotificationReceived("KIA_ERROR", { identifier: idA, error: "auth failed for A" });
+  assert.strictEqual(mod.errorMessage, "auth failed for A", "the active vehicle's error must surface");
+
+  clearTimeout(mod._timer);
+  clearTimeout(mod._watchdog);
+}
+
+console.log("all mmm-kiaaccess tests passed");

@@ -336,7 +336,8 @@ Module.register("MMM-KiaAccess", {
       this.file("core/state.js"),
       this.file("core/sessions.js"),
       this.file("core/trips.js"),
-      this.file("core/range.js")
+      this.file("core/range.js"),
+      this.file("core/dest-planner.js")
     ];
   },
 
@@ -366,6 +367,7 @@ Module.register("MMM-KiaAccess", {
     this.stateBuilder = typeof KiaAccessState !== "undefined" ? KiaAccessState : null;
     this.sessionLib = typeof KiaAccessSessions !== "undefined" ? KiaAccessSessions : null;
     this.tripLib = typeof KiaAccessTrips !== "undefined" ? KiaAccessTrips : null;
+    this.destPlanner = typeof KiaAccessDestPlanner !== "undefined" ? KiaAccessDestPlanner : null;
     this.flatMap = null;
     this.history = [];
     this.sessions = [];
@@ -1655,55 +1657,18 @@ Module.register("MMM-KiaAccess", {
     }
     if (!rows.length) return null;
 
-    // zone filter (calendar + static always pass). "-Name" excludes; a plain
-    // list is a whitelist. HA's zone option wins over config. Matches on the
-    // zone entity id OR its name, with punctuation stripped so "zone.nana_s"
-    // and "Nana's" are the same key.
-    const znorm = (s) => String(s || "").toLowerCase()
-      .replace(/^zone\./, "").replace(/[^a-z0-9]+/g, "");
+    // Which destinations survive (zone include/exclude, unreachable
+    // filter), their order (grouped by source vs. nearest-first) and the
+    // delay-colour thresholds -- all pure decision logic, in
+    // core/dest-planner.js so it's unit-tested without a DOM. HA's live
+    // mmZones override wins over the static config.visuals.drivingTimes.zones
+    // list when present.
     const haZones = (this.rangeReach && this.rangeReach.mmZones) || "";
-    const zfRaw = haZones.trim()
-      ? haZones.split(/[\n,]/)
-      : (Array.isArray(dt.zones) ? dt.zones : []);
-    const inc = [], exc = [];
-    zfRaw.map((z) => String(z).trim()).filter(Boolean).forEach((z) => {
-      (z[0] === "-" || z[0] === "!" ? exc : inc).push(znorm(z.replace(/^[-!]/, "")));
-    });
-    if (inc.length || exc.length) {
-      rows = rows.filter((r) => {
-        if (r.source !== "zone") return true;
-        const keys = [znorm(r.name), znorm(r.entityId)].filter(Boolean);
-        if (exc.some((e) => keys.includes(e))) return false;
-        return inc.length === 0 || inc.some((k) => keys.includes(k));
-      });
+    if (this.destPlanner) {
+      rows = this.destPlanner.planDestinations(rows, dt, haZones);
     }
-
-    if (dt.hideUnreachable) rows = rows.filter((r) => r.reachable);
-    if ((dt.order || "grouped") === "nearest") {
-      rows.sort((a, b) => a.km - b.km);
-    } else {
-      // grouped: calendar (by event time) -> static -> other US zones (by distance)
-      const rank = { calendar: 0, static: 1, zone: 2 };
-      rows.sort((a, b) => {
-        const g = (rank[a.source] != null ? rank[a.source] : 3) -
-          (rank[b.source] != null ? rank[b.source] : 3);
-        if (g) return g;
-        if (a.source === "calendar")
-          return String(a.when || "").localeCompare(String(b.when || ""));
-        return a.km - b.km;
-      });
-    }
-    rows = rows.slice(0, Number(dt.max) || 8);
-
-    const stops = (Array.isArray(dt.delayStops) ? dt.delayStops : [])
-      .filter((s) => s && isFinite(s.pctOver))
-      .sort((a, b) => a.pctOver - b.pctOver);
-    const delayColor = (r) => {
-      if (r.delayPct == null) return null;
-      let col = null;
-      stops.forEach((s) => { if (r.delayPct >= s.pctOver) col = s.color || null; });
-      return col;
-    };
+    const stops = this.destPlanner ? this.destPlanner.delayColorStops(dt.delayStops) : [];
+    const delayColor = (r) => this.destPlanner ? this.destPlanner.delayColorFor(r, stops) : null;
 
     const pack = Number(dt.packKwh) ||
       Number(((this.config.visuals || {}).chargeCost || {}).capacityKwh) ||
