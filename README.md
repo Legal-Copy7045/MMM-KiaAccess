@@ -1141,11 +1141,14 @@ Topics: `kia/ev9/ev_battery_percentage`, `kia/ev9/is_locked`,
 `kia/ev9/_meta/fetched_at`, `kia/ev9/_meta/stale`, and `kia/ev9/status`
 (`online` / `offline` via LWT). Current-state only — derive change triggers
 downstream, or use the `KIA_ACCESS_STATE_CHANGED` notification above.
-**Give each Kia account its own `topicPrefix`** if you run more than one on
-the same broker — `<prefix>/status` reflects one connection's liveness, so
-two accounts sharing a prefix would have that topic flip based on whichever
-connection last (dis)connected rather than either account specifically (a
-one-time warning is logged if this happens).
+**Running more than one Kia account through the same broker + `topicPrefix`?**
+Each connection also publishes a reliable, account-scoped status at
+`kia/ev9/status/<your-email>` — unlike the plain `kia/ev9/status` above
+(which reflects whichever connection last (dis)connected when two accounts
+share a prefix, not either one specifically; a one-time warning is logged
+if this happens), the scoped one is backed by that connection's own
+Last-Will-and-Testament and always correctly flips to `offline` if — and
+only if — that specific account's connection drops.
 
 The raw API dump (`vehicle.data.*`, which includes GPS) is **not** fanned out
 to individual retained topics; set `mqtt.publishRaw: true` if you want it. The

@@ -165,6 +165,16 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         tmdata = await self._timers_store.async_load() or {}
         self._home_unplugged_since = tmdata.get("home_unplugged_since")
         self._moved_since = tmdata.get("moved_since")
+        # _last_parked (the moved-while-parked/tow-theft anchor) used to be
+        # in-memory only -- a HA restart (routine: updates, crashes) reset it
+        # to None, and the car's position on the FIRST post-restart poll
+        # became the new anchor unconditionally (see the `else` branch
+        # below). A vehicle towed/moved WHILE HA was down would be silently
+        # adopted as "where it's always been parked" instead of being
+        # detected as having moved -- the exact scenario this whole
+        # detector exists to catch. Restore it the same way as the other
+        # two timers.
+        self._last_parked = tmdata.get("last_parked")
 
     async def async_set_pref(self, key: str, value) -> None:
         self.climate_prefs[key] = value
@@ -1304,7 +1314,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # continuously true", which must survive a HA restart (routine:
         # updates, crashes) without silently resetting the clock and
         # delaying the alert by another full graceMin/sustainedMin.
-        timers_before = (self._home_unplugged_since, self._moved_since)
+        timers_before = (self._home_unplugged_since, self._moved_since, self._last_parked)
         state["atHome"] = self._at_home(state)
         home_unplugged = state["atHome"] is True and state.get("plugged") is not True
         if home_unplugged and self._home_unplugged_since is None:
@@ -1426,11 +1436,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._prev_cond["_charging"] = res["meta"]["charging"]
         self._first_alert_run = False
 
-        timers_after = (self._home_unplugged_since, self._moved_since)
+        timers_after = (self._home_unplugged_since, self._moved_since, self._last_parked)
         if timers_after != timers_before:
             await self._timers_store.async_save({
                 "home_unplugged_since": self._home_unplugged_since,
                 "moved_since": self._moved_since,
+                "last_parked": self._last_parked,
             })
 
     # commands gated by the "block automated climate" option

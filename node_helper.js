@@ -73,6 +73,21 @@ module.exports = NodeHelper.create({
   socketNotificationReceived(notification, payload) {
     if (notification === "KIA_FETCH") this.handleFetch(payload);
     else if (notification === "KIA_WEBHOOK") this.handleWebhook(payload);
+    else if (notification === "KIA_LAST_PARKED") this.handleLastParked(payload);
+  },
+
+  // The frontend's moved-while-parked (tow/theft) anchor changed -- persist
+  // it into that vehicle's own cache file so a MagicMirror restart doesn't
+  // lose it (see st()'s and emitData()'s comments). `identifier` is the
+  // same region|brand|username|VIN this vehicle's KIA_DATA/KIA_ERROR
+  // already use, so this naturally stays isolated per vehicle in rotate
+  // mode -- no new id scheme needed.
+  handleLastParked(msg) {
+    const identifier = msg && msg.identifier;
+    if (!identifier) return;
+    const s = this.st(identifier);
+    s.lastParked = (msg.lastParked && typeof msg.lastParked === "object") ? msg.lastParked : null;
+    this.persist(identifier);
   },
 
   // ---- optional outbound webhook: one HTTP POST per edge-triggered event ----
@@ -165,7 +180,16 @@ module.exports = NodeHelper.create({
     var s = {
       failStreak: 0, reqTimes: [], lastGood: null, history: [],
       sessions: [], openSession: null, rangeMap: null,
-      trips: [], openTrip: null
+      trips: [], openTrip: null,
+      // moved-while-parked (tow/theft) anchor -- lives on the FRONTEND
+      // (MMM-KiaAccess.js's processConditions()), not computed here, but
+      // persisted through this per-vehicle cache like everything else so a
+      // MagicMirror restart doesn't lose it (see handleLastParked() below
+      // and emitData()'s round-trip). Without this, a vehicle towed/moved
+      // while MM was down would silently become its own new "parked here"
+      // baseline on the first post-restart poll instead of being detected
+      // as having moved at all.
+      lastParked: null
     };
     try {
       var disk = JSON.parse(fs.readFileSync(this.cacheFile(id), "utf8"));
@@ -177,6 +201,7 @@ module.exports = NodeHelper.create({
         s.rangeMap = disk.rangeMap || null;
         s.trips = Array.isArray(disk.trips) ? disk.trips : [];
         s.openTrip = disk.openTrip || null;
+        s.lastParked = disk.lastParked || null;
       }
     } catch (e) {
       /* no cache yet */
@@ -205,7 +230,8 @@ module.exports = NodeHelper.create({
           lastGood: s.lastGood, history: s.history,
           sessions: s.sessions, openSession: s.openSession,
           rangeMap: s.rangeMap,
-          trips: s.trips, openTrip: s.openTrip
+          trips: s.trips, openTrip: s.openTrip,
+          lastParked: s.lastParked
         })
       );
       fs.renameSync(tmp, file);
@@ -662,8 +688,16 @@ module.exports = NodeHelper.create({
           // setSnapshot() kept being called as if /metrics were being
           // served while every actual scrape just failed with nothing
           // logged anywhere to explain why.
-          onError: (err) =>
-            Log.error(`[MMM-KiaAccess] Prometheus server on :${port} failed: ${err.message}`)
+          onError: (err) => {
+            Log.error(`[MMM-KiaAccess] Prometheus server on :${port} failed: ${err.message}`);
+            // `this.promServers[port] = srv` (below) already ran by the time
+            // this fires (listen() is sync, the bind failure/success is
+            // reported asynchronously) -- without clearing it, every future
+            // poll would see a truthy-but-dead server here and never retry
+            // binding even once the port becomes free.
+            if (this.promServers[port] === srv) delete this.promServers[port];
+            srv.stop();
+          }
         });
         srv.start();
         this.promServers[port] = srv;
@@ -913,6 +947,9 @@ module.exports = NodeHelper.create({
     else if (s.rangeReach) payload.rangeReach = s.rangeReach;
     payload.trips = s.trips.slice(-60);
     payload.openTrip = s.openTrip || null;
+    // round-tripped so the frontend can restore its moved-while-parked
+    // anchor after a restart instead of starting blank (see st()'s comment)
+    payload.lastParked = s.lastParked || null;
     // note: `config` (credentials / token) is deliberately NOT echoed back
     this.sendSocketNotification("KIA_DATA", { identifier: id, payload });
   },
@@ -942,25 +979,32 @@ module.exports = NodeHelper.create({
 
     // Two DIFFERENT connections (distinct credentials -- see `key` above)
     // can still legitimately share the same topicPrefix (two accounts, one
-    // broker, same prefix chosen independently). Each gets its own MQTT
-    // connection now, correctly, but the bridge-level `<prefix>/status`
-    // Last-Will-and-Testament below is keyed ONLY by prefix -- one
-    // connection dropping publishes offline to a topic the OTHER,
-    // perfectly healthy connection also claims as its own status. Nothing
-    // here can safely rename that topic without breaking every existing
-    // single-connection setup's dashboards/automations watching it, so
-    // this only warns (once) rather than silently changing behaviour --
-    // give each config its own topicPrefix to get a reliable bridge status.
+    // broker, same prefix chosen independently). mqtt.js only supports ONE
+    // static Last-Will-and-Testament per connection, so it has to point
+    // somewhere deterministic and connection-specific -- a plain
+    // `<prefix>/status` shared by both connections would mean one
+    // connection dropping publishes offline to a topic the OTHER, healthy
+    // connection also claims, flipping based on whichever last (dis)
+    // connected rather than reflecting either account specifically.
+    // statusTopic below is derived from the connection's own identity
+    // (username, or the URL if anonymous) so it's stable across restarts
+    // and never collides between two genuinely different accounts, even
+    // sharing one topicPrefix.
+    const acctSeg = String(m.username || m.url || "account")
+      .toLowerCase().replace(/[^a-z0-9_.@-]/g, "_");
+    const statusTopic = prefix + "/status/" + acctSeg;
+
     const owner = this.mqttPrefixOwners[prefix];
     if (owner === undefined) {
       this.mqttPrefixOwners[prefix] = key;
     } else if (owner !== key) {
       Log.warn(
         `[MMM-KiaAccess] mqtt topicPrefix "${prefix}" is used by more than one ` +
-        `independently configured connection -- "${prefix}/status" will flip ` +
-        `between online/offline based on whichever connection last (dis)connected, ` +
-        `not the account this config actually belongs to. Give each account its ` +
-        `own mqtt.topicPrefix if you rely on that topic.`
+        `independently configured connection -- the plain "${prefix}/status" topic ` +
+        `will flip between online/offline based on whichever connection last (dis)` +
+        `connected, not either account specifically. Use "${statusTopic}" instead ` +
+        `for a reliable per-account status, or give each account its own ` +
+        `mqtt.topicPrefix.`
       );
     }
 
@@ -968,11 +1012,18 @@ module.exports = NodeHelper.create({
       username: m.username || undefined,
       password: m.password || undefined,
       reconnectPeriod: 30000,
-      will: { topic: prefix + "/status", payload: "offline", retain: true, qos: 0 }
+      will: { topic: statusTopic, payload: "offline", retain: true, qos: 0 }
     });
     client._kiaDiscovered = false;
     client.on("connect", () => {
       Log.info("[MMM-KiaAccess] mqtt connected to " + m.url);
+      client.publish(statusTopic, "online", { retain: true });
+      // Legacy plain topic, best-effort: still published "online" here for
+      // any dashboard/automation already watching it, but it no longer
+      // carries this connection's own Last-Will -- that's on statusTopic
+      // above now, the only one guaranteed to flip to "offline" on an
+      // ungraceful disconnect when more than one connection shares this
+      // topicPrefix (see the warning above).
       client.publish(prefix + "/status", "online", { retain: true });
       client._kiaDiscovered = false; // re-send discovery after a reconnect
     });

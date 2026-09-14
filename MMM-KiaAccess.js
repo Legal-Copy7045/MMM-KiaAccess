@@ -518,11 +518,31 @@ Module.register("MMM-KiaAccess", {
     "announcedActive", "_alertShown", "_modalReason"
   ],
   _loadCondState(vin) {
-    if (!vin) return; // not rotating: this.prevCond etc are already correct
+    if (!vin) {
+      // not rotating: this.prevCond etc live directly on `this` and never
+      // need swapping -- but _lastParked still needs a ONE-TIME restore
+      // from node_helper's persisted copy after a MagicMirror restart
+      // (this.rawPayload is already set to the current payload by the time
+      // this runs -- see the KIA_DATA handler above). undefined (never
+      // touched this session), not falsy, is the signal to restore: a
+      // legitimate null (no anchor recorded yet) must not be re-fetched
+      // from a now-stale payload on every subsequent poll.
+      if (this._lastParked === undefined) {
+        this._lastParked = (this.rawPayload && this.rawPayload.lastParked) || null;
+      }
+      return;
+    }
     if (!this.vehicleCondState[vin]) {
+      // _lastParked seeded from node_helper's persisted copy (round-tripped
+      // on every KIA_DATA, see emitData()) rather than hardcoded null -- the
+      // first time THIS SESSION touches this vin, in-memory vehicleCondState
+      // has nothing of its own yet, but node_helper's on-disk cache may
+      // already know where this car was last parked from before a
+      // MagicMirror restart.
+      const seed = (this.vehiclePayloads[vin] && this.vehiclePayloads[vin].lastParked) || null;
       this.vehicleCondState[vin] = {
         prevCond: {}, firstConditionRun: true,
-        _homeUnpluggedSince: null, _lastParked: null, _movedSince: null,
+        _homeUnpluggedSince: null, _lastParked: seed, _movedSince: null,
         announcedActive: {}, _alertShown: {}, _modalReason: null
       };
     }
@@ -530,10 +550,14 @@ Module.register("MMM-KiaAccess", {
     this._CTX_FIELDS.forEach((f) => { this[f] = slot[f]; });
   },
   _saveCondState(vin) {
-    if (!vin) return;
+    if (!vin) {
+      this._maybeSendLastParked(vin, this._lastParked);
+      return;
+    }
     const slot = {};
     this._CTX_FIELDS.forEach((f) => { slot[f] = this[f]; });
     this.vehicleCondState[vin] = slot;
+    this._maybeSendLastParked(vin, this._lastParked);
   },
 
   // identifierFor() in node_helper.js is `[region,brand,username,vin].join
@@ -542,6 +566,37 @@ Module.register("MMM-KiaAccess", {
   vinFromIdentifier(identifier) {
     const parts = String(identifier || "").split("|");
     return parts.length ? parts[parts.length - 1] : null;
+  },
+
+  // The full identifier for a given vin (or the account-level one when not
+  // rotating, i.e. vin is null) -- same shape node_helper.js's
+  // identifierFor() builds, so a KIA_LAST_PARKED sent here lands in exactly
+  // the cache file/state slot that vehicle's own KIA_DATA/KIA_ERROR already
+  // use.
+  _fullIdentifier(vin) {
+    const c = this.serialisableConfig();
+    return [c.region, c.brand, c.username, vin || c.vin || "auto"].join("|");
+  },
+
+  // Persist the moved-while-parked anchor to node_helper (see its
+  // handleLastParked()) whenever it actually changes -- not on every poll,
+  // which would mean a disk write every cycle for a value that's usually
+  // unchanged. `vin` is null in non-rotating mode; _fullIdentifier() falls
+  // back to the account-level id there, matching how that vehicle's own
+  // KIA_DATA already addresses it.
+  _maybeSendLastParked(vin, lastParked) {
+    this._sentLastParked = this._sentLastParked || {};
+    const key = vin || "";
+    const prev = this._sentLastParked[key];
+    const same = prev === lastParked ||
+      (prev && lastParked && prev.lat === lastParked.lat &&
+        prev.lon === lastParked.lon && prev.odo === lastParked.odo);
+    if (same) return;
+    this._sentLastParked[key] = lastParked;
+    this.sendSocketNotification("KIA_LAST_PARKED", {
+      identifier: this._fullIdentifier(vin),
+      lastParked: lastParked || null
+    });
   },
 
   // Renders whichever vehicle's data is currently cached for the active
@@ -554,14 +609,18 @@ Module.register("MMM-KiaAccess", {
     const cached = vin && this.vehiclePayloads[vin];
     this.loading = !cached;
     this.rawPayload = cached || null;
+    // rangeMap/rangeReach are per-vehicle state, same as everything else
+    // here -- always REPLACE (never merge with `if (cached.x) this.x = …`),
+    // or a car with no map/reach data yet would keep showing whatever the
+    // PREVIOUS car on screen last had, under the new car's name and stats.
+    this.rangeMap = (cached && cached.rangeMap) || null;
+    this.rangeReach = (cached && cached.rangeReach) || null;
     if (cached) {
       this.history = cached.history || [];
       this.sessions = cached.sessions || [];
       this.openSession = cached.openSession || null;
       this.trips = cached.trips || [];
       this.openTrip = cached.openTrip || null;
-      if (cached.rangeMap) this.rangeMap = cached.rangeMap;
-      if (cached.rangeReach) this.rangeReach = cached.rangeReach;
     }
     this.errorMessage = (vin && this.vehicleErrors[vin]) || null;
     this.liveChargeTimer();
@@ -705,8 +764,16 @@ Module.register("MMM-KiaAccess", {
       this.openSession = data.payload.openSession || null;
       this.trips = data.payload.trips || [];
       this.openTrip = data.payload.openTrip || null;
-      if (data.payload.rangeMap) this.rangeMap = data.payload.rangeMap;
-      if (data.payload.rangeReach) this.rangeReach = data.payload.rangeReach;
+      // Always replace, never `if (truthy) assign` -- node_helper.js's
+      // emitData() already does the "keep the last known value if this
+      // particular poll didn't have one" job server-side (per-vehicle, via
+      // s.rangeMap / s.rangeReach), so data.payload.rangeMap/rangeReach is
+      // already the right value for THIS vin, explicit null included when
+      // it genuinely has none yet. A redundant `if` guard on the client
+      // only risks holding onto a DIFFERENT (previously active) vehicle's
+      // leftover value instead of correctly reflecting "this car has none."
+      this.rangeMap = data.payload.rangeMap || null;
+      this.rangeReach = data.payload.rangeReach || null;
       this.liveChargeTimer(); // start/stop the "cost this charge" refresh
       this.stale = !!m.stale;
       this.staleNote = m.note || null;
