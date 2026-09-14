@@ -190,6 +190,26 @@ def _coordinator_for(hass: HomeAssistant, call: ServiceCall) -> KiaAccessCoordin
     )
 
 
+def _strict_int(value):
+    """Like vol.Coerce(int), but rejects a genuinely fractional value
+    instead of silently truncating it -- vol.Coerce(int)(80.9) == 80 with
+    no error, which is surprising for a raw/automation service call (the
+    HA UI's own number selector already prevents this for a human, so this
+    only matters for a call that bypasses it). A whole-number float or
+    numeric string (80.0, "80") is still accepted."""
+    if isinstance(value, bool):
+        raise vol.Invalid("must be a whole number, not a boolean")
+    if isinstance(value, int):
+        return value
+    try:
+        f = float(value)
+    except (TypeError, ValueError) as exc:
+        raise vol.Invalid(f"not a number: {value!r}") from exc
+    if not f.is_integer():
+        raise vol.Invalid(f"must be a whole number, got {value!r}")
+    return int(f)
+
+
 def _register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, COMMANDS[0]["key"]):
         return
@@ -198,7 +218,7 @@ def _register_services(hass: HomeAssistant) -> None:
         opt_schema = {vol.Optional("entry_id"): cv.string}
         for opt_name, meta in (spec.get("options") or {}).items():
             base = {
-                "int": vol.Coerce(int),
+                "int": _strict_int,
                 "float": vol.Coerce(float),
                 "bool": cv.boolean,
             }.get(meta.get("type"), cv.string)
