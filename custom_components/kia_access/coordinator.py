@@ -106,6 +106,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self.climate_prefs: dict = dict(DEFAULT_CLIMATE_PREFS)
         # last control command, for the "action in progress" sensor
         self.last_action: dict = {"name": None, "status": "idle", "at": None}
+        # command key -> {"since", "message"} for a command whose request
+        # timed out (kia_client.CommandUnconfirmed) -- Kia's protocol gives
+        # no way to ask afterward whether it actually reached the vehicle,
+        # so a blind retry isn't necessarily safe (most consequential for
+        # the climate/charge start-vs-stop pairs). Cleared the moment that
+        # same command is attempted again, successfully or not -- the point
+        # is only to flag the retry itself, not track it indefinitely.
+        self._unconfirmed_commands: dict[str, dict] = {}
         # set for exactly one _job() call by async_force_refresh() -- lets the
         # manual "Refresh now" button wake the car even when "poll car
         # directly" is off for the regular scheduled polls
@@ -913,6 +921,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         return str(v)
 
     @property
+    def unconfirmed_commands(self) -> dict:
+        """{command_key: {"since", "message"}} for a command whose request
+        timed out and hasn't been retried yet -- see async_run_command()."""
+        return dict(self._unconfirmed_commands)
+
+    @property
     def parked_location(self) -> dict | None:
         """Where the car was last seen parked, with map links + distance home."""
         p = self._parked
@@ -1426,6 +1440,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "card, the button, or Developer Tools."
             )
         job = self._job(command=command, options=options or {})
+        # A new attempt of this command resolves any prior "unconfirmed" flag
+        # for it -- the point is only to warn about the retry itself, not to
+        # track an unresolved ambiguity forever.
+        self._unconfirmed_commands.pop(command, None)
         self.last_action = {
             "name": command,
             "status": "running",
@@ -1435,6 +1453,19 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         try:
             await self.hass.async_add_executor_job(kia_client.run_command, job)
             self.last_action = {**self.last_action, "status": "done"}
+        except kia_client.CommandUnconfirmed as err:
+            # The request timed out -- Kia's protocol has no ID-less way to
+            # ask afterward whether the vehicle actually received it, so
+            # this is genuinely unknown, not a clear failure. Flag it so a
+            # caller (the card, before letting a climate/charge start-vs-
+            # stop retry through) can ask the user to confirm rather than
+            # silently sending a second command on top of an unresolved one.
+            self.last_action = {**self.last_action, "status": "unconfirmed"}
+            self._unconfirmed_commands[command] = {
+                "since": dt_util.utcnow().isoformat(),
+                "message": str(err),
+            }
+            raise
         except Exception:
             self.last_action = {**self.last_action, "status": "failed"}
             raise

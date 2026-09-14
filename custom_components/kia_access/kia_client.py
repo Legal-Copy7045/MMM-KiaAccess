@@ -59,6 +59,16 @@ class ClientError(Exception):
     """Any other failure worth reporting to the caller verbatim."""
 
 
+class CommandUnconfirmed(ClientError):
+    """A control command's HTTP request timed out (or the car itself never
+    answered) -- Kia's own protocol gives no ID-less way to ask afterward
+    "did anything get queued for this vehicle?", so whether the command
+    actually landed is genuinely unknown, not "failed". A subclass of
+    ClientError so existing `except ClientError` callers keep working
+    unchanged; callers that care about the distinction can catch this
+    specifically to avoid treating a blind retry as safe."""
+
+
 # ---------------------------------------------------------------------------
 # JSON helpers (shared with the bridge's vehicle dump)
 # ---------------------------------------------------------------------------
@@ -330,6 +340,20 @@ def fetch(job, token_file=None):
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
         raise ClientError("no matching vehicles on the account")
+    if not job.get("vin") and len(selected) > 1:
+        # Reads used to silently fall back to "vehicle 1" here, same as the
+        # control path used to before it was locked down (see run_command()).
+        # Without an explicit VIN, which physical car that is can change
+        # between polls (the account API's own vehicle order isn't
+        # guaranteed stable) -- silently mixing two cars' data into one set
+        # of entities/history/sessions/trips/alerts is worse than a clear,
+        # one-time setup error asking for a VIN. Fail loudly instead of
+        # guessing, for both callers of this shared function (MM and HA).
+        raise ClientError(
+            f"{len(selected)} vehicles on this account — set a VIN in the "
+            "config to pick one (reads need an explicit target, same as "
+            "control commands)"
+        )
     vehicles = [dump_vehicle(v) for v in selected]
 
     meta = {}
@@ -425,7 +449,17 @@ def run_command(job, token_file=None):
             return metric.get("default")
         return spec_for_key.get("default")
 
+    action_id = None
     try:
+        # VehicleManager's control methods (lock/unlock/start_climate/...)
+        # each return Kia's own server-issued job id ("Xid") for the
+        # request -- previously discarded here. check_action_status(vehicle_
+        # id, action_id) can later poll whether it actually completed; that
+        # polling isn't wired up yet (Kia USA's implementation of it is a
+        # weak one-shot check, not worth building on without more research),
+        # but surfacing the id now means it's at least available for a
+        # caller/log line to reference, rather than lost the moment this
+        # function returns.
         if call == "climate_options":
             try:
                 from hyundai_kia_connect_api.ApiImpl import ClimateRequestOptions
@@ -438,14 +472,14 @@ def run_command(job, token_file=None):
                 val = _with_default(key)
                 if val is not None and hasattr(co, key):
                     setattr(co, key, val)
-            method(vehicle_id, co)
+            action_id = method(vehicle_id, co)
         elif call == "positional":
             args = [_with_default(a) for a in spec.get("args", [])]
-            method(vehicle_id, *args)
+            action_id = method(vehicle_id, *args)
         elif call == "poi":
-            method(vehicle_id, [_build_poi(opts)])
+            action_id = method(vehicle_id, [_build_poi(opts)])
         else:
-            method(vehicle_id)
+            action_id = method(vehicle_id)
     except ClientError:
         raise
     except NotImplementedError as exc:
@@ -454,9 +488,28 @@ def run_command(job, token_file=None):
             "(waiting on a hyundai_kia_connect_api implementation)"
         ) from exc
     except Exception as exc:  # noqa: BLE001
+        # A request timeout (the HTTP call itself, or "the server fails to
+        # establish a connection with the car" -- see the library's own
+        # ApiImplSession, which wraps requests.exceptions.Timeout into
+        # exactly this) means we genuinely don't know whether the command
+        # reached the vehicle -- Kia's protocol has no ID-less way to check
+        # afterward. That's categorically different from a clear rejection
+        # (bad PIN, unsupported command, etc.), so it needs its own
+        # exception type rather than a flat "failed", so a caller can avoid
+        # treating an immediate blind retry as obviously safe.
+        try:
+            from hyundai_kia_connect_api.exceptions import RequestTimeoutError
+        except Exception:  # noqa: BLE001
+            RequestTimeoutError = ()  # noqa: N806 -- library too old to have it
+        if RequestTimeoutError and isinstance(exc, RequestTimeoutError):
+            raise CommandUnconfirmed(
+                f"'{name}' request timed out -- Kia's servers may or may not "
+                "have received it; the vehicle's actual state is unknown "
+                "until its next status refresh"
+            ) from exc
         raise ClientError(f"{spec['method']} failed: {type(exc).__name__}: {exc}") from exc
 
-    return {"ok": True, "command": name, "vehicleId": vehicle_id}
+    return {"ok": True, "command": name, "vehicleId": vehicle_id, "actionId": action_id}
 
 
 def _geocode(address):

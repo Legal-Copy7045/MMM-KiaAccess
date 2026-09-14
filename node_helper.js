@@ -50,7 +50,6 @@ module.exports = NodeHelper.create({
     this.promServers = {}; // key -> exporter.PromServer
     this.haLive = {}; // id -> HaLiveClient (source: "homeassistant", mode: "push")
     this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
-    this._warnedMultiVehicle = {}; // id -> true once we've logged the no-VIN warning
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
     } catch (e) {
@@ -314,23 +313,14 @@ module.exports = NodeHelper.create({
       } catch (e) {
         return this.fail(id, config, `bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`);
       }
+      // kia_client.fetch() itself now refuses (result.ok === false) a
+      // multi-vehicle account with no VIN configured -- rather than warning
+      // here and silently picking [0], which physical car that was could
+      // change between polls. So by the time we reach this line,
+      // result.vehicles is guaranteed to have exactly one entry.
       if (!result.ok) return this.fail(id, config, result.error || "unknown bridge error");
       if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
         return this.fail(id, config, "bridge returned no vehicles");
-      }
-      // With no `vin` configured, kia_client returns every vehicle on the
-      // account and this always reads element [0] -- not guaranteed to be
-      // the same physical car from one poll to the next, and this module's
-      // own identifierFor() also collapses every un-VIN'd vehicle on an
-      // account into one shared cache/history file. Warn once rather than
-      // silently mixing two cars' data together.
-      if (!config.vin && result.vehicles.length > 1 && !this._warnedMultiVehicle[id]) {
-        this._warnedMultiVehicle[id] = true;
-        Log.warn(
-          `[MMM-KiaAccess] this account has ${result.vehicles.length} vehicles and no ` +
-          "'vin' is set in config.js -- data may jump between cars from one poll to the " +
-          "next, and their history will be mixed together. Set vin: \"<VIN>\" to fix this."
-        );
       }
 
       const vehicle = result.vehicles[0];

@@ -146,7 +146,15 @@ class KiaAccessActionSensor(KiaAccessEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return dict(self.coordinator.last_action or {})
+        out = dict(self.coordinator.last_action or {})
+        # {command_key: {"since","message"}} for a command whose request
+        # timed out and hasn't been retried yet -- the card checks this
+        # before letting a climate/charge start-vs-stop retry through, since
+        # Kia's protocol gives no way to know whether the earlier one landed.
+        unconfirmed = self.coordinator.unconfirmed_commands
+        if unconfirmed:
+            out["unconfirmed_commands"] = unconfirmed
+        return out
 
 
 class KiaAccessRangeReachSensor(KiaAccessEntity, SensorEntity):

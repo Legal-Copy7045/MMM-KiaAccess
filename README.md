@@ -450,7 +450,7 @@ cache when the data actually changed, so a fast rate costs almost nothing.
     pin: "1234",
     brand: "KIA",            // KIA | HYUNDAI | GENESIS
     region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
-    vin: "",                 // blank = first vehicle on the account
+    vin: "",                 // blank = fine for a single-vehicle account; required if you have more than one
 
     // --- runtime ---
     pythonBin: "python3",    // command that runs kia_bridge.py
@@ -557,7 +557,7 @@ depends on its brand, region and powertrain):
 | `username` / `password` / `pin` | `""` | Kia Connect / Bluelink credentials. **Required for mode B**; not used when `source: "homeassistant"` |
 | `brand` | `"KIA"` | `KIA` \| `HYUNDAI` \| `GENESIS` (mode B) |
 | `region` | `"USA"` | `USA` `CA` `EU` `AU` `CN` `IN` `NZ` `BR` (mode B) |
-| `vin` | `""` | Blank = first vehicle on the account (mode B) |
+| `vin` | `""` | Blank is fine for a single-vehicle account; **required** if the account has more than one — which physical car "first" means isn't guaranteed stable between polls, so the bridge refuses rather than silently mixing two cars' data (mode B) |
 | `pythonBin` | `"python3"` | mode B — command used to run the bridge (`PYTHON` env var also works) |
 | `fetchTimeout` | `90` | Seconds before the bridge process is killed |
 | `updateInterval` | `1800000` | ms between fetches. **Mode C** default: `300000` (push — fallback poll) or `30000` (poll) |

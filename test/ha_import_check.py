@@ -216,6 +216,52 @@ assert hasattr(co.KiaAccessCoordinator, "async_force_refresh")
 _btn = importlib.import_module(f"{pkg}.button")
 assert hasattr(_btn, "KiaAccessRefreshButton")
 
+# CommandUnconfirmed: a request timeout is genuinely ambiguous (the vehicle
+# may or may not have received it), so it must be its own exception type,
+# still catchable as a plain ClientError by callers that don't care about
+# the distinction.
+_kc = importlib.import_module(f"{pkg}.kia_client")
+assert hasattr(_kc, "CommandUnconfirmed")
+assert issubclass(_kc.CommandUnconfirmed, _kc.ClientError)
+
+# unconfirmed_commands property: must return a snapshot copy, not the live
+# dict (a caller mutating the returned value must not corrupt coordinator
+# state), and only the coordinator's own _unconfirmed_commands feeds it.
+_ucp = co.KiaAccessCoordinator.unconfirmed_commands.fget
+_fake_uc_coord = type("C", (), {
+    "_unconfirmed_commands": {"start_climate": {"since": "x", "message": "timed out"}}
+})()
+_uc = _ucp(_fake_uc_coord)
+assert _uc == {"start_climate": {"since": "x", "message": "timed out"}}
+_uc["start_climate"] = "mutated"
+assert _fake_uc_coord._unconfirmed_commands["start_climate"] != "mutated", (
+    "the property must return a copy, not a reference to the live dict"
+)
+
+# KiaAccessActionSensor surfaces unconfirmed_commands in its attributes only
+# when non-empty (so the common case doesn't carry an empty-dict attribute)
+_sensor_mod = importlib.import_module(f"{pkg}.sensor")
+
+
+def _fake_action_coord(unconfirmed):
+    return type("C", (), {
+        "last_action": {"name": "start_climate", "status": "unconfirmed", "at": "t"},
+        "unconfirmed_commands": unconfirmed,
+        "entry": type("E", (), {"entry_id": "e1"})(),
+        "vehicle": {},
+    })()
+
+
+_action_sensor = object.__new__(_sensor_mod.KiaAccessActionSensor)
+_action_sensor.coordinator = _fake_action_coord({"start_climate": {"since": "x", "message": "m"}})
+attrs = _sensor_mod.KiaAccessActionSensor.extra_state_attributes.fget(_action_sensor)
+assert attrs.get("unconfirmed_commands") == {"start_climate": {"since": "x", "message": "m"}}
+
+_action_sensor2 = object.__new__(_sensor_mod.KiaAccessActionSensor)
+_action_sensor2.coordinator = _fake_action_coord({})
+attrs2 = _sensor_mod.KiaAccessActionSensor.extra_state_attributes.fget(_action_sensor2)
+assert "unconfirmed_commands" not in attrs2, "must be omitted, not an empty dict, when nothing is pending"
+
 _cln = co.KiaAccessCoordinator._clean_address
 assert _cln(["Maple Street", "Maple St, Springfield, PA", {"road": "x"}]) == "Maple Street"
 assert _cln({"road": "Main St", "city": "Pittsburgh"}) == "Main St"

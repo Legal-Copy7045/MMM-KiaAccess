@@ -354,6 +354,23 @@
       return false;
     }
 
+    // Only the climate/charge start-vs-stop pairs: a stale command in one
+    // of those, if it actually landed after all, produces a confusing state
+    // transition (or an unwanted double-charge-stop racing a since-issued
+    // start) -- lock/unlock/flash/etc. retrying twice is comparatively
+    // harmless, so this deliberately isn't a blanket check on every command.
+    _confirmIfUnconfirmed(key) {
+      var STATEFUL = { start_climate: 1, stop_climate: 1, start_charge: 1, stop_charge: 1 };
+      if (!STATEFUL[key]) return true;
+      var u = (this._unconfirmedCommands || {})[key];
+      if (!u) return true;
+      var spec = CMD_BY_KEY[key] || {};
+      return window.confirm(
+        "Your last \"" + (spec.name || key) + "\" request timed out, and we don't know " +
+        "if the car received it. Send it again anyway?"
+      );
+    }
+
     _callCommand(key, needsConfirm) {
       if (!this._hass || this._tooSoon(key)) return;
       var spec = CMD_BY_KEY[key] || {};
@@ -361,6 +378,7 @@
           !window.confirm((spec.name || key) + " — send this to the car?")) {
         return;
       }
+      if (!this._confirmIfUnconfirmed(key)) return;
       var data = {};
       if (this._entryId) data.entry_id = this._entryId;
       this._hass.callService("kia_access", key, data);
@@ -598,6 +616,7 @@
 
     _startClimate() {
       if (!this._hass || this._tooSoon("start_climate")) return;
+      if (!this._confirmIfUnconfirmed("start_climate")) return;
       var c = this._clim();
       var bounds = this._climBounds();
       var data = {
@@ -621,6 +640,7 @@
 
     _stopClimate() {
       if (!this._hass || this._tooSoon("stop_climate")) return;
+      if (!this._confirmIfUnconfirmed("stop_climate")) return;
       var data = {};
       if (this._entryId) data.entry_id = this._entryId;
       this._hass.callService("kia_access", "stop_climate", data);
@@ -788,6 +808,16 @@
           "' data-refresh title='Refresh now' aria-label='Refresh now'>" +
           "<ha-icon icon='mdi:refresh'></ha-icon></button>"
         : "";
+
+      // "Remote action" sensor's unconfirmed_commands attribute: a prior
+      // start_climate/stop_climate/start_charge/stop_charge whose request
+      // timed out -- Kia's protocol gives no way to know afterward whether
+      // it reached the vehicle, so _callCommand()/_startClimate()/
+      // _stopClimate() ask before sending a second one on top of it.
+      var actionEntity = entId.replace(/_status$/, "_remote_action");
+      var actionSt = hass.states[actionEntity];
+      this._unconfirmedCommands =
+        (actionSt && actionSt.attributes && actionSt.attributes.unconfirmed_commands) || {};
 
       // status chips for the at-a-glance stuff
       var chips = [];
