@@ -309,10 +309,12 @@ _eac = co.KiaAccessCoordinator._external_away_cost
 _dt_util = importlib.import_module("homeassistant.util.dt")
 
 
-def _fake_cost_coord(state_value):
+def _fake_cost_coord(state_value, options=None):
     st = type("St", (), {"state": state_value, "last_changed": _dt_util.utcnow()})()
+    opts = {"away_cost_entity": "sensor.cost"}
+    opts.update(options or {})
     return type("C", (), {
-        "entry": type("E", (), {"options": {"away_cost_entity": "sensor.cost"}})(),
+        "entry": type("E", (), {"options": opts})(),
         "hass": type("H", (), {"states": type("S", (), {
             "get": lambda self, eid: st
         })()})(),
@@ -325,6 +327,21 @@ assert _eac(_fake_cost_coord("nan"), _session) is None, "NaN must read as no-val
 assert _eac(_fake_cost_coord("inf"), _session) is None, "Infinity must read as no-valid-reading-yet"
 assert _eac(_fake_cost_coord("-5"), _session) is None, "a non-positive cost must be rejected"
 assert _eac(_fake_cost_coord("unknown"), _session) is None, "a non-numeric state must be rejected"
+
+# away_cost_grace_min: 0 is a genuinely valid configured value (the number
+# selector's own min bound, meaning "no grace, only accept a cost reading
+# from within the session window itself") -- `or 90` would silently widen
+# it back out. Session ended 30 min ago; the cost sensor's last_changed is
+# "now" (see _fake_cost_coord). With 0 grace that's outside the window and
+# must be rejected; with the old 90-min default it would wrongly pass.
+_old_ended = (_dt_util.utcnow().timestamp() - 30 * 60) * 1000
+_grace_session = {"startedAt": _old_ended, "endedAt": _old_ended}
+assert _eac(_fake_cost_coord("9.99", {"away_cost_grace_min": 0}), _grace_session) is None, (
+    "an explicitly configured 0-minute grace must actually mean zero, not fall back to 90"
+)
+assert _eac(_fake_cost_coord("9.99", {"away_cost_grace_min": 90}), _grace_session) == 9.99, (
+    "a real 90-minute grace must still work (sanity check against the fix above)"
+)
 _sess = importlib.import_module(f"{pkg}.sessions")
 _scl = _sess.update(None, {"t": 0, "charging": True, "batteryPct": 10, "atHome": False},
                     {"pricePerKwh": 0.2, "awayPricePerKwh": 0.6})["open"]
