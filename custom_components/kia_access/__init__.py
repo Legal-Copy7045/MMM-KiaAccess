@@ -90,6 +90,19 @@ def _migrate_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.config_entries.async_update_entry(entry, unique_id=target)
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Domain-level setup, called once at HA startup regardless of any one
+    entry's enabled/disabled state (unlike async_setup_entry below, which
+    HA never calls for a disabled entry) -- runs the same unique_id
+    migration for every entry up front, so a legacy entry left disabled
+    across the v2.54/v2.55 upgrade still gets repaired instead of carrying
+    a stale identity indefinitely (it would otherwise only self-heal the
+    next time it's individually reloaded or re-enabled)."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        _migrate_unique_id(hass, entry)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kia Access from a config entry."""
     _migrate_unique_id(hass, entry)
