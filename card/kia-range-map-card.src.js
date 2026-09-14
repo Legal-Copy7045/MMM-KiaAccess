@@ -39,12 +39,24 @@
     });
   }
 
+  // Reads the same dashboard-wide selection the main kia-access-card's
+  // vehicle dropdown writes (see VEHICLE_SEL_STORE there) -- this card has
+  // no selector UI of its own, but should still follow whichever vehicle
+  // the user picked there rather than defaulting to an arbitrary one.
+  var VEHICLE_SEL_STORE = "kia-access-selected-vehicle";
+  function loadSelectedVehicle() {
+    try { return window.localStorage.getItem(VEHICLE_SEL_STORE) || ""; }
+    catch (e) { return ""; }
+  }
+
   function findRawEntity(hass, configured) {
     if (configured) return configured;
     var ids = Object.keys(hass.states).filter(function (id) {
       var a = hass.states[id].attributes;
       return id.indexOf("sensor.") === 0 && a && a.kia_access_raw === true;
-    });
+    }).sort();
+    var stored = loadSelectedVehicle();
+    if (stored && ids.indexOf(stored) !== -1) return stored;
     return ids[0] || null;
   }
 

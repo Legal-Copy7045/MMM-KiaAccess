@@ -10,7 +10,6 @@
           "pin": "PIN",
           "region": "Region",
           "brand": "Brand",
-          "vin": "VIN (optional, leave blank for the first vehicle)",
           "geocode": "Reverse-geocode the parked location"
         }
       },
@@ -19,6 +18,13 @@
         "description": "Enter the one-time code Kia just sent to {dest}.",
         "data": {
           "code": "Code"
+        }
+      },
+      "vehicle": {
+        "title": "Choose a vehicle",
+        "description": "This account has more than one vehicle. Pick the one this entry should track — add the integration again to set up another.",
+        "data": {
+          "vin": "Vehicle"
         }
       },
       "reauth_confirm": {

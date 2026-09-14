@@ -141,6 +141,16 @@ except kia_client.ClientError as e:
 res2 = _run_fetch_with_vehicles({"vin": "VIN2"}, [_Veh(last_updated_at="y", VIN="VIN2")])
 assert res2["ok"] is True and len(res2["vehicles"]) == 1, "an explicit VIN must still work"
 
+# allVehicles:true is the one deliberate opt-in bypass (MM's rotate-within-
+# one-module feature) -- it must return every vehicle instead of erroring,
+# but ONLY when explicitly set; a plain blank-VIN, 2+-vehicle read must
+# still refuse exactly as above (allVehicles defaulting to falsy must not
+# accidentally widen the ambiguity guard for every other caller)
+res3 = _run_fetch_with_vehicles({"allVehicles": True}, two_veh)
+assert res3["ok"] is True and len(res3["vehicles"]) == 2, (
+    "allVehicles:true must return every vehicle, not just the first"
+)
+
 
 # --- fetch(): a still-running wake-up thread past the timeout must NOT be
 # read from -- it may still be mutating `vm` in place (a data race), so
