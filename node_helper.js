@@ -823,9 +823,15 @@ module.exports = NodeHelper.create({
   // instance that individually failed to fetch.
   _reportFailure(id, config, rotating, message) {
     if (!rotating) return this.fail(id, config, message);
+    // Dedup defensively even though MMM-KiaAccess.js's own config
+    // normalisation already does -- a duplicated vin entry here would
+    // otherwise call fail() twice for the one vehicle, double-counting its
+    // failStreak for a single real failure.
+    const seen = new Set();
     (config.vehicles || []).forEach((v) => {
       const vin = String((v && v.vin) || "").toUpperCase();
-      if (!vin) return;
+      if (!vin || seen.has(vin)) return;
+      seen.add(vin);
       this.fail(this.identifierFor(Object.assign({}, config, { vin })), config, message);
     });
   },
@@ -836,9 +842,11 @@ module.exports = NodeHelper.create({
   // cap is account-wide, not per-car.
   _reportServe(id, config, rotating, opts) {
     if (!rotating) return this.serve(id, config, opts);
+    const seen = new Set();
     (config.vehicles || []).forEach((v) => {
       const vin = String((v && v.vin) || "").toUpperCase();
-      if (!vin) return;
+      if (!vin || seen.has(vin)) return;
+      seen.add(vin);
       this.serve(this.identifierFor(Object.assign({}, config, { vin })), config, opts);
     });
   },

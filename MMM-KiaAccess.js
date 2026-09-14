@@ -416,12 +416,22 @@ Module.register("MMM-KiaAccess", {
     // Kia source only -- an "homeassistant" source module already gets
     // per-account vehicle switching for free from the HA Lovelace card, so
     // `vehicles` here is simply ignored in that mode.
+    const seenVins = new Set();
     this.config.vehicles = (Array.isArray(this.config.vehicles) ? this.config.vehicles : [])
       .map((v) => ({
         vin: String((v && v.vin) || "").toUpperCase(),
         header: (v && v.header) || ""
       }))
-      .filter((v) => v.vin);
+      .filter((v) => {
+        // A duplicated VIN (copy-paste typo) isn't just a rotation quirk --
+        // node_helper.js's account-wide failure fan-out iterates this exact
+        // array, so a repeated entry would report the same failure/stale-
+        // serve twice for the one vehicle, double-counting its failStreak.
+        // First occurrence wins (keeps that entry's header:).
+        if (!v.vin || seenVins.has(v.vin)) return false;
+        seenVins.add(v.vin);
+        return true;
+      });
 
     const src = String(this.config.source || "kia").toLowerCase();
     let configErr = null;
