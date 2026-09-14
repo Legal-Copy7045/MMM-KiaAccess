@@ -36,6 +36,18 @@ assert.ok(pt.includes('kia_ev_battery_percentage{vin="ABC"} 63'));
 assert.ok(pt.includes("# TYPE kia_ev_charging_power gauge"));
 assert.ok(pt.includes('kia_stale{vin="ABC"} 1'));
 
+// a raw user-configured tag key with characters Prometheus label names
+// don't allow must not produce invalid exposition (which would break the
+// ENTIRE /metrics response, not just this one series) -- sanitized instead
+// of passed through as-is
+const ptBadLabel = E.promText(
+  { "vehicle.ev_battery_percentage": 50 }, null, "kia",
+  { "vehicle-name": "EV9", "2fast": "yes" }
+);
+assert.ok(ptBadLabel.includes('vehicle_name="EV9"'), ptBadLabel);
+assert.ok(ptBadLabel.includes('_2fast="yes"'), "a label name must not start with a digit: " + ptBadLabel);
+assert.ok(!ptBadLabel.includes("vehicle-name"), ptBadLabel);
+
 // ---- PromServer serves /metrics ----
 (async () => {
   const srv = new E.PromServer({ port: 9271, prefix: "kia", labels: { vin: "Z" } });
@@ -99,6 +111,22 @@ assert.ok(pt.includes('kia_stale{vin="ABC"} 1'));
   srv2.removeSnapshot("does-not-exist"); // no-op, must not throw
   srv2.removeSnapshot("VIN1");
   assert.strictEqual(srv2._text, "# no data yet\n", "no vehicles left -> empty snapshot text");
+
+  // ---- PromServer: a bind failure must reach the caller, not vanish ----
+  const holder = new E.PromServer({ port: 9274, prefix: "kia", labels: {} });
+  holder.start();
+  await new Promise((r) => setTimeout(r, 100));
+  let bindErr = null;
+  const blocked = new E.PromServer({
+    port: 9274, prefix: "kia", labels: {},
+    onError: (err) => { bindErr = err; }
+  });
+  blocked.start();
+  await new Promise((r) => setTimeout(r, 150));
+  holder.stop();
+  blocked.stop();
+  assert.ok(bindErr, "onError must fire when the port is already in use");
+  assert.strictEqual(bindErr.code, "EADDRINUSE", bindErr && bindErr.message);
 
   // ---- pushInflux hits /api/v2/write with the token header + line body ----
   const seen = {};

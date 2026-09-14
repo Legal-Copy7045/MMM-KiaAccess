@@ -32,6 +32,15 @@ const exporter = require("./exporter.js");
 
 const CACHE_DIR = path.join(__dirname, "cache");
 
+// How many consecutive SUCCESSFUL account-wide fetches a still-configured
+// rotate-mode vehicle may be missing from the account's own response before
+// it's treated as gone (sold, removed from the Kia app, …) and retired --
+// see handleFetch()'s accountMissStreak tracking. Low enough to actually
+// retire a genuinely-removed vehicle in reasonable time, high enough that
+// one incomplete/flaky account response doesn't retire a car that's still
+// really there.
+const ACCOUNT_MISS_RETIRE_AFTER = 3;
+
 /** Prefer the bundled venv (built by setup_python.js) unless the user set pythonBin. */
 function resolvePython(configured) {
   if (configured && configured !== "python3") return configured;
@@ -47,10 +56,12 @@ module.exports = NodeHelper.create({
   start() {
     this.inFlight = {};
     this.mqttClients = {};
+    this.mqttPrefixOwners = {}; // topicPrefix -> the connection key that first claimed it
     this.promServers = {}; // key -> exporter.PromServer
     this.haLive = {}; // id -> HaLiveClient (source: "homeassistant", mode: "push")
     this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
     this.rotateVins = {}; // account-level id -> Set of VINs configured as of the last fetch
+    this.accountMissStreak = {}; // account-level id -> { vin: consecutive successful fetches missing it }
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
     } catch (e) {
@@ -335,10 +346,23 @@ module.exports = NodeHelper.create({
 
     const killTimer = setTimeout(() => child.kill("SIGKILL"), (config.fetchTimeout || 90) * 1000);
 
+    // A spawn-level failure (bad executable, no exec permission, OS-level
+    // error) fires BOTH "error" and a subsequent "close" -- two separate
+    // Node child_process lifecycle events for the one real failure, not a
+    // caller mistake. Without this guard, both handlers report a failure:
+    // failStreak double-increments (skewing the exponential backoff) and
+    // the frontend gets the same error twice.
+    let settled = false;
+    const reportOnce = (message) => {
+      if (settled) return;
+      settled = true;
+      this._reportFailure(id, config, rotating, message);
+    };
+
     child.on("error", (err) => {
       clearTimeout(killTimer);
       this.inFlight[id] = false;
-      this._reportFailure(id, config, rotating, `failed to run ${pythonBin}: ${err.message}`);
+      reportOnce(`failed to run ${pythonBin}: ${err.message}`);
     });
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
@@ -346,15 +370,13 @@ module.exports = NodeHelper.create({
     child.on("close", (code) => {
       clearTimeout(killTimer);
       this.inFlight[id] = false;
+      if (settled) return; // "error" already reported this exact failure
 
       let result;
       try {
         result = JSON.parse(lastJsonLine(stdout));
       } catch (e) {
-        return this._reportFailure(
-          id, config, rotating,
-          `bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`
-        );
+        return reportOnce(`bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`);
       }
       // kia_client.fetch() itself now refuses (result.ok === false) a
       // multi-vehicle account with no VIN configured, UNLESS this is a
@@ -363,10 +385,10 @@ module.exports = NodeHelper.create({
       // change between polls. So outside rotate mode, result.vehicles is
       // guaranteed to have exactly one entry by the time we reach this line.
       if (!result.ok) {
-        return this._reportFailure(id, config, rotating, result.error || "unknown bridge error");
+        return reportOnce(result.error || "unknown bridge error");
       }
       if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
-        return this._reportFailure(id, config, rotating, "bridge returned no vehicles");
+        return reportOnce("bridge returned no vehicles");
       }
 
       if (rotating) {
@@ -382,6 +404,7 @@ module.exports = NodeHelper.create({
         const configuredVins = new Set(
           config.vehicles.map((v) => String(v.vin || "").toUpperCase())
         );
+        const seenVins = new Set();
         // Route each vehicle through the exact same per-id pipeline a
         // dedicated single-vehicle module instance uses (onPayload() reads
         // everything -- history, sessions, trips, cache, mqtt, exporter --
@@ -390,6 +413,7 @@ module.exports = NodeHelper.create({
         result.vehicles.forEach((vehicle) => {
           const vin = String(vehicle.VIN || vehicle.vin || "").toUpperCase();
           if (!vin || !configuredVins.has(vin)) return;
+          seenVins.add(vin);
           const subId = this.identifierFor(Object.assign({}, config, { vin }));
           this.onPayload(subId, config, {
             vehicle: vehicle,
@@ -399,14 +423,12 @@ module.exports = NodeHelper.create({
             )
           });
         });
+
         // Retire any vehicle that WAS configured on a previous fetch but no
         // longer is (removed from vehicles: since then) -- otherwise its
         // MQTT status stays retained "online" and its Prometheus series
         // keeps reporting its last-known numbers forever, indistinguishable
-        // from a car that's still actually being polled. Scoped to this
-        // module's own previously-configured set, not "any vin missing from
-        // THIS poll" -- a transient Kia API hiccup shouldn't retire and
-        // immediately re-arrive on the next successful poll.
+        // from a car that's still actually being polled.
         const prevVins = this.rotateVins[id];
         if (prevVins) {
           prevVins.forEach((vin) => {
@@ -414,6 +436,29 @@ module.exports = NodeHelper.create({
           });
         }
         this.rotateVins[id] = configuredVins;
+
+        // Separately: a vehicle can stay in vehicles: but drop out of the
+        // ACCOUNT's own response (sold, removed from the Kia app, etc.) --
+        // same stale-forever problem, different cause, so it needs its own
+        // retirement path rather than piggybacking on the config diff
+        // above. Debounced across several consecutive SUCCESSFUL fetches
+        // (not just polls -- a failed fetch never reaches this line at
+        // all) specifically because a single incomplete/flaky account
+        // response missing one car is a known, ordinary occurrence; only a
+        // sustained absence should be treated as "this vehicle is gone."
+        const miss = this.accountMissStreak[id] || {};
+        configuredVins.forEach((vin) => {
+          if (seenVins.has(vin)) {
+            delete miss[vin];
+          } else {
+            miss[vin] = (miss[vin] || 0) + 1;
+            if (miss[vin] >= ACCOUNT_MISS_RETIRE_AFTER) {
+              this._retireVehicle(config, vin);
+              delete miss[vin];
+            }
+          }
+        });
+        this.accountMissStreak[id] = miss;
         return;
       }
 
@@ -611,7 +656,14 @@ module.exports = NodeHelper.create({
           // base tags only -- a rotating module's several vehicles can share
           // one port/server, so the per-vehicle vin tag is applied per
           // setSnapshot() call below (its 3rd arg), not baked in here
-          labels: ex.tags || {}
+          labels: ex.tags || {},
+          // Without this, a bind failure (port already in use, no
+          // permission on a privileged port, …) was silently swallowed --
+          // setSnapshot() kept being called as if /metrics were being
+          // served while every actual scrape just failed with nothing
+          // logged anywhere to explain why.
+          onError: (err) =>
+            Log.error(`[MMM-KiaAccess] Prometheus server on :${port} failed: ${err.message}`)
         });
         srv.start();
         this.promServers[port] = srv;
@@ -879,6 +931,31 @@ module.exports = NodeHelper.create({
     }
 
     const prefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
+
+    // Two DIFFERENT connections (distinct credentials -- see `key` above)
+    // can still legitimately share the same topicPrefix (two accounts, one
+    // broker, same prefix chosen independently). Each gets its own MQTT
+    // connection now, correctly, but the bridge-level `<prefix>/status`
+    // Last-Will-and-Testament below is keyed ONLY by prefix -- one
+    // connection dropping publishes offline to a topic the OTHER,
+    // perfectly healthy connection also claims as its own status. Nothing
+    // here can safely rename that topic without breaking every existing
+    // single-connection setup's dashboards/automations watching it, so
+    // this only warns (once) rather than silently changing behaviour --
+    // give each config its own topicPrefix to get a reliable bridge status.
+    const owner = this.mqttPrefixOwners[prefix];
+    if (owner === undefined) {
+      this.mqttPrefixOwners[prefix] = key;
+    } else if (owner !== key) {
+      Log.warn(
+        `[MMM-KiaAccess] mqtt topicPrefix "${prefix}" is used by more than one ` +
+        `independently configured connection -- "${prefix}/status" will flip ` +
+        `between online/offline based on whichever connection last (dis)connected, ` +
+        `not the account this config actually belongs to. Give each account its ` +
+        `own mqtt.topicPrefix if you rely on that topic.`
+      );
+    }
+
     const client = mqtt.connect(m.url, {
       username: m.username || undefined,
       password: m.password || undefined,
