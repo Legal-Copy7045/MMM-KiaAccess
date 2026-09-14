@@ -197,6 +197,17 @@ class PromServer {
     this._text = promTextMulti(this._snapshots, this.prefix);
   }
 
+  /** Drop a vehicle's series entirely (retired from config, or removed
+   *  from the account) -- without this, /metrics would go on reporting its
+   *  last-known numbers forever, indistinguishable from a car that's still
+   *  actually being polled. A no-op if this vin was never snapshotted. */
+  removeSnapshot(vin) {
+    const key = vin || "";
+    if (!(key in this._snapshots)) return;
+    delete this._snapshots[key];
+    this._text = promTextMulti(this._snapshots, this.prefix);
+  }
+
   start() {
     if (this._server) return;
     this._server = http.createServer((req, res) => {

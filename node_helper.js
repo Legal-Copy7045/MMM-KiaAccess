@@ -50,6 +50,7 @@ module.exports = NodeHelper.create({
     this.promServers = {}; // key -> exporter.PromServer
     this.haLive = {}; // id -> HaLiveClient (source: "homeassistant", mode: "push")
     this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
+    this.rotateVins = {}; // account-level id -> Set of VINs configured as of the last fetch
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
     } catch (e) {
@@ -398,6 +399,21 @@ module.exports = NodeHelper.create({
             )
           });
         });
+        // Retire any vehicle that WAS configured on a previous fetch but no
+        // longer is (removed from vehicles: since then) -- otherwise its
+        // MQTT status stays retained "online" and its Prometheus series
+        // keeps reporting its last-known numbers forever, indistinguishable
+        // from a car that's still actually being polled. Scoped to this
+        // module's own previously-configured set, not "any vin missing from
+        // THIS poll" -- a transient Kia API hiccup shouldn't retire and
+        // immediately re-arrive on the next successful poll.
+        const prevVins = this.rotateVins[id];
+        if (prevVins) {
+          prevVins.forEach((vin) => {
+            if (!configuredVins.has(vin)) this._retireVehicle(config, vin);
+          });
+        }
+        this.rotateVins[id] = configuredVins;
         return;
       }
 
@@ -773,6 +789,32 @@ module.exports = NodeHelper.create({
       if (!vin) return;
       this.serve(this.identifierFor(Object.assign({}, config, { vin })), config, opts);
     });
+  },
+
+  // A vehicle removed from a rotate-mode vehicles: config (see handleFetch's
+  // rotateVins diff) stops being fetched, but its telemetry would otherwise
+  // linger forever: MQTT's retained "online" status and Prometheus's last
+  // snapshot are both durable by design and nothing else naturally expires
+  // them. This doesn't touch the vehicle's individual cache/history/session/
+  // trip file -- those stay on disk exactly like a module instance that's
+  // simply stopped polling would leave them, in case the vehicle comes back.
+  _retireVehicle(config, vin) {
+    const m = config && config.mqtt;
+    if (m && m.enabled !== false && m.url) {
+      const client = this.mqttClient(m);
+      if (client) {
+        const basePrefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
+        client.publish(basePrefix + "/" + vin + "/status", "offline", {
+          retain: m.retain !== false
+        });
+      }
+    }
+    const ex = config && config.exporter;
+    if (ex && ex.prometheus && ex.prometheus.enabled !== false) {
+      const port = Number(ex.prometheus.port) || 9110;
+      const srv = this.promServers[port];
+      if (srv) srv.removeSnapshot(vin);
+    }
   },
 
   /** send data — from cache when `opts` is given (stale / error / rate-limit), else assumed live */

@@ -89,6 +89,17 @@ assert.ok(pt.includes('kia_stale{vin="ABC"} 1'));
   assert.ok(text3.includes('kia_ev_battery_percentage{vin="VIN1"} 41'), text3);
   assert.ok(text3.includes('kia_ev_battery_percentage{vin="VIN2"} 90'), text3);
 
+  // removeSnapshot(): a vehicle retired from config (or from the account)
+  // must stop appearing at /metrics entirely, not linger forever at its
+  // last-known value
+  srv2.removeSnapshot("VIN2");
+  const text4 = srv2._text;
+  assert.ok(text4.includes('kia_ev_battery_percentage{vin="VIN1"} 41'), text4);
+  assert.ok(!text4.includes("VIN2"), text4);
+  srv2.removeSnapshot("does-not-exist"); // no-op, must not throw
+  srv2.removeSnapshot("VIN1");
+  assert.strictEqual(srv2._text, "# no data yet\n", "no vehicles left -> empty snapshot text");
+
   // ---- pushInflux hits /api/v2/write with the token header + line body ----
   const seen = {};
   const mock = http.createServer((req, res) => {
