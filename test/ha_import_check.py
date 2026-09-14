@@ -268,10 +268,51 @@ assert _cln({"road": "Main St", "city": "Pittsburgh"}) == "Main St"
 assert _cln("123 Main St") == "123 Main St"
 assert _cln(None) is None
 
-_in_us = co.KiaAccessCoordinator._in_us
-assert _in_us(40.7539, -79.8103) is True      # Saxonburg PA
-assert _in_us(51.5, -0.12) is False       # London
-assert _in_us(None, None) is False
+# _plausible_destination() replaced the old hardcoded North-America-only
+# bounding box (_in_us) -- calendar/static/zone destinations must be judged
+# by distance from the user's own home, not a hardcoded region, since this
+# project advertises support for 8 regions and the old box silently
+# discarded every destination for the 7 non-US/CA ones.
+_PlausibleCoord = type("PlausibleCoord", (), {
+    "_home_point": co.KiaAccessCoordinator._home_point,
+    "_haversine_km": staticmethod(co.KiaAccessCoordinator._haversine_km),
+    "_zone_radius_m": staticmethod(co.KiaAccessCoordinator._zone_radius_m),
+    "_plausible_destination": co.KiaAccessCoordinator._plausible_destination,
+    "_MAX_PLAUSIBLE_DESTINATION_KM": co.KiaAccessCoordinator._MAX_PLAUSIBLE_DESTINATION_KM,
+})
+
+
+def _fake_home_coord(home_lat, home_lon):
+    zone = None
+    if home_lat is not None:
+        zone = type("Z", (), {"attributes": {"latitude": home_lat, "longitude": home_lon, "radius": 100}})()
+    return _PlausibleCoord(), type("H", (), {
+        "states": type("S", (), {"get": lambda self, eid: zone})()
+    })()
+
+
+_pd_coord, _pd_hass = _fake_home_coord(40.7539, -79.8103)  # home: Saxonburg PA
+_pd_coord.hass = _pd_hass
+assert _pd_coord._plausible_destination(40.44, -79.99) is True, "Pittsburgh, near home"
+assert _pd_coord._plausible_destination(51.5, -0.12) is False, "London, nowhere near home"
+assert _pd_coord._plausible_destination(None, None) is False
+
+_pd_coord_eu, _pd_hass_eu = _fake_home_coord(52.52, 13.405)  # home: Berlin, Germany
+_pd_coord_eu.hass = _pd_hass_eu
+assert _pd_coord_eu._plausible_destination(53.5511, 9.9937) is True, (
+    "Hamburg (~255km) is a plausible destination from a Berlin home -- the "
+    "old US-only box would have wrongly excluded every non-US/CA destination"
+)
+assert _pd_coord_eu._plausible_destination(48.8566, 2.3522) is False, (
+    "Paris (~880km) is genuinely implausible as a drivable calendar "
+    "destination, same as the old box's intent for a far-off zone"
+)
+
+_pd_coord_none, _pd_hass_none = _fake_home_coord(None, None)  # no zone.home configured
+_pd_coord_none.hass = _pd_hass_none
+assert _pd_coord_none._plausible_destination(48.8566, 2.3522) is True, (
+    "no home configured -- can't judge distance, so don't block"
+)
 assert hasattr(co.KiaAccessCoordinator, "async_refresh_calendar_pois")
 assert hasattr(co.KiaAccessCoordinator, "_refresh_drive_times")
 assert hasattr(co.KiaAccessCoordinator, "_charge_at_home")
@@ -285,15 +326,31 @@ assert _pcr("") == [] and _pcr(None) == []
 assert _pcr("zone.home = Infinity") == [], "an infinite rate must be rejected"
 assert _pcr("zone.home = -1") == [], "a negative rate must be rejected"
 
+# _zone_radius_m() is the single shared helper _home_point(), _charge_at_
+# home(), and _charge_rate() all now use for parsing a zone's radius
+# attribute -- test it directly once here, on top of the _home_point()
+# exercise below (which was the original site this hardening shipped in).
+_zrm = co.KiaAccessCoordinator._zone_radius_m
+_fake_zone = lambda radius: type("Z", (), {"attributes": {"radius": radius}})()
+assert _zrm(_fake_zone(50)) == 50.0
+assert _zrm(_fake_zone(None)) == 100.0
+assert _zrm(_fake_zone("garbage")) == 100.0
+assert _zrm(_fake_zone(float("nan"))) == 100.0
+assert _zrm(_fake_zone(float("inf"))) == 100.0
+assert _zrm(_fake_zone(-10)) == 100.0
+
 # _home_point() must never raise out of a malformed zone.home radius --
 # it's called from _emit_alerts() with no surrounding guard, so an
 # unhandled ValueError here would fail the entire coordinator update
 _hp = co.KiaAccessCoordinator._home_point
-_fake_zone_coord = lambda radius: type("C", (), {"hass": type("H", (), {
-    "states": type("S", (), {"get": lambda self, eid: type("Z", (), {
-        "attributes": {"latitude": 1.0, "longitude": 2.0, "radius": radius}
-    })()})()
-})()})()
+_fake_zone_coord = lambda radius: type("C", (), {
+    "_zone_radius_m": staticmethod(co.KiaAccessCoordinator._zone_radius_m),
+    "hass": type("H", (), {
+        "states": type("S", (), {"get": lambda self, eid: type("Z", (), {
+            "attributes": {"latitude": 1.0, "longitude": 2.0, "radius": radius}
+        })()})()
+    })()
+})()
 assert _hp(_fake_zone_coord(100))[2] == 100.0, "a normal radius"
 assert _hp(_fake_zone_coord("not a number"))[2] == 100.0, "malformed radius must not raise"
 assert _hp(_fake_zone_coord(float("nan")))[2] == 100.0, "NaN radius must fall back"
@@ -418,6 +475,19 @@ try:
 except init.vol.Invalid:  # same voluptuous module __init__.py itself uses
     pass
 
+# an "int" option (ac_limit/dc_limit/duration/etc.) must reject a genuinely
+# fractional value instead of vol.Coerce(int)'s silent truncation
+# (80.9 -> 80) -- only matters for a raw/automation call bypassing the UI's
+# own number selector, which already prevents this for a human.
+_charge_schema = _fake_services_hass.services.registered["set_charge_limits"]
+_charge_schema({"ac_limit": 80})  # a real whole-number int must still pass
+_charge_schema({"ac_limit": 80.0})  # a whole-number float must still pass
+try:
+    _charge_schema({"ac_limit": 80.9})
+    raise AssertionError("a fractional ac_limit must be rejected, not silently truncated")
+except init.vol.Invalid:
+    pass
+
 # _ensure_lovelace_resource (auto-registers the card as a real Lovelace
 # resource so the frontend awaits it, instead of racing add_extra_js_url on a
 # cold app launch) must resolve its private-API imports against the real
@@ -444,5 +514,52 @@ s = json.load(open(os.path.join(ROOT, "custom_components/kia_access/strings.json
 e = json.load(open(os.path.join(ROOT, "custom_components/kia_access/translations/en.json"), encoding="utf-8"))
 assert s == e, "strings.json and translations/en.json differ"
 assert {"user", "otp", "reauth_confirm"} <= set(s["config"]["step"])
+
+# Multi-vehicle unique-id scoping: without a VIN, two "Add Integration"
+# attempts for the same account must still collide (a real duplicate) --
+# but WITH different VINs, they must be allowed to coexist as separate
+# config entries (one per vehicle), or a multi-vehicle account could never
+# be fully set up (each vehicle needs its own VIN-scoped entry once
+# kia_client.fetch()/run_command() refuse to guess which car to use).
+cf_mod = importlib.import_module(f"{pkg}.config_flow")
+
+
+class _StopEarly(Exception):
+    """Raised from the patched async_set_unique_id to short-circuit the
+    flow right after capturing the uid it computed, before it would try a
+    real Kia login."""
+
+
+def _captured_uid(vin):
+    flow = object.__new__(cf_mod.KiaAccessConfigFlow)
+    flow._reauth_entry = None
+    captured = {}
+
+    async def _fake_set_unique_id(uid):
+        captured["uid"] = uid
+        raise _StopEarly()
+
+    flow.async_set_unique_id = _fake_set_unique_id
+    user_input = {
+        "username": "user@example.com", "password": "x", "pin": "",
+        "region": "USA", "brand": "KIA", "vin": vin, "geocode": False,
+    }
+    try:
+        asyncio.run(cf_mod.KiaAccessConfigFlow.async_step_user(flow, user_input))
+    except _StopEarly:
+        pass
+    return captured["uid"]
+
+
+_uid_no_vin = _captured_uid("")
+_uid_vin1 = _captured_uid("vin1")
+_uid_vin2 = _captured_uid("vin2")
+assert _uid_no_vin == "USA:KIA:user@example.com", "blank VIN keeps the original account-only id"
+assert _uid_vin1 == "USA:KIA:user@example.com:VIN1", "VIN must be included (and uppercased) once set"
+assert _uid_vin1 != _uid_vin2, (
+    "two different VINs on the same account must get DIFFERENT unique ids, "
+    "or a second vehicle could never be added as its own config entry"
+)
+assert _uid_no_vin != _uid_vin1, "a blank-VIN entry and a VIN-scoped entry for the same account must differ"
 
 print("ha_import_check: ok")

@@ -131,10 +131,24 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             self._job = dict(user_input)
-            await self.async_set_unique_id(
+            # VIN-scoped when given, so a multi-vehicle account can have one
+            # config entry per vehicle -- without this, the second "Add
+            # Integration" attempt for the same account's other vehicle
+            # would always abort on a unique-ID collision with the first,
+            # even though the whole point of requiring a VIN (see kia_client
+            # .fetch()/run_command()) is to let more than one entry coexist.
+            # A blank VIN keeps the original account-only ID, so a genuine
+            # single-vehicle setup (still the common case) behaves exactly
+            # as before and a second blank-VIN attempt still correctly
+            # aborts as a real duplicate.
+            uid = (
                 f"{user_input[CONF_REGION]}:{user_input[CONF_BRAND]}:"
                 f"{user_input['username'].lower()}"
             )
+            vin = (user_input.get(CONF_VIN) or "").strip().upper()
+            if vin:
+                uid += f":{vin}"
+            await self.async_set_unique_id(uid)
             self._abort_if_unique_id_configured()
             try:
                 result = await self.hass.async_add_executor_job(self._try_login)
@@ -212,11 +226,13 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_PIN: self._job.get(CONF_PIN, ""),
             CONF_REGION: self._job.get(CONF_REGION, "USA"),
             CONF_BRAND: self._job.get(CONF_BRAND, "KIA"),
-            CONF_VIN: self._job.get(CONF_VIN, ""),
+            CONF_VIN: (self._job.get(CONF_VIN) or "").strip().upper(),
             CONF_GEOCODE: self._job.get(CONF_GEOCODE, False),
             CONF_TOKEN: token,
         }
         title = f"{self._job.get(CONF_BRAND, 'KIA')} ({self._job['username']})"
+        if data[CONF_VIN]:
+            title += f" — {data[CONF_VIN]}"
         return self.async_create_entry(title=title, data=data)
 
     @staticmethod
@@ -233,12 +249,30 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
+            # VIN lives in entry.data (set at initial setup), not
+            # entry.options like everything else this flow edits -- pull it
+            # out and update entry.data directly instead of letting it land
+            # in options. Without this, a multi-vehicle account set up
+            # without a VIN (or with the wrong one) had no way to fix that
+            # short of deleting and recreating the whole config entry.
+            new_vin = (user_input.pop(CONF_VIN, "") or "").strip().upper()
+            if new_vin != (self._entry.data.get(CONF_VIN) or "").strip().upper():
+                self.hass.config_entries.async_update_entry(
+                    self._entry, data={**self._entry.data, CONF_VIN: new_vin}
+                )
             return self.async_create_entry(title="", data=user_input)
         opts = dict(self._entry.options)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Optional(
+                        CONF_VIN,
+                        default=self._entry.data.get(CONF_VIN, ""),
+                        description={
+                            "suggested_value": self._entry.data.get(CONF_VIN, "")
+                        },
+                    ): str,
                     vol.Optional(
                         "scan_interval",
                         default=opts.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES),

@@ -200,7 +200,11 @@ API, not from Kia. So:
    is only accepted when the account has exactly one vehicle; with more than
    one, it's required (setup fails with a clear error otherwise) — which
    physical car "the first one" means isn't guaranteed stable from one poll to
-   the next, so this is deliberate rather than a bug. A few notes:
+   the next, so this is deliberate rather than a bug. Each vehicle's VIN also
+   uniquely identifies its config entry, so two entries for the same account
+   (one per vehicle) can coexist — and if you set one up without a VIN before
+   realizing you needed one, it's editable afterward too, in that entry's
+   **Configure → VIN**. A few notes:
    - `Last charge` / `Charge session` need a price — **Configure → Price per kWh**.
    - The **seat / wheel-heat `select`s and `Climate run time` are stored
      preferences**: there's no API to set them alone, so `climate.turn_on` and
@@ -857,7 +861,9 @@ dialog):
 - **Static destinations** — one `Name | address` per line, always shown
   (geocoded once, cached), e.g. `White House | 1600 Pennsylvania Ave NW, Washington, DC`.
 - **Calendar entities** + **Calendar look-ahead (hours)** — any event with a
-  location in the next N hours, geocoded (US only, cached). Call
+  location in the next N hours, geocoded and cached (a destination further
+  than ~500 km from `zone.home` is skipped as implausible, not filtered by
+  region). Call
   **`kia_access.refresh_calendar_destinations`** to re-read now instead of
   waiting for the ~30-min cycle; `calendar_status` shows what was found.
 

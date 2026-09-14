@@ -422,30 +422,41 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "lifetime": drive_trips.summary(self._trips, 36500),
         }
 
-    # continental US + Alaska + Hawaii bounding boxes — keeps foreign zones
-    # (e.g. UK "Parent's") out of the reachable-destinations list
-    _US_BOXES = (
-        (24.4, 49.5, -125.0, -66.9),
-        (51.0, 71.6, -179.9, -129.0),
-        (18.8, 22.3, -160.5, -154.7),
-    )
+    # A destination further than this from home is treated as "not really
+    # drivable, someone's zone for a place on another continent" and
+    # excluded from calendar/static/zone destinations -- generous relative
+    # to any real single-charge EV range, so it never excludes a genuine
+    # same-country (or even same-continent) destination. This replaced a
+    # hardcoded North-America-only bounding box that silently discarded
+    # every calendar/static destination for any of the 7 non-US/CA regions
+    # this project otherwise advertises supporting -- the box's real intent
+    # ("keep an obviously-unreachable zone like a relative's house abroad
+    # out of the list") only ever needed to be relative to the user's own
+    # home, not a hardcoded country.
+    _MAX_PLAUSIBLE_DESTINATION_KM = 500
 
-    @classmethod
-    def _in_us(cls, lat, lon) -> bool:
+    def _plausible_destination(self, lat, lon) -> bool:
         if lat is None or lon is None:
             return False
-        return any(a <= lat <= b and c <= lon <= d for a, b, c, d in cls._US_BOXES)
+        hlat, hlon, _ = self._home_point()
+        km = self._haversine_km(lat, lon, hlat, hlon)
+        if km is None:
+            # no zone.home configured (or no fix) -- nothing to judge
+            # distance against, so don't block on it
+            return True
+        return km <= self._MAX_PLAUSIBLE_DESTINATION_KM
 
     def _zone_pois(self) -> list[dict]:
-        """Every US zone.* as {name, lat, lon}. This is the full set — Home
-        Assistant (dashboard / sensor) always sees all of them. The
-        `zone_entities` option only narrows the MagicMirror panel, and the
-        mirror applies that itself (via the mm_zone_filter attribute)."""
+        """Every plausibly-reachable zone.* as {name, lat, lon} (see
+        _plausible_destination). This is the full set — Home Assistant
+        (dashboard / sensor) always sees all of them. The `zone_entities`
+        option only narrows the MagicMirror panel, and the mirror applies
+        that itself (via the mm_zone_filter attribute)."""
         out = []
         for st in self.hass.states.async_all("zone"):
             lat = st.attributes.get("latitude")
             lon = st.attributes.get("longitude")
-            if not self._in_us(lat, lon):
+            if not self._plausible_destination(lat, lon):
                 continue
             out.append(
                 {
@@ -529,10 +540,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return None
 
         lat, lon = latlon
-        if not self._in_us(lat, lon):
-            _LOGGER.debug("Kia Access: %r geocoded outside the US, skipping", address)
+        if not self._plausible_destination(lat, lon):
+            _LOGGER.debug(
+                "Kia Access: %r geocoded implausibly far from home, skipping", address
+            )
             self._cal_status.setdefault("geocode_errors", []).append(
-                f"{address!r}: outside US ({round(lat, 3)},{round(lon, 3)})"
+                f"{address!r}: too far from home ({round(lat, 3)},{round(lon, 3)})"
             )
             return None
         self._geo_cache[key] = [lat, lon]
@@ -584,7 +597,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
     async def async_refresh_calendar_pois(self) -> None:
         """Pull locations off the configured calendars for the next N hours,
-        geocode them (US only), and cache as POIs for the range-reach readout."""
+        geocode them (skipping anything implausibly far from home — see
+        _plausible_destination), and cache as POIs for the range-reach readout."""
         raw = self.entry.options.get("calendar_entities") or ""
         cals = [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
         self._cal_status = {"calendars": cals, "events": 0, "with_location": 0,
@@ -1137,27 +1151,34 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         )
         return r * 2 * math.asin(math.sqrt(a))
 
+    @staticmethod
+    def _zone_radius_m(zone_or_state) -> float:
+        """A zone/state's `radius` attribute, defaulting to and falling back
+        to 100m on anything malformed -- missing, non-numeric, NaN, Infinity,
+        or negative. Used everywhere a zone's radius is read (_home_point,
+        _charge_at_home, _charge_rate) so a bad attribute degrades to a
+        sane default instead of raising (this can be reached from inside
+        the locked update body with no surrounding guard, where an
+        unhandled exception would fail the entire coordinator update) or
+        silently matching/never-matching everything (float("nan")/float(
+        "inf") both pass a bare isinstance/TypeError-ValueError check)."""
+        try:
+            raw = zone_or_state.attributes.get("radius", 100)
+            radius_m = 100.0 if raw is None else float(raw)
+            if not math.isfinite(radius_m) or radius_m < 0:
+                return 100.0
+            return radius_m
+        except (TypeError, ValueError):
+            return 100.0
+
     def _home_point(self) -> tuple[float | None, float | None, float]:
         zone = self.hass.states.get("zone.home")
         if zone is None:
             return None, None, 100.0
-        # This is called from _emit_alerts(), inside the locked update body
-        # with no surrounding guard -- an unhandled ValueError from a
-        # malformed radius (a bad template, a broken zone integration) would
-        # fail the ENTIRE coordinator update, not just the home-distance
-        # calc that needs it. Same defensive pattern as _charge_at_home()/
-        # _charge_rate()'s zone-radius parsing just below.
-        try:
-            raw_radius = zone.attributes.get("radius", 100)
-            radius_m = 100.0 if raw_radius is None else float(raw_radius)
-            if not math.isfinite(radius_m) or radius_m < 0:
-                radius_m = 100.0
-        except (TypeError, ValueError):
-            radius_m = 100.0
         return (
             zone.attributes.get("latitude"),
             zone.attributes.get("longitude"),
-            radius_m,
+            self._zone_radius_m(zone),
         )
 
     def _at_home(self, state: dict) -> bool | None:
@@ -1180,11 +1201,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         st = self.hass.states.get(zid)
         if st is None:
             return None
-        try:
-            raw_radius = st.attributes.get("radius", 100)
-            radius_m = 100.0 if raw_radius is None else float(raw_radius)
-        except (TypeError, ValueError):
-            radius_m = 100.0
+        radius_m = self._zone_radius_m(st)
 
         def _n(x):
             try:
@@ -1257,11 +1274,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             st = self.hass.states.get(zid)
             if st is None:
                 continue
-            try:
-                raw_radius = st.attributes.get("radius", 100)
-                radius_m = 100.0 if raw_radius is None else float(raw_radius)
-            except (TypeError, ValueError):
-                radius_m = 100.0
+            radius_m = self._zone_radius_m(st)
             km = self._haversine_km(
                 car_lat, car_lon,
                 st.attributes.get("latitude"), st.attributes.get("longitude"),
