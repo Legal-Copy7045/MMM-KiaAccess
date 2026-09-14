@@ -1260,8 +1260,20 @@ current.
   `npm install` (mode B) or a HACS redownload (mode A / C).
 - Trigger an immediate mirror refresh from another module with
   `this.sendNotification("MMM_KIA_ACCESS_REFRESH")`.
-- Contributing / running the tests: `npm test`; run `npm run sync` after editing
-  anything in `core/`.
+- **Contributing / repo layout.** `custom_components/kia_access/kia_client.py`,
+  `conditions.py`, `vehicle_state.py`, `sessions.py`, `range.py`, `routing.py`,
+  `trips.py` and `core/entities.json` / `core/commands.json` look like
+  duplicates of the same-named files at the repo root — they are: HACS
+  requires the integration folder to be self-contained (no reaching outside
+  it for shared code), so `scripts/sync-core.js` copies those root files in
+  verbatim. **Always edit the root copy**, never the one under
+  `custom_components/`; then run `npm run sync` (CI's `sync-core.js --check`
+  fails the build if you forget). The card bundle
+  (`custom_components/kia_access/frontend/kia-access-card.js`) is generated
+  the same way, from `card/*.src.js` + `core/*.js` — edit those, not the
+  bundle. Running the tests: `npm test` (JS) / `python test/*_test.py` +
+  `python test/ha_import_check.py` (Python, needs `pip install homeassistant`
+  for the last one).
 
 ## Send to car
 

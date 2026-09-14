@@ -27,12 +27,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOKEN_FILE = os.path.join(HERE, "token.json")
 
-REGION_INT = {
-    "EU": 1, "EUROPE": 1, "CA": 2, "CANADA": 2, "US": 3, "USA": 3,
-    "CN": 4, "CHINA": 4, "AU": 5, "AUSTRALIA": 5, "IN": 7, "INDIA": 7,
-    "NZ": 8, "BR": 9, "BRAZIL": 9,
-}
-BRAND_INT = {"KIA": 1, "HYUNDAI": 2, "GENESIS": 3}
+# Same table kia_client.py uses to talk to hyundai_kia_connect_api -- imported
+# rather than redefined, so a future region/brand code change can't silently
+# drift between the two (they're both root-level files in the same
+# directory, so this import works whether enroll.py is invoked by a relative
+# or absolute path: CPython always puts the running script's own directory
+# first on sys.path).
+from kia_client import REGION_INT, BRAND_INT  # noqa: E402
 
 
 def open_tty():
