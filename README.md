@@ -193,7 +193,14 @@ API, not from Kia. So:
    USA / CA). Tick *Reverse-geocode the parked location* if you want a street
    address for the car's position.
 3. You now have one **device per vehicle** with all the entities, controls and
-   events listed under [**What you get**](#what-you-get). A few notes:
+   events listed under [**What you get**](#what-you-get). **If your account has
+   more than one vehicle**, one config entry only ever tracks one of them —
+   run **+ Add Integration → "Kia Access"** again for each additional vehicle,
+   filling in that vehicle's **VIN** field on the setup form. A blank VIN
+   is only accepted when the account has exactly one vehicle; with more than
+   one, it's required (setup fails with a clear error otherwise) — which
+   physical car "the first one" means isn't guaranteed stable from one poll to
+   the next, so this is deliberate rather than a bug. A few notes:
    - `Last charge` / `Charge session` need a price — **Configure → Price per kWh**.
    - The **seat / wheel-heat `select`s and `Climate run time` are stored
      preferences**: there's no API to set them alone, so `climate.turn_on` and

@@ -245,10 +245,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     s = charge_sessions.apply_cost(s, ext, "external")
                 elif (opts.get("away_cost_entity") or "").strip():
                     # cost usually posts a few min after unplug — keep watching
+                    # `or 90` would silently turn an explicitly-configured 0
+                    # (the number selector's own min bound, "apply the cost
+                    # the instant it's available") into 90 -- 0 is falsy.
+                    _grace_opt = opts.get("away_cost_grace_min")
+                    grace_min = 90 if _grace_opt is None else _grace_opt
                     self._ext_pending = {
                         "startedAt": s["startedAt"],
-                        "until": (time.time() * 1000)
-                        + float(opts.get("away_cost_grace_min") or 90) * 60000,
+                        "until": (time.time() * 1000) + float(grace_min) * 60000,
                     }
             self._sessions.append(s)
             keep_after = (time.time() * 1000) - 180 * 864e5
@@ -295,7 +299,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # once the entity recovers and reports a proper value.
         if not math.isfinite(cost) or cost <= 0:
             return None
-        grace = float(self.entry.options.get("away_cost_grace_min") or 90) * 60000
+        # same falsy-zero pitfall as the other away_cost_grace_min read above
+        _grace_opt2 = self.entry.options.get("away_cost_grace_min")
+        grace = float(90 if _grace_opt2 is None else _grace_opt2) * 60000
         changed_ms = (st.last_changed or dt_util.utcnow()).timestamp() * 1000
         started = float(session.get("startedAt") or 0)
         ended = float(session.get("endedAt") or started)

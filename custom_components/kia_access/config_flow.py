@@ -293,7 +293,12 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                     ): _sensor_entity(),
                     vol.Optional(
                         "away_cost_grace_min",
-                        default=float(opts.get("away_cost_grace_min") or 90),
+                        # `or 90` would show 90 in this form even after the
+                        # user explicitly saved 0 (the field's own min bound)
+                        default=float(
+                            90 if opts.get("away_cost_grace_min") is None
+                            else opts["away_cost_grace_min"]
+                        ),
                     ): _number(0, 720, 5),
                     vol.Optional(
                         "capacity_kwh",
