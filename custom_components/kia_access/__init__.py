@@ -18,7 +18,17 @@ from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import COMMANDS, DOMAIN, EVENT_KIA_ACCESS_ALERT, PLATFORMS, VERSION
+from .config_flow import _account_uid
+from .const import (
+    COMMANDS,
+    CONF_BRAND,
+    CONF_REGION,
+    CONF_VIN,
+    DOMAIN,
+    EVENT_KIA_ACCESS_ALERT,
+    PLATFORMS,
+    VERSION,
+)
 from .coordinator import KiaAccessCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,8 +37,63 @@ _LOGGER = logging.getLogger(__name__)
 _FRONTEND_REGISTERED = False
 
 
+def _migrate_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Bring a pre-v2.54 entry's unique_id in line with what a fresh setup
+    would produce today.
+
+    Two ways an entry can end up with a VIN in entry.data but an
+    account-only (no-VIN) unique_id: it was created before v2.52 added VIN
+    scoping at all, or its VIN was set later via the Options flow before
+    v2.53 fixed that flow to also update unique_id (v2.53's fix only
+    prevented the mismatch going forward -- it never retroactively repaired
+    entries the bug had already touched). Left alone, adding a SECOND entry
+    for the same account (v2.54's setup flow always resolves a real VIN, even
+    for a single-vehicle account) would get a different, VIN-scoped id and
+    NOT collide with this one -- silently creating a duplicate coordinator,
+    device and entity set polling the exact same physical car.
+    """
+    vin = str(entry.data.get(CONF_VIN, "") or "").strip().upper()
+    if not vin:
+        return  # nothing to reconcile -- a blank-VIN entry's id is already correct
+    target = _account_uid(
+        entry.data.get(CONF_REGION, "USA"),
+        entry.data.get(CONF_BRAND, "KIA"),
+        entry.data.get("username", ""),
+        vin,
+    )
+    if entry.unique_id == target:
+        return  # already correct
+    other = next(
+        (
+            e
+            for e in hass.config_entries.async_entries(DOMAIN)
+            if e.entry_id != entry.entry_id and e.unique_id == target
+        ),
+        None,
+    )
+    if other is not None:
+        # Both entries already exist and both look like they track this same
+        # vehicle -- resolving that by silently deleting/merging one is too
+        # destructive to do unattended (which one has the right options,
+        # history, automations pointed at it?). Surface it instead.
+        _LOGGER.warning(
+            "Kia Access: entry %s (VIN %s) has a stale unique_id from before "
+            "v2.53 and can't be auto-repaired -- entry %s already owns the "
+            "correct id (%s). If these two entries track the same physical "
+            "vehicle, remove the duplicate one manually.",
+            entry.entry_id,
+            vin,
+            other.entry_id,
+            target,
+        )
+        return
+    hass.config_entries.async_update_entry(entry, unique_id=target)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kia Access from a config entry."""
+    _migrate_unique_id(hass, entry)
+
     # Register the Lovelace card first, independent of the vehicle data fetch:
     # if the Kia cloud call below is slow or fails, HA raises ConfigEntryNotReady
     # and retries later -- but the card element must still be defined in the

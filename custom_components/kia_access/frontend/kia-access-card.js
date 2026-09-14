@@ -2249,13 +2249,31 @@ g.KiaAccessCommands={
     return Math.round(h / 24) + "d ago";
   }
 
-  // every raw summary sensor on the account (one per config entry / vehicle),
-  // sorted for a stable order across renders
+  // every raw summary sensor on the WHOLE HA instance (one per config entry
+  // / vehicle -- possibly spanning more than one Kia Access ACCOUNT, see
+  // distinctAccounts() below), sorted for a stable order across renders
   function findAllRawEntities(hass) {
     return Object.keys(hass.states).filter(function (id) {
       var a = hass.states[id].attributes;
       return id.indexOf("sensor.") === 0 && a && a.kia_access_raw === true;
     }).sort();
+  }
+
+  // Distinct `account` attribute values (region:brand:username, see
+  // sensor.py) across a set of raw entity ids -- more than one means these
+  // vehicles are NOT all the same Kia Access login, and auto-discovery must
+  // not silently merge them into one dropdown (a selection in that dropdown
+  // sends commands via that vehicle's own entry_id, so nothing is actually
+  // sent to the wrong account -- but presenting a stranger's, or a
+  // different household login's, car in what looks like "your" vehicle
+  // list is confusing and unexpected).
+  function distinctAccounts(hass, ids) {
+    var seen = {};
+    ids.forEach(function (id) {
+      var a = hass.states[id] && hass.states[id].attributes;
+      seen[(a && a.account) || ""] = 1;
+    });
+    return Object.keys(seen);
   }
 
   function findRawEntity(hass, configured) {
@@ -2283,7 +2301,8 @@ g.KiaAccessCommands={
     var flat = {};
     Object.keys(attrs || {}).forEach(function (k) {
       if (k === "kia_access_raw" || k === "friendly_name" ||
-          k === "icon" || k === "entry_id" || k === "vehicle_name") return;
+          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
+          k === "account") return;
       flat["vehicle." + k] = attrs[k];
     });
     return flat;
@@ -2450,16 +2469,27 @@ g.KiaAccessCommands={
 
     // Which vehicle's raw sensor this card instance shows. An explicit
     // `entity:` in the card config always wins (unchanged "one card per
-    // vehicle" behaviour). Otherwise: keep whatever's already selected if
-    // it's still a real vehicle on this account; else fall back to the
-    // dashboard-wide last pick (shared across every auto-discovering card,
-    // see VEHICLE_SEL_STORE); else the first vehicle alphabetically. Single-
-    // vehicle accounts always resolve to that one entity, so nothing about
-    // this changes behaviour for the common case.
+    // vehicle" behaviour, and the only supported way to pin a specific
+    // vehicle when more than one Kia Access ACCOUNT is configured -- see
+    // the account-scoping note below). Otherwise: keep whatever's already
+    // selected if it's still a real vehicle on this account; else fall back
+    // to the dashboard-wide last pick (shared across every auto-discovering
+    // card, see VEHICLE_SEL_STORE); else the first vehicle alphabetically.
+    // Single-vehicle accounts always resolve to that one entity, so nothing
+    // about this changes behaviour for the common case.
     _activeEntityId(hass) {
       if (this._config && this._config.entity) return this._config.entity;
       var all = findAllRawEntities(hass);
       if (!all.length) return null;
+      // More than one Kia Access ACCOUNT on this HA instance (not just more
+      // than one vehicle) -- auto-discovery can't safely guess which one is
+      // "yours" for this card, so refuse to merge them into one dropdown;
+      // _render() shows a message asking for an explicit `entity:` instead.
+      if (distinctAccounts(hass, all).length > 1) {
+        this._multiAccount = true;
+        return null;
+      }
+      this._multiAccount = false;
       if (this._selectedEntity && all.indexOf(this._selectedEntity) !== -1) {
         return this._selectedEntity;
       }
@@ -2894,10 +2924,14 @@ g.KiaAccessCommands={
 
       var entId = this._activeEntityId(hass);
       if (!entId || !hass.states[entId]) {
+        var msg = this._multiAccount
+          ? "Kia Access: more than one Kia Access account is set up on this " +
+            "Home Assistant instance, so this card can't guess which one's " +
+            "vehicle to show. Set <code>entity:</code> to its summary sensor."
+          : "Kia Access: no vehicle entity found. Add the integration, or " +
+            "set <code>entity:</code> to its summary sensor.";
         root.innerHTML =
-          "<ha-card><div class='ka-wrap'>Kia Access: no vehicle entity found. " +
-          "Add the integration, or set <code>entity:</code> to its summary sensor." +
-          "</div></ha-card><style>" + STYLE + "</style>";
+          "<ha-card><div class='ka-wrap'>" + msg + "</div></ha-card><style>" + STYLE + "</style>";
         return;
       }
 
@@ -3121,6 +3155,17 @@ g.KiaAccessCommands={
       var a = hass.states[id].attributes;
       return id.indexOf("sensor.") === 0 && a && a.kia_access_raw === true;
     }).sort();
+    // More than one Kia Access ACCOUNT on this HA instance (not just more
+    // than one vehicle): can't safely guess which one is "yours" for this
+    // card, so refuse to auto-pick across them -- same rule as the main
+    // kia-access-card's vehicle dropdown (see distinctAccounts() there);
+    // set entity: explicitly instead.
+    var accounts = {};
+    ids.forEach(function (id) {
+      var a = hass.states[id] && hass.states[id].attributes;
+      accounts[(a && a.account) || ""] = 1;
+    });
+    if (Object.keys(accounts).length > 1) return null;
     var stored = loadSelectedVehicle();
     if (stored && ids.indexOf(stored) !== -1) return stored;
     return ids[0] || null;
@@ -3130,7 +3175,8 @@ g.KiaAccessCommands={
     var flat = {};
     Object.keys(attrs || {}).forEach(function (k) {
       if (k === "kia_access_raw" || k === "friendly_name" ||
-          k === "icon" || k === "entry_id" || k === "vehicle_name") return;
+          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
+          k === "account") return;
       flat["vehicle." + k] = attrs[k];
     });
     return flat;

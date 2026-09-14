@@ -718,4 +718,109 @@ assert res2["type"] == "form" and res2.get("errors", {}).get("vin") == "vin_in_u
 assert entry_a2.data.get("vin") != "VIN2", "the collision must not have been applied"
 assert not ce2.updates, "no update should have been attempted once a collision was detected"
 
+# --- __init__._migrate_unique_id(): a pre-v2.54 entry can have a VIN in
+# entry.data but still an account-only (no-VIN) unique_id -- either because
+# it was created before v2.52 added VIN scoping, or its VIN was set later
+# via the Options flow before v2.53's fix started keeping unique_id in sync.
+# Left alone, v2.54's setup flow always resolving a real VIN (even for a
+# single-vehicle account) means a second entry for the SAME account would
+# get a different, VIN-scoped id and not collide -- two coordinators for
+# one physical car. ---
+def _run_migrate(entry_data, entry_uid, other_entries):
+    entry = _fake_entry("m", entry_uid, entry_data)
+    hass = type("H", (), {"config_entries": _FakeConfigEntries([entry, *other_entries])})()
+    init._migrate_unique_id(hass, entry)
+    return entry, hass.config_entries
+
+
+# blank VIN -> nothing to migrate, id is already the correct (account-only) form
+e, ce = _run_migrate(
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": ""},
+    "USA:KIA:user@example.com", [],
+)
+assert e.unique_id == "USA:KIA:user@example.com"
+assert not ce.updates, "a blank-VIN entry's id is already correct -- nothing to touch"
+
+# VIN populated, stale account-only uid, no collision -> repaired to VIN-scoped
+e2, ce2 = _run_migrate(
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+    "USA:KIA:user@example.com", [],
+)
+assert e2.unique_id == "USA:KIA:user@example.com:VIN1", (
+    "a stale pre-v2.53 entry must be repaired to the VIN-scoped id"
+)
+
+# VIN populated, uid already correct (created by v2.54's own setup flow) -> no-op
+e3, ce3 = _run_migrate(
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+    "USA:KIA:user@example.com:VIN1", [],
+)
+assert not ce3.updates, "an already-correct entry must not be touched"
+
+# VIN populated, stale uid, but ANOTHER entry already owns the target id --
+# must be left alone (surfaced via a log warning), never silently merged
+other_entry = _fake_entry("other", "USA:KIA:user@example.com:VIN1", {"vin": "VIN1"})
+e4, ce4 = _run_migrate(
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+    "USA:KIA:user@example.com", [other_entry],
+)
+assert e4.unique_id == "USA:KIA:user@example.com", (
+    "must not overwrite into a collision with another entry"
+)
+assert not ce4.updates
+
+
+# --- config_flow._finish_with_uid(): re-running setup for a single-vehicle
+# account that already has a legacy blank-VIN entry must not silently create
+# a SECOND entry for the same physical car (v2.54's flow always resolves a
+# real VIN for a single-vehicle account, so the plain unique-id check alone
+# never sees a collision -- the two ids genuinely differ). Only applies when
+# the account currently has exactly one vehicle; a 2+-vehicle account's
+# blank-VIN entry is a different, already-ambiguous situation this guard
+# deliberately leaves alone (adding a legitimate second vehicle must still
+# work). ---
+def _run_finish_with_uid(vin, vehicle_count, existing_entries):
+    flow = object.__new__(cf_mod.KiaAccessConfigFlow)
+    flow._job = {
+        "username": "user@example.com", "region": "USA", "brand": "KIA",
+        cf_mod.CONF_VIN: vin,
+    }
+    flow._vehicle_count = vehicle_count
+    flow._token = {"tok": 1}
+    flow.hass = type("H", (), {"config_entries": _FakeConfigEntries(existing_entries)})()
+
+    async def _noop_set_unique_id(uid):
+        flow._captured_uid = uid
+
+    flow.async_set_unique_id = _noop_set_unique_id
+    flow._abort_if_unique_id_configured = lambda: None  # simulate "not already configured"
+    flow._finish = lambda token: {"type": "create_entry"}
+
+    return asyncio.run(cf_mod.KiaAccessConfigFlow._finish_with_uid(flow))
+
+
+legacy_blank_entry = _fake_entry("legacy", "USA:KIA:user@example.com", {"vin": ""})
+
+# single-vehicle account, legacy blank-VIN entry already exists -> must abort
+r1 = _run_finish_with_uid("VIN1", 1, [legacy_blank_entry])
+assert r1.get("type") == "abort" and r1.get("reason") == "already_configured", (
+    "re-adding an already-configured single-vehicle account must not create a "
+    "second entry for the same car just because the ids happen to differ"
+)
+
+# multi-vehicle account with the SAME legacy blank-VIN entry present -> NOT
+# blocked (adding a real second/third vehicle must keep working)
+r2 = _run_finish_with_uid("VIN2", 2, [legacy_blank_entry])
+assert r2.get("type") == "create_entry", (
+    "a genuinely different vehicle on a multi-vehicle account must not be blocked"
+)
+
+# single-vehicle account, no legacy entry present -> proceeds normally
+r3 = _run_finish_with_uid("VIN1", 1, [])
+assert r3.get("type") == "create_entry"
+
+# blank VIN (e.g. account API returned 0 vehicles) -> guard never applies
+r4 = _run_finish_with_uid("", 0, [legacy_blank_entry])
+assert r4.get("type") == "create_entry"
+
 print("ha_import_check: ok")

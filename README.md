@@ -231,7 +231,12 @@ API, not from Kia. So:
    appears once you actually have 2+ vehicles' worth of config entries; a
    single-vehicle setup looks exactly as before. Set `entity:` explicitly
    instead if you'd rather pin a card to one specific vehicle (e.g. one card
-   per vehicle across different dashboard views).
+   per vehicle across different dashboard views). **Running more than one
+   separate Kia Access *account* on the same Home Assistant instance** (not
+   just more than one vehicle on one account)? The dropdown deliberately
+   won't merge vehicles from different accounts together — it shows a
+   message asking you to set `entity:` on each card instead, so a card never
+   guesses which login's car to show.
    If the card doesn't show up, hard-refresh the browser, or add that path as a
    **Lovelace resource** (type: JavaScript Module) manually.
 
