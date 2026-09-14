@@ -99,11 +99,15 @@ module.exports = NodeHelper.create({
     return [config.region, config.brand, config.username, config.vin || "auto"].join("|");
   },
 
+  // sha256 purely to get a fixed-length, filesystem-safe, non-cleartext name
+  // for a local (git-ignored) cache file / identity tag — not a security
+  // boundary.
+  _idHash(id) {
+    return crypto.createHash("sha256").update(id).digest("hex").slice(0, 16);
+  },
+
   cacheFile(id) {
-    // sha256 purely to get a fixed-length, filesystem-safe, non-cleartext
-    // name for a local (git-ignored) cache file — not a security boundary.
-    const name = crypto.createHash("sha256").update(id).digest("hex").slice(0, 16);
-    const file = path.join(CACHE_DIR, name + ".json");
+    const file = path.join(CACHE_DIR, this._idHash(id) + ".json");
     // one-time migration off the older (pre-v2.43.1) filename so
     // charge-session / trip history carries over on upgrade
     if (!fs.existsSync(file)) {
@@ -117,13 +121,28 @@ module.exports = NodeHelper.create({
   },
 
   // The old cache filename was also a hash of the vehicle id, so there's no
-  // way to recompute it without hashing sensitive data again. Instead: if
-  // this is a single-vehicle setup, the directory holds exactly one leftover
-  // file from the old scheme — adopt it. Ambiguous (0 or 2+ files) just
-  // falls through to a fresh cache.
+  // way to recompute it without hashing sensitive data again -- but every
+  // file persist() writes (v2.56+) tags itself with _kiaAccessIdHash, so a
+  // NEW-format leftover always identifies itself and is never ambiguous.
+  // Only an OLD, untagged file (genuinely pre-v2.43.1) is a migration
+  // candidate; a single leftover with a tag belongs to some OTHER already-
+  // configured vehicle (routine now that one MM instance can rotate through
+  // several cars, see the vehicles: config) and must never be adopted --
+  // silently attaching vehicle A's history/sessions/trips to vehicle B
+  // under a plausible-looking filename is far worse than just starting B
+  // fresh. Ambiguous (0 or 2+ untagged leftovers) also falls through to a
+  // fresh cache, as before.
   migrateLegacyCache(file) {
     const leftovers = fs.readdirSync(CACHE_DIR)
-      .filter((f) => f.endsWith(".json") && path.join(CACHE_DIR, f) !== file);
+      .filter((f) => f.endsWith(".json") && path.join(CACHE_DIR, f) !== file)
+      .filter((f) => {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, f), "utf8"));
+          return !(parsed && typeof parsed === "object" && parsed._kiaAccessIdHash);
+        } catch (e) {
+          return false; // unreadable/corrupt -- not a safe migration candidate
+        }
+      });
     if (leftovers.length === 1) {
       fs.renameSync(path.join(CACHE_DIR, leftovers[0]), file);
     }
@@ -165,6 +184,12 @@ module.exports = NodeHelper.create({
       fs.writeFileSync(
         tmp,
         JSON.stringify({
+          // identity tag (a hash, not the raw id -- which embeds the
+          // account email) -- see migrateLegacyCache()'s comment for why
+          // this exists: it's what stops a brand-new vehicle's first cache
+          // file from ever being able to adopt an already-tagged file that
+          // belongs to a DIFFERENT vehicle.
+          _kiaAccessIdHash: this._idHash(id),
           lastGood: s.lastGood, history: s.history,
           sessions: s.sessions, openSession: s.openSession,
           rangeMap: s.rangeMap,
@@ -192,6 +217,13 @@ module.exports = NodeHelper.create({
       Log.info("[MMM-KiaAccess] fetch already in progress, skipping");
       return;
     }
+
+    // "rotate within one module": config.vehicles is a list of {vin, header}
+    // to cycle through on-screen. Computed up front (not just before the
+    // bridge spawn below) because request-cap/error paths ahead of that
+    // point need it too -- see _reportFailure()'s comment for why an
+    // account-level failure can't just use `id` here in rotate mode.
+    const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
 
     // ---- alternative source: pull from a Home Assistant instance ----
     // (local read — not subject to the Kia request/hour cap)
@@ -256,7 +288,7 @@ module.exports = NodeHelper.create({
     if (cap > 0 && s.reqTimes.length >= cap) {
       const retryAfterMs = 3600e3 - (now - s.reqTimes[0]) + 1000;
       Log.warn(`[MMM-KiaAccess] request cap reached (${cap}/hr) — serving cache`);
-      return this.serve(id, config, {
+      return this._reportServe(id, config, rotating, {
         stale: true,
         note: `paused — ${cap} requests/hour cap`,
         retryAfterMs
@@ -265,15 +297,12 @@ module.exports = NodeHelper.create({
     s.reqTimes.push(now);
     this.inFlight[id] = true;
 
-    // "rotate within one module": config.vehicles is a list of {vin, header}
-    // to cycle through on-screen. One bridge call fetches every vehicle at
-    // once (allVehicles:true, see kia_client.fetch()) instead of running
-    // one bridge process per car -- cheaper on Kia's servers, and each
-    // vehicle still gets its own isolated history/session/trip/cache/mqtt
-    // identity below (see child.on("close") and onPayload()'s `id` param),
-    // exactly like a dedicated single-vehicle module instance would.
-    const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
-
+    // One bridge call fetches every configured vehicle at once
+    // (allVehicles:true, see kia_client.fetch()) instead of running one
+    // bridge process per car -- cheaper on Kia's servers, and each vehicle
+    // still gets its own isolated history/session/trip/cache/mqtt identity
+    // below (see child.on("close") and onPayload()'s `id` param), exactly
+    // like a dedicated single-vehicle module instance would.
     const pythonBin = resolvePython(config.pythonBin);
     const script = path.join(__dirname, "kia_bridge.py");
     const job = {
@@ -300,7 +329,7 @@ module.exports = NodeHelper.create({
       child = spawn(pythonBin, [script], { stdio: ["pipe", "pipe", "pipe"] });
     } catch (err) {
       this.inFlight[id] = false;
-      return this.fail(id, config, `could not start ${pythonBin}: ${err.message}`);
+      return this._reportFailure(id, config, rotating, `could not start ${pythonBin}: ${err.message}`);
     }
 
     const killTimer = setTimeout(() => child.kill("SIGKILL"), (config.fetchTimeout || 90) * 1000);
@@ -308,7 +337,7 @@ module.exports = NodeHelper.create({
     child.on("error", (err) => {
       clearTimeout(killTimer);
       this.inFlight[id] = false;
-      this.fail(id, config, `failed to run ${pythonBin}: ${err.message}`);
+      this._reportFailure(id, config, rotating, `failed to run ${pythonBin}: ${err.message}`);
     });
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
@@ -321,7 +350,10 @@ module.exports = NodeHelper.create({
       try {
         result = JSON.parse(lastJsonLine(stdout));
       } catch (e) {
-        return this.fail(id, config, `bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`);
+        return this._reportFailure(
+          id, config, rotating,
+          `bridge produced no JSON (exit ${code}). ${truncate(stderr || stdout)}`
+        );
       }
       // kia_client.fetch() itself now refuses (result.ok === false) a
       // multi-vehicle account with no VIN configured, UNLESS this is a
@@ -329,12 +361,26 @@ module.exports = NodeHelper.create({
       // here and silently picking [0], which physical car that was could
       // change between polls. So outside rotate mode, result.vehicles is
       // guaranteed to have exactly one entry by the time we reach this line.
-      if (!result.ok) return this.fail(id, config, result.error || "unknown bridge error");
+      if (!result.ok) {
+        return this._reportFailure(id, config, rotating, result.error || "unknown bridge error");
+      }
       if (!Array.isArray(result.vehicles) || !result.vehicles.length) {
-        return this.fail(id, config, "bridge returned no vehicles");
+        return this._reportFailure(id, config, rotating, "bridge returned no vehicles");
       }
 
       if (rotating) {
+        // job.allVehicles:true (above) tells kia_client.fetch() to return
+        // EVERY vehicle on the account, not just the ones this module
+        // config lists -- config.vehicles is what actually scopes "the
+        // cars this module rotates through" (it's also the exact list the
+        // frontend indexes into for its own rotation), so an account with
+        // more cars than are configured here must not let the extra ones
+        // through: they'd get cache/history/session/trip files created,
+        // publish to MQTT/Influx/Prometheus, and trigger range-map fetches
+        // for a vehicle nothing asked this module to track.
+        const configuredVins = new Set(
+          config.vehicles.map((v) => String(v.vin || "").toUpperCase())
+        );
         // Route each vehicle through the exact same per-id pipeline a
         // dedicated single-vehicle module instance uses (onPayload() reads
         // everything -- history, sessions, trips, cache, mqtt, exporter --
@@ -342,7 +388,7 @@ module.exports = NodeHelper.create({
         // what keeps two cars' trip/charge logs from ever mixing).
         result.vehicles.forEach((vehicle) => {
           const vin = String(vehicle.VIN || vehicle.vin || "").toUpperCase();
-          if (!vin) return; // can't isolate history for a vehicle with no VIN
+          if (!vin || !configuredVins.has(vin)) return;
           const subId = this.identifierFor(Object.assign({}, config, { vin }));
           this.onPayload(subId, config, {
             vehicle: vehicle,
@@ -554,6 +600,29 @@ module.exports = NodeHelper.create({
         srv.start();
         this.promServers[port] = srv;
         Log.info("[MMM-KiaAccess] Prometheus /metrics on :" + port);
+      } else if (
+        !srv._mismatchWarned &&
+        (srv.path !== (ex.prometheus.path || "/metrics") ||
+          srv.prefix !== (ex.prometheus.prefix || "kia"))
+      ) {
+        srv._mismatchWarned = true; // once per server, not once per poll
+        // Two DIFFERENT module configs sharing one port is a real OS-level
+        // constraint, not just a bookkeeping choice: only one process can
+        // ever bind a given TCP port, so there is no such thing as two
+        // independent PromServers on it -- whichever config's module
+        // instance got here first silently wins the path/prefix for every
+        // vehicle on this port from then on. Different vehicles' own
+        // numbers still show up correctly (they're separate label-series,
+        // see setSnapshot()'s vin argument), so this only warns rather than
+        // failing -- but a mismatched path/prefix means the LOSING config's
+        // own setting is being ignored, worth knowing about.
+        Log.warn(
+          `[MMM-KiaAccess] Prometheus port ${port} is already serving ` +
+          `path "${srv.path}" / prefix "${srv.prefix}" (from another ` +
+          `module config) -- this config's path/prefix is being ignored. ` +
+          `Give each module instance its own prometheus.port if you want ` +
+          `them independent.`
+        );
       }
       // Passing vin keys this snapshot separately from any other vehicle
       // sharing the same server/port -- without it, a rotating module's N
@@ -670,6 +739,42 @@ module.exports = NodeHelper.create({
     this.serve(id, config, { stale: true, error: message });
   },
 
+  // A whole-account fetch that fails before any vehicle-specific data comes
+  // back (bridge wouldn't start, no JSON, kia_client.fetch() itself errored,
+  // the request-cap was hit) has nowhere vehicle-specific to report through
+  // -- there IS no per-vehicle payload yet. Reporting it under the account-
+  // level `id` (region|brand|username|auto) is what a single-vehicle module
+  // expects, but the frontend's isForMe() in rotate mode only ever accepts
+  // region|brand|username|<configured VIN> (see MMM-KiaAccess.js) and
+  // silently drops anything else -- so a rotate-mode account failure would
+  // vanish into the void: no error surfaced, no stale-cache fallback shown,
+  // the UI just keeps displaying whatever it already had with no indication
+  // anything is wrong. Fan it out to each configured vehicle's own identity
+  // instead, so every one gets its own (correctly failStreak-tracked, cache-
+  // backed) failure report, same as if each had its own dedicated module
+  // instance that individually failed to fetch.
+  _reportFailure(id, config, rotating, message) {
+    if (!rotating) return this.fail(id, config, message);
+    (config.vehicles || []).forEach((v) => {
+      const vin = String((v && v.vin) || "").toUpperCase();
+      if (!vin) return;
+      this.fail(this.identifierFor(Object.assign({}, config, { vin })), config, message);
+    });
+  },
+
+  // Same idea as _reportFailure(), for a non-error "serve what we have"
+  // case (currently just the request/hour cap) -- opts (stale/note/
+  // retryAfterMs) apply identically to every configured vehicle since the
+  // cap is account-wide, not per-car.
+  _reportServe(id, config, rotating, opts) {
+    if (!rotating) return this.serve(id, config, opts);
+    (config.vehicles || []).forEach((v) => {
+      const vin = String((v && v.vin) || "").toUpperCase();
+      if (!vin) return;
+      this.serve(this.identifierFor(Object.assign({}, config, { vin })), config, opts);
+    });
+  },
+
   /** send data — from cache when `opts` is given (stale / error / rate-limit), else assumed live */
   serve(id, config, opts) {
     const s = this.st(id);
@@ -712,7 +817,11 @@ module.exports = NodeHelper.create({
 
   // ---- optional MQTT state publisher ----
   mqttClient(m) {
-    const key = m.url + "|" + (m.username || "") + "|" + (m.topicPrefix || "");
+    // password included: two configs that differ only by credentials must
+    // never share a connection -- url/username/topicPrefix alone would
+    // silently connect the SECOND config with the FIRST one's password.
+    const key = m.url + "|" + (m.username || "") + "|" + (m.password || "") +
+      "|" + (m.topicPrefix || "");
     if (this.mqttClients[key] !== undefined) return this.mqttClients[key];
 
     let mqtt;
