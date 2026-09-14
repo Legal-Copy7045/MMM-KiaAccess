@@ -1155,6 +1155,10 @@ every other one's retained state. Each vehicle also publishes its own
 `kia/ev9/<VIN>/status` (`online`, refreshed on every poll — there's no single
 Last-Will-and-Testament that can represent N cars, so this one doesn't flip to
 `offline` on disconnect the way the plain single-vehicle status topic does).
+Remove a car from `vehicles:` and its own status topic is published
+`offline` (retained) on the next poll, so it stops looking falsely available
+— its individual value topics (`ev_battery_percentage` etc.) are left as-is,
+same as any other retained MQTT value once nothing's updating it.
 Not rotating (a single `vin:`, or one module block per car)? Topics are
 unchanged from before this existed.
 
@@ -1201,7 +1205,9 @@ Prometheus: an always-on `/metrics` endpoint — `kia_ev_battery_percentage{vin=
 plus `kia_stale`. Strings are skipped; booleans become `1`/`0`. Rotating through
 multiple `vehicles:`? Every car's samples carry its own `vin` tag/label — the
 Prometheus endpoint shows one series per vehicle rather than one server
-sharing a single, last-writer-wins snapshot.
+sharing a single, last-writer-wins snapshot. Remove a car from `vehicles:`
+and its series is dropped from `/metrics` on the next poll, instead of
+reporting its last-known numbers forever.
 
 ## Reliability
 
