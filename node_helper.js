@@ -521,8 +521,16 @@ module.exports = NodeHelper.create({
     const tags = Object.assign(vin ? { vin } : {}, ex.tags || {});
 
     if (ex.influx && ex.influx.url && ex.influx.bucket) {
+      // `tags` (vin + ex.tags) was computed above but never actually reached
+      // pushInflux() -- every write used ex.influx's own (usually absent)
+      // tags only, so multi-vehicle Influx samples weren't separated by VIN
+      // as the config's own comment promises. Merge it in; an explicit
+      // ex.influx.tags entry still wins on a key collision.
+      const influxCfg = Object.assign({}, ex.influx, {
+        tags: Object.assign({}, tags, ex.influx.tags || {})
+      });
       exporter
-        .pushInflux(ex.influx, flat, meta)
+        .pushInflux(influxCfg, flat, meta)
         .then((code) => {
           if (code < 200 || code >= 300)
             Log.warn("[MMM-KiaAccess] influx write -> HTTP " + code);
@@ -538,13 +546,21 @@ module.exports = NodeHelper.create({
           port,
           path: ex.prometheus.path,
           prefix: ex.prometheus.prefix || "kia",
-          labels: tags
+          // base tags only -- a rotating module's several vehicles can share
+          // one port/server, so the per-vehicle vin tag is applied per
+          // setSnapshot() call below (its 3rd arg), not baked in here
+          labels: ex.tags || {}
         });
         srv.start();
         this.promServers[port] = srv;
         Log.info("[MMM-KiaAccess] Prometheus /metrics on :" + port);
       }
-      srv.setSnapshot(flat, meta);
+      // Passing vin keys this snapshot separately from any other vehicle
+      // sharing the same server/port -- without it, a rotating module's N
+      // vehicles calling setSnapshot() on the same PromServer would each
+      // overwrite the last one's numbers, while /metrics kept reporting
+      // them under whichever vehicle's vin created the server first.
+      srv.setSnapshot(flat, meta, vin);
     }
   },
 
@@ -570,8 +586,15 @@ module.exports = NodeHelper.create({
     const key = isoline.cacheKey(lat, lon, [oneWay, round]);
     if (s.rangeMap && s.rangeMap.key === key &&
         Date.now() - (s.rangeMap.at || 0) < 6 * 3600e3) return;
-    if (this._rmInFlight === key) return;
-    this._rmInFlight = key;
+    // Keyed by `id` (per vehicle), not a single module-wide slot -- a
+    // rotate-mode module calls maybeRangeMap() for every vehicle from one
+    // fetch cycle, near-simultaneously; a shared slot meant vehicle B's
+    // request could clear/overwrite vehicle A's in-flight marker (or vice
+    // versa) before A's fetch actually finished, defeating the guard for
+    // both instead of coalescing each vehicle's own repeat requests.
+    this._rmInFlight = this._rmInFlight || {};
+    if (this._rmInFlight[id] === key) return;
+    this._rmInFlight[id] = key;
 
     const timedFetch = async (url) => {
       const ctl = new AbortController();
@@ -636,7 +659,7 @@ module.exports = NodeHelper.create({
     } catch (e) {
       Log.warn("[MMM-KiaAccess] range map: " + e.message);
     } finally {
-      this._rmInFlight = null;
+      this._rmInFlight[id] = null;
     }
   },
 
@@ -728,18 +751,51 @@ module.exports = NodeHelper.create({
     const client = this.mqttClient(m);
     if (!client) return;
 
-    const prefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
+    // Rotate mode: N vehicles share one mqtt connection/topicPrefix --
+    // without a VIN segment, every car would publish to (and retained-
+    // overwrite) the exact SAME topics, and HA discovery would only ever
+    // register whichever vehicle happened to be processed first. A card/
+    // dashboard/automation built on a pre-rotate single-vehicle setup is
+    // unaffected: vin is only non-empty when config.vehicles is actually
+    // configured, so its topics are unchanged from before this feature
+    // existed.
+    const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
+    const vin = rotating
+      ? String((payload.vehicle && (payload.vehicle.VIN || payload.vehicle.vin)) || "").toUpperCase()
+      : "";
+    const basePrefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
+    const prefix = vin ? basePrefix + "/" + vin : basePrefix;
     const retain = m.retain !== false;
     const flat = flatten(payload.vehicle || {});
 
-    // Home Assistant MQTT discovery (once per connection)
+    // The connection's own Last-Will-and-Testament (basePrefix + "/status",
+    // set once at connect time in mqttClient()) only reflects whether the
+    // bridge is reachable AT ALL -- mqtt.js supports one static LWT per
+    // connection, fixed before the account's vehicle list is even known, so
+    // it can't distinguish "vehicle A's data is flowing" from "vehicle B's".
+    // Each vehicle also gets its own retained "online" at its own vin-scoped
+    // status topic, refreshed on every successful poll -- matching the
+    // per-vehicle availability_topic ha-discovery declares below.
+    if (vin) client.publish(prefix + "/status", "online", { retain });
+
+    // Home Assistant MQTT discovery (once per connection PER VEHICLE when
+    // rotating -- a single client._kiaDiscovered boolean would only ever
+    // register whichever vehicle happened to be processed first, and never
+    // learn about the others)
     const ha = m.homeAssistant;
-    if (ha && ha.enabled && !client._kiaDiscovered) {
-      try {
-        haDiscovery.publish(client, { prefix, discoveryPrefix: ha.discoveryPrefix, device: ha.device, vehicle: payload.vehicle });
-        client._kiaDiscovered = true;
-      } catch (e) {
-        Log.warn("[MMM-KiaAccess] HA discovery failed: " + e.message);
+    if (ha && ha.enabled) {
+      const discoveredVins = vin
+        ? (client._kiaDiscoveredVins || (client._kiaDiscoveredVins = {}))
+        : null;
+      const already = vin ? discoveredVins[vin] : client._kiaDiscovered;
+      if (!already) {
+        try {
+          haDiscovery.publish(client, { prefix, discoveryPrefix: ha.discoveryPrefix, device: ha.device, vehicle: payload.vehicle });
+          if (vin) discoveredVins[vin] = true;
+          else client._kiaDiscovered = true;
+        } catch (e) {
+          Log.warn("[MMM-KiaAccess] HA discovery failed: " + e.message);
+        }
       }
     }
 
