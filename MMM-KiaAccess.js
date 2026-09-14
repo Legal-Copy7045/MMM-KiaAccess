@@ -350,12 +350,16 @@ Module.register("MMM-KiaAccess", {
     this.activeVehicleIndex = 0;
     this.vehiclePayloads = {}; // vin -> last KIA_DATA payload for that car
     this.vehicleErrors = {}; // vin -> last error message for that car
-    // prevCond/firstConditionRun (used below) are hysteresis/one-shot state
-    // for the alert engine -- swapping in the WRONG car's state before
-    // evaluating conditions would compare car B's reading against car A's
-    // previous reading and could misfire a one-shot event (e.g. a bogus
-    // "charging started"). Keyed per VIN so rotating never crosses that.
-    this.vehicleCondState = {}; // vin -> { prevCond, firstConditionRun }
+    // Every bit of state processConditions()/fireNotifications() reads or
+    // writes on `this` (hysteresis dead-bands, the home-unplugged timer, the
+    // parked-position anchor, announced/shown/modal bookkeeping -- see
+    // _CTX_FIELDS below) is hysteresis/one-shot/timer state for the alert
+    // engine. Swapping in the WRONG car's state before evaluating conditions
+    // would compare car B's reading against car A's previous one and could
+    // misfire a one-shot event, or worse, a bogus tow/theft alert from B's
+    // GPS position read against A's parked anchor. Keyed per VIN so rotating
+    // never crosses any of it.
+    this.vehicleCondState = {}; // vin -> one slot per _CTX_FIELDS entry
     this.utils = typeof KiaAccessUtils !== "undefined" ? KiaAccessUtils : null;
     this.visuals = typeof KiaAccessVisuals !== "undefined" ? KiaAccessVisuals : null;
     this.conditions = typeof KiaConditions !== "undefined" ? KiaConditions : null;
@@ -484,21 +488,42 @@ Module.register("MMM-KiaAccess", {
 
   // vehicleCondState swap -- see the comment on that map in start(). Every
   // processConditions() call must be bracketed by these when rotating, so
-  // hysteresis/one-shot state never leaks between two different cars.
+  // NONE of the state it reads/writes leaks between two different cars:
+  // not just prevCond/firstConditionRun (the hysteresis dead-bands), but
+  // everything processConditions() and fireNotifications() touch on `this` --
+  // the home-unplugged timer, the parked-position anchor for moved-while-
+  // parked (tow/theft) detection, and the announced/shown/modal-owner
+  // bookkeeping that decides whether a notification actually fires. Missing
+  // any one of these was its own cross-vehicle contamination bug: e.g.
+  // without its own _lastParked, switching from car A (just parked in
+  // Pittsburgh) to car B (just parked in Cleveland) would compare B's
+  // position against A's anchor and could read as a multi-hundred-mile
+  // "moved while parked" -- a bogus tow/theft alert on a car that never
+  // moved. Same idea for _homeUnpluggedSince (B inheriting A's countdown)
+  // and announcedActive/_alertShown/_modalReason (B's transition clearing
+  // or suppressing a notification that was actually about A).
+  _CTX_FIELDS: [
+    "prevCond", "firstConditionRun",
+    "_homeUnpluggedSince", "_lastParked", "_movedSince",
+    "announcedActive", "_alertShown", "_modalReason"
+  ],
   _loadCondState(vin) {
     if (!vin) return; // not rotating: this.prevCond etc are already correct
     if (!this.vehicleCondState[vin]) {
-      this.vehicleCondState[vin] = { prevCond: {}, firstConditionRun: true };
+      this.vehicleCondState[vin] = {
+        prevCond: {}, firstConditionRun: true,
+        _homeUnpluggedSince: null, _lastParked: null, _movedSince: null,
+        announcedActive: {}, _alertShown: {}, _modalReason: null
+      };
     }
-    this.prevCond = this.vehicleCondState[vin].prevCond;
-    this.firstConditionRun = this.vehicleCondState[vin].firstConditionRun;
+    const slot = this.vehicleCondState[vin];
+    this._CTX_FIELDS.forEach((f) => { this[f] = slot[f]; });
   },
   _saveCondState(vin) {
     if (!vin) return;
-    this.vehicleCondState[vin] = {
-      prevCond: this.prevCond,
-      firstConditionRun: this.firstConditionRun
-    };
+    const slot = {};
+    this._CTX_FIELDS.forEach((f) => { slot[f] = this[f]; });
+    this.vehicleCondState[vin] = slot;
   },
 
   // identifierFor() in node_helper.js is `[region,brand,username,vin].join
