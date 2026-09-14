@@ -1141,6 +1141,11 @@ Topics: `kia/ev9/ev_battery_percentage`, `kia/ev9/is_locked`,
 `kia/ev9/_meta/fetched_at`, `kia/ev9/_meta/stale`, and `kia/ev9/status`
 (`online` / `offline` via LWT). Current-state only — derive change triggers
 downstream, or use the `KIA_ACCESS_STATE_CHANGED` notification above.
+**Give each Kia account its own `topicPrefix`** if you run more than one on
+the same broker — `<prefix>/status` reflects one connection's liveness, so
+two accounts sharing a prefix would have that topic flip based on whichever
+connection last (dis)connected rather than either account specifically (a
+one-time warning is logged if this happens).
 
 The raw API dump (`vehicle.data.*`, which includes GPS) is **not** fanned out
 to individual retained topics; set `mqtt.publishRaw: true` if you want it. The
@@ -1158,7 +1163,11 @@ Last-Will-and-Testament that can represent N cars, so this one doesn't flip to
 Remove a car from `vehicles:` and its own status topic is published
 `offline` (retained) on the next poll, so it stops looking falsely available
 — its individual value topics (`ev_battery_percentage` etc.) are left as-is,
-same as any other retained MQTT value once nothing's updating it.
+same as any other retained MQTT value once nothing's updating it. A vehicle
+that stays in `vehicles:` but stops appearing in the account itself (sold,
+removed from the Kia app, …) is retired the same way after a few consecutive
+successful polls that don't see it — one flaky/incomplete account response
+alone won't retire a car that's still really there.
 Not rotating (a single `vin:`, or one module block per car)? Topics are
 unchanged from before this existed.
 

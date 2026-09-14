@@ -105,13 +105,39 @@ function pushInflux(cfg, flat, meta) {
   }, line);
 }
 
+// Prometheus label names must match [a-zA-Z_][a-zA-Z0-9_]* -- unlike metric
+// names (already sanitized the same way, see numericFields()'s caller
+// below), a raw JS object key from a user's `exporter.tags` config (e.g.
+// "vehicle-name") is never validated anywhere else before landing here. An
+// invalid label name doesn't just get dropped -- it makes the ENTIRE
+// /metrics response invalid to a scraper, taking every other metric down
+// with it. Silently sanitizing (matching the existing metric-name
+// precedent) rather than refusing to start: this module has no config-time
+// validation step to hook into, and a working-but-renamed tag beats an
+// entirely broken scrape.
+function sanitizeLabelName(k) {
+  let s = String(k).replace(/[^a-zA-Z0-9_]/g, "_");
+  if (!/^[a-zA-Z_]/.test(s)) s = "_" + s;
+  return s || "_";
+}
+
+function renderLabels(labels) {
+  const merged = {}; // sanitized name -> value; a later raw key that
+  // sanitizes to the same name as an earlier one wins (avoids emitting the
+  // same label name twice in one series, itself also invalid exposition)
+  Object.keys(labels || {}).forEach((k) => {
+    if (labels[k] == null || labels[k] === "") return;
+    merged[sanitizeLabelName(k)] = labels[k];
+  });
+  return Object.keys(merged)
+    .map((k) => k + '="' + String(merged[k]).replace(/["\\\n]/g, "") + '"')
+    .join(",");
+}
+
 /** Render the Prometheus exposition text for one snapshot. */
 function promText(flat, meta, prefix, labels) {
   prefix = prefix || "kia";
-  const lbl = Object.keys(labels || {})
-    .filter((k) => labels[k] != null && labels[k] !== "")
-    .map((k) => k + '="' + String(labels[k]).replace(/["\\\n]/g, "") + '"')
-    .join(",");
+  const lbl = renderLabels(labels);
   const suffix = lbl ? "{" + lbl + "}" : "";
   const lines = [];
   numericFields(flat).forEach((x) => {
@@ -142,10 +168,7 @@ function promTextMulti(snapshots, prefix) {
   Object.keys(snapshots).forEach((key) => {
     const snap = snapshots[key];
     if (!snap) return;
-    const lbl = Object.keys(snap.labels || {})
-      .filter((k) => snap.labels[k] != null && snap.labels[k] !== "")
-      .map((k) => k + '="' + String(snap.labels[k]).replace(/["\\\n]/g, "") + '"')
-      .join(",");
+    const lbl = renderLabels(snap.labels);
     const suffix = lbl ? "{" + lbl + "}" : "";
     numericFields(snap.flat).forEach((x) => {
       const name = prefix + "_" + x.key;
@@ -185,6 +208,13 @@ class PromServer {
     this._snapshots = {}; // key ("" for a single, unkeyed vehicle) -> {flat, meta, labels}
     this._text = "# no data yet\n";
     this._server = null;
+    // Node-builtins-only module (see the file header) -- no logger here by
+    // design, so a bind failure (EADDRINUSE, permission denied on a
+    // privileged port, etc.) is handed to the CALLER's own logger instead
+    // of being silently discarded. Without this, node_helper.js would go on
+    // calling setSnapshot() and believing /metrics was being served, while
+    // externally every scrape just fails with no explanation anywhere.
+    this._onError = typeof opts.onError === "function" ? opts.onError : null;
   }
 
   setSnapshot(flat, meta, vin) {
@@ -219,7 +249,7 @@ class PromServer {
         res.end("not found\n");
       }
     });
-    this._server.on("error", () => { /* port in use etc — logged by caller */ });
+    this._server.on("error", (err) => { if (this._onError) this._onError(err); });
     this._server.listen(this.port);
   }
 
