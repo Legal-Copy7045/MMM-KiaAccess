@@ -769,6 +769,23 @@ assert e4.unique_id == "USA:KIA:user@example.com", (
 )
 assert not ce4.updates
 
+# --- async_setup(): HA never calls async_setup_entry for a DISABLED entry,
+# so relying on that alone would leave a legacy entry's stale unique_id
+# unrepaired for as long as it stays disabled. async_setup() runs once at
+# domain setup regardless of any one entry's state and must migrate every
+# entry up front. ---
+disabled_legacy = _fake_entry(
+    "disabled", "USA:KIA:user@example.com",
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+)
+hass_multi = type("H", (), {"config_entries": _FakeConfigEntries([disabled_legacy])})()
+assert asyncio.run(init.async_setup(hass_multi, {})) is True
+assert disabled_legacy.unique_id == "USA:KIA:user@example.com:VIN1", (
+    "async_setup() must migrate every entry it finds, not rely on that "
+    "entry's own async_setup_entry (which a disabled entry never gets) "
+    "having already run"
+)
+
 
 # --- config_flow._finish_with_uid(): re-running setup for a single-vehicle
 # account that already has a legacy blank-VIN entry must not silently create
