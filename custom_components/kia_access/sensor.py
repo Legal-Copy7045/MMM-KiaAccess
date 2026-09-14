@@ -13,7 +13,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from . import sessions as charge_sessions
-from .const import DOMAIN, ENTITIES, SEAT_LEVELS
+from .const import CONF_BRAND, CONF_REGION, DOMAIN, ENTITIES, SEAT_LEVELS
 from .entity import KiaAccessEntity
 
 _SEAT_BY_CODE = {v: k for k, v in SEAT_LEVELS.items()}
@@ -311,6 +311,18 @@ class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
         out: dict = {"kia_access_raw": True, "entry_id": self.coordinator.entry.entry_id}
         v = self.coordinator.vehicle
         out["vehicle_name"] = str(v.get("name") or v.get("model") or "Kia")
+        # Lets the Lovelace card's vehicle-switcher group entities by ACCOUNT
+        # (region:brand:username, same derivation as config_flow._account_uid()
+        # minus the VIN) rather than merging every Kia Access vehicle on the
+        # whole HA instance into one dropdown -- entry_id alone identifies a
+        # vehicle, not which account it belongs to. Already effectively
+        # public: it's the same string stored as this entry's own unique_id.
+        d = self.coordinator.entry.data
+        out["account"] = ":".join([
+            str(d.get(CONF_REGION, "USA")).upper(),
+            str(d.get(CONF_BRAND, "KIA")).upper(),
+            str(d.get("username", "")).lower(),
+        ])
         # lets the Lovelace card pick the right climate set_temp unit/bounds
         # for THIS vehicle instead of assuming USA/Canada Fahrenheit
         # (climate_temp_unit() is the same source the native climate entity uses)

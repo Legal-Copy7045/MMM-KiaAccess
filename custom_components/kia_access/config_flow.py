@@ -112,6 +112,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._reauth_entry = None
         self._token: dict | None = None
         self._vehicles: list[dict] = []
+        self._vehicle_count: int | None = None
 
     async def async_step_reauth(self, entry_data: dict) -> FlowResult:
         self._reauth_entry = self.hass.config_entries.async_get_entry(
@@ -200,6 +201,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         all; only a genuine multi-vehicle account is asked to choose."""
         self._token = token
         vehicles = await self.hass.async_add_executor_job(self._list_vehicles)
+        self._vehicle_count = len(vehicles)
         if len(vehicles) <= 1:
             self._job[CONF_VIN] = vehicles[0]["vin"] if vehicles else ""
             return await self._finish_with_uid()
@@ -227,18 +229,31 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # VIN-scoped when set, so a multi-vehicle account can have one config
         # entry per vehicle -- without this, a second entry for the same
         # account's other vehicle would always abort on a unique-ID
-        # collision with the first. A blank VIN (no vehicles returned, or a
-        # single-vehicle account) keeps the original account-only ID, so a
-        # genuine single-vehicle setup behaves exactly as before and a
-        # second blank-VIN attempt still correctly aborts as a real
-        # duplicate.
+        # collision with the first. A blank VIN (no vehicles returned) keeps
+        # the original account-only ID.
+        region = self._job.get(CONF_REGION, "USA")
+        brand = self._job.get(CONF_BRAND, "KIA")
+        vin = self._job.get(CONF_VIN, "")
         await self.async_set_unique_id(
-            _account_uid(
-                self._job.get(CONF_REGION, "USA"), self._job.get(CONF_BRAND, "KIA"),
-                self._job["username"], self._job.get(CONF_VIN, ""),
-            )
+            _account_uid(region, brand, self._job["username"], vin)
         )
         self._abort_if_unique_id_configured()
+        # A single-vehicle account always resolves a real VIN here now (see
+        # _after_login()), so its uid is VIN-scoped -- DIFFERENT from a
+        # pre-v2.54 entry for the exact same account/car, which used the
+        # account-only (blank-VIN) form. The check above alone can't catch
+        # that mismatch (the two uids genuinely differ), so check for it
+        # explicitly: re-running setup for an account you already configured
+        # must not silently create a second entry for the same physical car.
+        # (__init__.py's own migration repairs an EXISTING mismatched entry;
+        # this is only about not creating a brand new duplicate here.)
+        if vin and getattr(self, "_vehicle_count", None) == 1:
+            blank_uid = _account_uid(region, brand, self._job["username"], "")
+            if any(
+                e.unique_id == blank_uid
+                for e in self.hass.config_entries.async_entries(DOMAIN)
+            ):
+                return self.async_abort(reason="already_configured")
         return self._finish(self._token)
 
     def _list_vehicles(self) -> list[dict]:

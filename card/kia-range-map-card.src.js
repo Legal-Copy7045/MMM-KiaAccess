@@ -55,6 +55,17 @@
       var a = hass.states[id].attributes;
       return id.indexOf("sensor.") === 0 && a && a.kia_access_raw === true;
     }).sort();
+    // More than one Kia Access ACCOUNT on this HA instance (not just more
+    // than one vehicle): can't safely guess which one is "yours" for this
+    // card, so refuse to auto-pick across them -- same rule as the main
+    // kia-access-card's vehicle dropdown (see distinctAccounts() there);
+    // set entity: explicitly instead.
+    var accounts = {};
+    ids.forEach(function (id) {
+      var a = hass.states[id] && hass.states[id].attributes;
+      accounts[(a && a.account) || ""] = 1;
+    });
+    if (Object.keys(accounts).length > 1) return null;
     var stored = loadSelectedVehicle();
     if (stored && ids.indexOf(stored) !== -1) return stored;
     return ids[0] || null;
@@ -64,7 +75,8 @@
     var flat = {};
     Object.keys(attrs || {}).forEach(function (k) {
       if (k === "kia_access_raw" || k === "friendly_name" ||
-          k === "icon" || k === "entry_id" || k === "vehicle_name") return;
+          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
+          k === "account") return;
       flat["vehicle." + k] = attrs[k];
     });
     return flat;
