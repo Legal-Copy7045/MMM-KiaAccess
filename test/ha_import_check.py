@@ -213,6 +213,93 @@ assert _fc._force_next_refresh is False, "the force flag must be one-shot"
 assert _fc._job()["refresh"] is False, "second call must fall back to cache-only"
 assert hasattr(co.KiaAccessCoordinator, "async_force_refresh")
 
+import asyncio  # noqa: E402  (used below and re-imported, harmlessly, near line 540)
+
+# async_load_prefs() must restore _last_parked (the moved-while-parked /
+# tow-theft anchor) from the timers store alongside the two timers it
+# already restored -- without this, a HA restart silently re-anchors "where
+# the car is parked" to wherever it happens to be on the first post-restart
+# poll, so a vehicle towed/moved WHILE HA was down is never detected as
+# having moved at all.
+class _FakeStore:
+    def __init__(self, data=None):
+        self._data = data
+
+    async def async_load(self):
+        return self._data
+
+    async def async_save(self, data):
+        self._data = data
+
+
+class _FakePrefsCoord:
+    _valid_ll = co.KiaAccessCoordinator._valid_ll
+    async_load_prefs = co.KiaAccessCoordinator.async_load_prefs
+
+    def __init__(self, timers_data):
+        self._prefs_store = _FakeStore({})
+        self._geo_store = _FakeStore({"geo": {}})
+        self._timers_store = _FakeStore(timers_data)
+
+
+_lp = {"lat": 40.71, "lon": -79.75, "odo": 12345.0}
+_restored = _FakePrefsCoord({
+    "home_unplugged_since": 1000.0, "moved_since": None, "last_parked": _lp,
+})
+asyncio.run(_restored.async_load_prefs())
+assert _restored._home_unplugged_since == 1000.0
+assert _restored._last_parked == _lp, (
+    "_last_parked must survive a restart the same way home_unplugged_since/"
+    "moved_since already do -- otherwise a tow/theft while HA is down is "
+    "silently adopted as the new parked position instead of detected"
+)
+
+# no timers ever saved yet (fresh install) -- must default to None, not raise
+_fresh = _FakePrefsCoord({})
+asyncio.run(_fresh.async_load_prefs())
+assert _fresh._last_parked is None
+
+# KiaAccessEntity.device_info must be a live @property, not a snapshot taken
+# once in __init__ -- entities are created right after the coordinator's
+# FIRST successful fetch (async_config_entry_first_refresh() is awaited
+# before entity platforms are set up), but that first fetch can itself be a
+# genuinely near-empty Kia record (see coordinator.py's "Kia returned an
+# empty state... open the Kia app once to force a sync" warning) -- a
+# one-time-built DeviceInfo would freeze the HA device registry entry at
+# that incomplete snapshot forever, even once a later poll brings in the
+# real model/name/VIN.
+ent_mod = importlib.import_module(f"{pkg}.entity")
+
+
+class _FakeCoordEntry:
+    entry_id = "entry123"
+
+
+class _FakeCoordinator:
+    def __init__(self, vehicle):
+        self.entry = _FakeCoordEntry()
+        self.vehicle = vehicle
+
+
+class _FakeEntity(ent_mod.KiaAccessEntity):
+    def __init__(self, coordinator):
+        self.coordinator = coordinator
+        self._key = "x"
+        self._ident = coordinator.entry.entry_id
+        self._attr_unique_id = f"{self._ident}_{self._key}"
+
+
+_fake_coord = _FakeCoordinator({})  # first-fetch-just-happened, still empty
+_ent = _FakeEntity(_fake_coord)
+assert _ent.device_info["name"] == "Kia", "no vehicle data yet -> generic fallback name"
+_fake_coord.vehicle = {"name": "My EV9", "model": "EV9", "VIN": "5XY123"}  # a LATER poll fills it in
+assert _ent.device_info["name"] == "My EV9", (
+    "device_info must reflect the CURRENT coordinator.vehicle, not whatever "
+    "it looked like when the entity was constructed"
+)
+assert _ent.device_info["model"] == "EV9"
+assert _ent.device_info["serial_number"] == "5XY123"
+
 _btn = importlib.import_module(f"{pkg}.button")
 assert hasattr(_btn, "KiaAccessRefreshButton")
 
