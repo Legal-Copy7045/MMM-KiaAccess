@@ -382,4 +382,120 @@ function tmpCacheDir() {
   Object.values(helper.mqttClients).forEach((c) => { if (c && c.end) c.end(true); });
 }
 
-console.log("all node_helper tests passed");
+// ---- request/hour cap: must be keyed by ACCOUNT (region|brand|username),
+// not by the vin-scoped `id` -- a hostile-audit finding: two module configs
+// covering the SAME real Kia account under different vin-scopes (e.g. one
+// single-vehicle block plus a separate rotate block for the same login)
+// used to each get their own independent request budget, silently doubling
+// the real request rate against Kia's servers despite maxRequestsPerHour
+// being set identically on both. ----
+{
+  const helper = freshHelper();
+  const single = { region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1", maxRequestsPerHour: 1 };
+  const rotate = {
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "VIN1" }, { vin: "VIN2" }], maxRequestsPerHour: 1
+  };
+  assert.strictEqual(
+    helper.acctKeyFor(single), helper.acctKeyFor(rotate),
+    "the same real account must produce the same rate-limit key regardless of vin-scope"
+  );
+  const idSingle = helper.identifierFor(single);
+  const idRotate = helper.identifierFor({ ...rotate, vin: "" });
+  assert.notStrictEqual(idSingle, idRotate, "sanity check: the two configs really do have different vehicle-cache ids");
+
+  // end-to-end: exhaust the shared cap via the single-vehicle config, then
+  // confirm the ROTATE config (a different `id`, but the SAME real account)
+  // is blocked by the very next call -- not just that the key helper
+  // matches, but that handleFetch() actually enforces one shared bucket.
+  // A deliberately-invalid pythonBin means any spawn that DOES slip through
+  // fails harmlessly and asynchronously -- this test only inspects
+  // synchronous state (inFlight / the served-from-cache report), so it
+  // never needs to wait for that failure to land.
+  const served = [];
+  helper.serve = (id, config, opts) => served.push({ id, opts });
+  const badBin = { pythonBin: "this-binary-does-not-exist-kia-test" };
+
+  helper.handleFetch(Object.assign({}, single, badBin));
+  assert.strictEqual(helper.inFlight[idSingle], true, "the first call (under cap) must proceed to spawn");
+  assert.strictEqual(served.length, 0, "the first call must not be served-from-cache -- it's under the cap");
+
+  helper.handleFetch(Object.assign({}, rotate, badBin));
+  assert.strictEqual(helper.inFlight[idRotate], undefined, (
+    "the rotate config's call must be BLOCKED by the cap the single-vehicle config already used up -- " +
+    "they share one real Kia account and must share one request budget"
+  ));
+  assert.strictEqual(served.length, 2, ( // fanned out per configured vehicle, see _reportServe()
+    "the second call must be served from cache (rate-limited), not spawn a second bridge process"
+  ));
+}
+
+// ---- maybeRangeMap(): an older, slower fetch must never overwrite a
+// newer, faster one's result with stale data -- a hostile-audit finding.
+// s.rangeMap used to be written unconditionally with no check that the
+// writer was still the LATEST call for this id, so a car that moved
+// between two overlapping calls (concretely reachable in HA poll mode,
+// whose 30s default interval is often shorter than this function's own
+// up-to-~30s worst-case external-API time) could have its map silently
+// regress to an old, wrong-location image whenever the earlier call
+// happened to resolve after a later one. ----
+async function testRangeMapRace() {
+  const dir = tmpCacheDir();
+  const helper = freshHelper(dir);
+  const id = helper.identifierFor({ region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1" });
+
+  const prevFetch = global.fetch;
+  const pending = [];
+  global.fetch = (url) => new Promise((resolve) => pending.push({ url, resolve }));
+  const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const boundary = [
+    { longitude: 0, latitude: 0 }, { longitude: 0, latitude: 1 },
+    { longitude: 1, latitude: 1 }, { longitude: 1, latitude: 0 }
+  ];
+  const tomtomOk = { ok: true, json: async () => ({ reachableRange: { boundary } }) };
+  const config = { rangeMap: { apiKey: "geo-key", tomtomKey: "tt-key", width: 200, height: 200 } };
+
+  try {
+    // cycle 1: the car's OLD position (key1) -- kept pending throughout
+    const payload1 = { vehicle: { location_latitude: 40.0, location_longitude: -80.0, ev_driving_range: 300 } };
+    const p1 = helper.maybeRangeMap(id, config, payload1);
+    await flush();
+    assert.strictEqual(pending.length, 1, "cycle 1's oneWay fetch must be in flight");
+
+    // cycle 2: the car's NEWER position (key2) -- starts while cycle 1 is still pending
+    const payload2 = { vehicle: { location_latitude: 41.0, location_longitude: -81.0, ev_driving_range: 300 } };
+    const p2 = helper.maybeRangeMap(id, config, payload2);
+    await flush();
+    assert.strictEqual(pending.length, 2, "cycle 2's oneWay fetch must also now be in flight");
+
+    // resolve cycle 2 FULLY first -- the newer cycle finishes before the older one
+    pending[1].resolve(tomtomOk);
+    await flush();
+    assert.strictEqual(pending.length, 3, "cycle 2's round-trip fetch must now be in flight");
+    pending[2].resolve(tomtomOk);
+    await p2;
+
+    const s = helper.st(id);
+    const key2 = s.rangeMap && s.rangeMap.key;
+    assert.ok(key2, "cycle 2 must have written a rangeMap");
+
+    // NOW let cycle 1 (older, slower, now-stale) finish
+    pending[0].resolve(tomtomOk);
+    await flush();
+    assert.strictEqual(pending.length, 4, "cycle 1's round-trip fetch must now be in flight");
+    pending[3].resolve(tomtomOk);
+    await p1;
+
+    assert.strictEqual(s.rangeMap.key, key2, (
+      "cycle 1 (older, slower, now-stale) must never overwrite cycle 2's (newer, faster) " +
+      "rangeMap -- this is the exact stale-write race the generation guard exists to prevent"
+    ));
+  } finally {
+    global.fetch = prevFetch;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+testRangeMapRace()
+  .then(() => console.log("all node_helper tests passed"))
+  .catch((err) => { console.error(err); process.exitCode = 1; });

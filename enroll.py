@@ -11,10 +11,16 @@ and keeps the password out of the process list):
       ~/MagicMirror/modules/MMM-KiaAccess/venv/bin/python3 enroll.py
 
 It logs in, asks Kia to send you a code (SMS or email), you type it back, and
-the resulting long-lived refresh token is written to `token.json` next to this
-script. `kia_bridge.py` then reuses that token and refreshes it silently — no
-more OTP until Kia expires the refresh token (months), at which point just run
-this again.
+the resulting long-lived refresh token is written to a `token-<hash>.json`
+file next to this script, scoped to this account (region+brand+username) so
+enrolling a second account never overwrites the first one's saved token.
+`kia_bridge.py` then reuses that token and refreshes it silently — no more
+OTP until Kia expires the refresh token (months), at which point just run
+this again with the same KIA_JOB.
+
+Running this for a second account? Just re-run it with that account's own
+KIA_JOB — no extra flags needed, each account gets its own token file
+automatically.
 
 The job may also be given as argv[1] (a JSON string) or on stdin.
 """
@@ -25,15 +31,25 @@ import stat
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOKEN_FILE = os.path.join(HERE, "token.json")
 
-# Same table kia_client.py uses to talk to hyundai_kia_connect_api -- imported
-# rather than redefined, so a future region/brand code change can't silently
-# drift between the two (they're both root-level files in the same
-# directory, so this import works whether enroll.py is invoked by a relative
-# or absolute path: CPython always puts the running script's own directory
-# first on sys.path).
-from kia_client import REGION_INT, BRAND_INT  # noqa: E402
+# Same tables/helpers kia_client.py uses -- imported rather than redefined,
+# so a future region/brand code change (or the token-file naming scheme)
+# can't silently drift between the two (they're both root-level files in
+# the same directory, so this import works whether enroll.py is invoked by
+# a relative or absolute path: CPython always puts the running script's own
+# directory first on sys.path).
+#
+# account_token_file()/_account_hash() matter here specifically because the
+# token file is per-ACCOUNT, not a single shared token.json: two accounts
+# enrolled with two separate `KIA_JOB`s must land in two separate files, or
+# enrolling account B here would silently overwrite account A's saved
+# token, breaking account A's next fetch. _migrate_legacy_token() carries
+# forward a pre-v2.63 single-account install's existing token.json under
+# its new account-scoped name the first time either enroll.py or a normal
+# fetch touches it.
+from kia_client import (  # noqa: E402
+    REGION_INT, BRAND_INT, account_token_file, _account_hash, _migrate_legacy_token
+)
 
 
 def open_tty():
@@ -153,23 +169,32 @@ def main():
         print("Login finished but no token was produced.", file=sys.stderr)
         return 1
 
+    account_hash = _account_hash(job.get("region", "USA"), job.get("brand", "KIA"), job["username"])
+    token_file = job.get("tokenFile") or account_token_file(job)
+    # carries forward a pre-v2.63 install's single shared token.json (if any)
+    # under this account's own name, exactly as a normal fetch would
+    _migrate_legacy_token(token_file, account_hash)
+
     tok = vm.token.to_dict()
     tok["enrolled_at"] = __import__("datetime").datetime.now(
         __import__("datetime").timezone.utc
     ).isoformat()
+    # Identity tag -- see kia_client._migrate_legacy_token()'s comment: it's
+    # what stops a LATER account's setup from ever adopting this file.
+    tok["_kiaAccessAccountHash"] = account_hash
     # Create already owner-only rather than open()-then-chmod(), which briefly
     # leaves the refresh token world/group-readable (whatever the umask
     # allows) in the window before the chmod call below.
-    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(tok, fh, indent=2, default=str)
     try:
-        os.chmod(TOKEN_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        os.chmod(token_file, stat.S_IRUSR | stat.S_IWUSR)  # 0600
     except OSError:
         pass
 
     names = ", ".join(sorted(vm.vehicles and (v.name for v in vm.vehicles.values()) or []))
-    print(f"\nSaved {TOKEN_FILE}")
+    print(f"\nSaved {token_file}")
     if names:
         print(f"Vehicles: {names}")
     print("You can now start MagicMirror.")

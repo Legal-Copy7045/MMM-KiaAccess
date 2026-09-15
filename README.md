@@ -378,11 +378,17 @@ KIA_JOB='{"username":"you@example.com","password":"pw","pin":"1234","region":"US
 (Passing the details in `KIA_JOB` leaves the terminal free for the prompts and keeps the
 password out of `ps`. `argv[1]` or stdin also work.)
 
-It asks where to send the code (SMS / email), you paste the code back, and it writes
-`token.json` (git-ignored, `chmod 600`) next to the script. `kia_bridge.py` then reuses
-and silently refreshes that token — no more prompts until Kia expires the refresh token
-(months away), at which point just run `enroll.py` again. If the module ever shows
-*"OTP enrollment required"*, that's the signal.
+It asks where to send the code (SMS / email), you paste the code back, and it writes a
+`token-<hash>.json` (git-ignored, `chmod 600`) next to the script, scoped to this
+account so a second `enroll.py` run for a different Kia account never overwrites it.
+`kia_bridge.py` then reuses and silently refreshes that token — no more prompts until
+Kia expires the refresh token (months away), at which point just run `enroll.py` again
+with the same `KIA_JOB`. If the module ever shows *"OTP enrollment required"*, that's
+the signal.
+
+Running two Kia accounts (two module blocks, or one rotating through vehicles on two
+different accounts)? Run `enroll.py` once per account, each with that account's own
+`KIA_JOB` — no extra configuration needed, each gets its own token file automatically.
 
 ### C · MagicMirror fed by Home Assistant
 

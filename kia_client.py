@@ -14,6 +14,7 @@ the Lovelace card and this module all agree on names and arguments.
 """
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -23,7 +24,57 @@ import threading
 _LOGGER = logging.getLogger(__name__)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+# Pre-v2.63 default: a single shared token.json for every account. Two
+# MagicMirror module instances (or module blocks) configured with DIFFERENT
+# Kia accounts both fell back to this same file -- each one's token refresh
+# silently overwrote the other's, so whichever account polled last would
+# leave the OTHER account authenticating with the wrong (or freshly revoked)
+# token on its next cycle. See account_token_file() / DEFAULT_TOKEN_FILE's
+# remaining role as a one-time migration source, below.
 DEFAULT_TOKEN_FILE = os.path.join(_HERE, "token.json")
+
+
+def _account_hash(region, brand, username) -> str:
+    """sha256(REGION|BRAND|username), truncated -- same non-cryptographic
+    identity-hashing idea node_helper.js's _idHash() uses for cache files
+    (there's no Node/Python code-sharing path for this one, so it's a
+    separate implementation of the same idea). Token identity is scoped to
+    the ACCOUNT (region+brand+username), not a specific vehicle -- one Kia
+    login's token is shared across every vehicle on that account."""
+    raw = f"{str(region).upper()}|{str(brand).upper()}|{str(username).strip().lower()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def account_token_file(job) -> str:
+    """The token file THIS job's account owns -- distinct per (region, brand,
+    username), so two differently-configured accounts never share one file."""
+    h = _account_hash(
+        job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
+    )
+    return os.path.join(_HERE, f"token-{h}.json")
+
+
+def _migrate_legacy_token(token_file, account_hash) -> None:
+    """One-time migration off the old shared token.json, mirroring
+    node_helper.js's migrateLegacyCache(): adopt (rename) the legacy file
+    ONLY if it's never been tagged with an account's identity (a fresh
+    upgrade from a pre-v2.63, single-account-only install) -- a legacy file
+    already tagged for a DIFFERENT account must never be adopted here, or a
+    second account set up after the first already migrated would silently
+    steal the first account's still-in-use token."""
+    if os.path.exists(token_file) or not os.path.exists(DEFAULT_TOKEN_FILE):
+        return
+    try:
+        with open(DEFAULT_TOKEN_FILE, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except Exception:
+        return  # unreadable/corrupt -- not a safe migration candidate
+    if not (isinstance(raw, dict) and not raw.get("_kiaAccessAccountHash")):
+        return  # already tagged (for this or another account) -- never adopt
+    try:
+        os.rename(DEFAULT_TOKEN_FILE, token_file)
+    except OSError:
+        pass
 # repo layout: <root>/core/commands.json ; HA vendored copy: alongside this file
 COMMANDS_FILE = next(
     (p for p in (
@@ -183,7 +234,7 @@ def token_dict(vm, enrolled_at=None):
     return tok
 
 
-def _save_token(token_file, vm, enrolled_at):
+def _save_token(token_file, vm, enrolled_at, account_hash=None):
     if vm.token is None:
         return
     try:
@@ -191,6 +242,12 @@ def _save_token(token_file, vm, enrolled_at):
         tok["enrolled_at"] = enrolled_at or datetime.datetime.now(
             datetime.timezone.utc
         ).isoformat()
+        # Identity tag -- see _migrate_legacy_token()'s comment for why this
+        # exists: it's what stops a SECOND account's setup from ever being
+        # able to adopt an already-tagged file belonging to a DIFFERENT
+        # account during the legacy-token.json migration.
+        if account_hash:
+            tok["_kiaAccessAccountHash"] = account_hash
         # Create already owner-only rather than open()-then-chmod(): the
         # latter briefly leaves the refresh token world/group-readable
         # (whatever the umask allows) between the write and the chmod call --
@@ -245,7 +302,11 @@ def make_manager(job, saved_token=None):
 
 def connect(job, token_file=None):
     """Return (vm, enrolled_at). Raises OtpRequired / ClientError."""
-    token_file = token_file or job.get("tokenFile") or DEFAULT_TOKEN_FILE
+    account_hash = _account_hash(
+        job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
+    )
+    token_file = token_file or job.get("tokenFile") or account_token_file(job)
+    _migrate_legacy_token(token_file, account_hash)
     try:
         from hyundai_kia_connect_api import VehicleManager
         from hyundai_kia_connect_api.Token import Token
@@ -286,7 +347,7 @@ def connect(job, token_file=None):
     # and reads it back from fetch()'s meta["token"]), don't write anything into
     # the HACS-managed integration folder.
     if "token" not in job:
-        _save_token(token_file, vm, enrolled_at)
+        _save_token(token_file, vm, enrolled_at, account_hash)
     return vm, enrolled_at
 
 

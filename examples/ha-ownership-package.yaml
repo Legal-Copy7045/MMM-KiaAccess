@@ -103,7 +103,10 @@ template:
           {% set start = as_timestamp('2025-01-01 00:00:00', 1735707600) %}
           {% set term_days = 1096 %}
           {% set allowance = 30000 %}
-          {% set days = [(now().timestamp() - start) / 86400, 0] | max %}
+          {# whole days only -- see "Kia lease projected total"'s comment on
+             why this must be an integer, not (now() - start) / 86400 left
+             as a fraction #}
+          {% set days = [((now().timestamp() - start) / 86400) | round(0, 'floor'), 0] | max %}
           {{ (days * (allowance / term_days)) | round(0) }}
 
       - name: "Kia lease margin"
@@ -121,7 +124,19 @@ template:
         state: >
           {% set start = as_timestamp('2025-01-01 00:00:00', 1735707600) %}
           {% set term_days = 1096 %}
-          {% set days = (now().timestamp() - start) / 86400 %}
+          {# Whole days only, not the raw fractional (now() - start) / 86400.
+             This template re-evaluates every time sensor.kia_lease_miles_used
+             changes (i.e. every poll, ~every 30 min by default) -- with a
+             fractional day count, `used / days` shifts a little on every one
+             of those re-evaluations even when `used` itself hasn't changed,
+             because the denominator keeps ticking upward through the day.
+             Early in a lease this is the whole visible number: on day 6,
+             going from day 6.00 to day 6.02 (one ~30 min poll) is a ~0.3%
+             swing in the denominator, enough to visibly jump the projected
+             total. Flooring to a whole day means it only changes once a day
+             from the passage of time, plus whenever new mileage comes in --
+             both genuinely meaningful changes, not clock noise. #}
+          {% set days = ((now().timestamp() - start) / 86400) | round(0, 'floor') %}
           {% set used = states('sensor.kia_lease_miles_used') | float(0) %}
           {{ ((used / days) * term_days) | round(0) if days >= 1 else used | round(0) }}
 

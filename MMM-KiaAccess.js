@@ -378,6 +378,11 @@ Module.register("MMM-KiaAccess", {
     this.staleNote = null;
     this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
     this.firstConditionRun = true;
+    // Which condition (if any) currently owns MagicMirror's one mirror-wide
+    // alert-module modal slot -- initialised ONCE here, not per-vehicle (see
+    // the comment on _CTX_FIELDS for why it's deliberately excluded from
+    // the rotate-mode per-vin swap).
+    this._modalReason = null;
     this.diagramAlerts = []; // [{level,label}] under the diagram's warning triangle
     this.rangeMap = null; // { oneWayUrl, roundTripUrl, … } from node_helper
     this.rangeReach = null; // { pois, oneWayKm, driveTimeSource } from HA (mode C)
@@ -504,20 +509,31 @@ Module.register("MMM-KiaAccess", {
   // not just prevCond/firstConditionRun (the hysteresis dead-bands), but
   // everything processConditions() and fireNotifications() touch on `this` --
   // the home-unplugged timer, the parked-position anchor for moved-while-
-  // parked (tow/theft) detection, and the announced/shown/modal-owner
-  // bookkeeping that decides whether a notification actually fires. Missing
-  // any one of these was its own cross-vehicle contamination bug: e.g.
-  // without its own _lastParked, switching from car A (just parked in
-  // Pittsburgh) to car B (just parked in Cleveland) would compare B's
-  // position against A's anchor and could read as a multi-hundred-mile
-  // "moved while parked" -- a bogus tow/theft alert on a car that never
-  // moved. Same idea for _homeUnpluggedSince (B inheriting A's countdown)
-  // and announcedActive/_alertShown/_modalReason (B's transition clearing
-  // or suppressing a notification that was actually about A).
+  // parked (tow/theft) detection, and the announced/shown bookkeeping that
+  // decides whether a notification actually fires. Missing any one of these
+  // was its own cross-vehicle contamination bug: e.g. without its own
+  // _lastParked, switching from car A (just parked in Pittsburgh) to car B
+  // (just parked in Cleveland) would compare B's position against A's
+  // anchor and could read as a multi-hundred-mile "moved while parked" -- a
+  // bogus tow/theft alert on a car that never moved. Same idea for
+  // _homeUnpluggedSince (B inheriting A's countdown) and
+  // announcedActive/_alertShown (B's transition clearing or suppressing a
+  // notification that was actually about A).
+  //
+  // _modalReason is deliberately NOT here, unlike everything else this
+  // comment describes -- it tracks which condition currently owns
+  // MagicMirror's ONE mirror-wide alert-module modal slot, a resource that
+  // exists once for the whole screen, not once per vehicle. Swapping it
+  // per-vin used to let two different vehicles each believe they
+  // independently owned that single slot (both seeing their own copy as
+  // null/free), so a rotation could show car B's modal on top of car A's
+  // still-open one, or later pop up a queued, already-stale modal for a
+  // condition that had already cleared. It's initialised once in start()
+  // and left alone here.
   _CTX_FIELDS: [
     "prevCond", "firstConditionRun",
     "_homeUnpluggedSince", "_lastParked", "_movedSince",
-    "announcedActive", "_alertShown", "_modalReason"
+    "announcedActive", "_alertShown"
   ],
   _loadCondState(vin) {
     if (!vin) {
@@ -545,7 +561,7 @@ Module.register("MMM-KiaAccess", {
       this.vehicleCondState[vin] = {
         prevCond: {}, firstConditionRun: true,
         _homeUnpluggedSince: null, _lastParked: seed, _movedSince: null,
-        announcedActive: {}, _alertShown: {}, _modalReason: null
+        announcedActive: {}, _alertShown: {}
       };
     }
     const slot = this.vehicleCondState[vin];
