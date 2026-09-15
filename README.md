@@ -1184,50 +1184,52 @@ mqtt: {
 }
 ```
 
-Topics: `kia/ev9/ev_battery_percentage`, `kia/ev9/is_locked`,
-`kia/ev9/tire_pressure_front_left`, … plus `kia/ev9/state` (JSON),
-`kia/ev9/_meta/fetched_at`, `kia/ev9/_meta/stale`, and `kia/ev9/status`
-(`online` / `offline` via LWT). Current-state only — derive change triggers
-downstream, or use the `KIA_ACCESS_STATE_CHANGED` notification above.
-**Treat `kia/ev9/status/<your-email>-<8-char-hash>` as the canonical status
-topic** for anything that actually needs to be right (an automation, an
-alert) — it's backed by that specific connection's own
-Last-Will-and-Testament, so it always correctly flips to `offline` if — and
-only if — that account's connection drops. The hash suffix keeps two
-different accounts from ever landing on the same topic even if their
-usernames happen to sanitise to the same text. The plain `kia/ev9/status`
-is published `online` for backward compatibility only: with a single
-account it behaves the same as before, but once more than one account
-shares a broker + `topicPrefix` it reflects whichever connection last
-(dis)connected rather than either one specifically (a one-time warning is
-logged when this happens) and should not be relied on.
+Topics are scoped by the vehicle's own VIN (for Kia USA, its account-issued
+`id` — see the VIN-fallback note above), always, for every vehicle with a
+resolvable identity — not just in rotate mode: `kia/ev9/<VIN>/ev_battery_percentage`,
+`kia/ev9/<VIN>/is_locked`, `kia/ev9/<VIN>/tire_pressure_front_left`, … plus
+`kia/ev9/<VIN>/state` (JSON), `kia/ev9/<VIN>/_meta/fetched_at`,
+`kia/ev9/<VIN>/_meta/stale`, and `kia/ev9/<VIN>/status` (`online`, refreshed on
+every successful poll — see below for why this one isn't itself LWT-backed).
+Current-state only — derive change triggers downstream, or use the
+`KIA_ACCESS_STATE_CHANGED` notification above.
+**Treat `kia/ev9/status/<your-email>-<8-char-hash>` as the canonical
+connection-level status topic** for anything that actually needs to be
+right (an automation, an alert) — it's backed by that specific connection's
+own Last-Will-and-Testament, so it always correctly flips to `offline` if —
+and only if — that account's connection drops (this doesn't distinguish
+which vehicle on the account is/isn't reporting; use the per-vehicle
+`kia/ev9/<VIN>/status` above for that, refreshed each successful poll and
+flipped to `offline` the moment a vehicle is removed from config, but not
+itself backed by an LWT — mqtt.js only supports one static LWT per
+connection). The hash suffix keeps two different accounts from ever
+landing on the same topic even if their usernames happen to sanitise to
+the same text. The plain `kia/ev9/status` is published `online` for
+backward compatibility only: with a single account it behaves the same as
+before, but once more than one account shares a broker + `topicPrefix` it
+reflects whichever connection last (dis)connected rather than either one
+specifically (a one-time warning is logged when this happens) and should
+not be relied on.
 
 The raw API dump (`vehicle.data.*`, which includes GPS) is **not** fanned out
 to individual retained topics; set `mqtt.publishRaw: true` if you want it. The
 `kia/ev9/state` JSON blob still contains everything (turn it off with
 `publishJson: false`).
 
-**Every topic above gets the vehicle's VIN inserted**
-(`kia/ev9/VIN1/ev_battery_percentage`, …) — whether you're using
-`vehicles: [...]` to rotate through several cars in one module block, or
-running one module block per car (each its own `vin:`), or even a single
-car with no `vehicles:` at all. It's always scoped by the vehicle's own
-identity now, not just in rotate mode: two SEPARATE module blocks for two
-different cars can easily end up pointed at the same broker + same
-`topicPrefix`, and without per-vehicle scoping in that case too, the two
-cars silently overwrote each other's retained state — real data corruption
-(car B's telemetry showing up under whatever HA device/dashboard still
-labelled car A), not just an inconvenience.
+The VIN scoping above applies whether you're using `vehicles: [...]` to
+rotate through several cars in one module block, running one module block
+per car (each its own `vin:`), or even a single car with no `vehicles:` at
+all — the latter two look like "just one vehicle" to any one module
+instance, but two SEPARATE module blocks for two different cars can easily
+end up pointed at the same broker + same `topicPrefix`, and without
+per-vehicle scoping in that case too, they'd silently overwrite each
+other's retained state (real cross-vehicle data corruption, not just an
+inconvenience) — which is exactly why this isn't limited to rotate mode.
 **If you're upgrading from before this changed:** a genuinely
 lone single-vehicle setup's topics move from `kia/ev9/...` to
 `kia/ev9/<VIN>/...` — repoint any dashboard/automation/HA MQTT sensor at
 the new path (or subscribe to `kia/ev9/#` if you'd rather not hardcode the
-VIN). If your account is Kia USA, remember the value here is the vehicle's
-own `id`, not its literal VIN — see the VIN-fallback note above.
-Each vehicle also publishes its own `kia/ev9/<VIN>/status` (`online`,
-refreshed on every poll — there's no single Last-Will-and-Testament that
-can represent more than one car, so this one doesn't flip to `offline` on
-disconnect the way the connection-level status topic does).
+VIN).
 Remove a car from `vehicles:` and its own status topic is published
 `offline` (retained) on the very next poll — even if that poll itself
 fails to fetch anything (this diff only needs your config, not a
@@ -1259,7 +1261,12 @@ Publishes retained `homeassistant/…/config` messages so a curated set of entit
 (battery %, health, 12V, range, charge power, ETA, odometer, outside temp, last
 reported; charging / plugged / locked / doors / frunk / liftgate / sunroof / tyre
 warning / defrost / climate binary sensors) appear in Home Assistant
-automatically, grouped under one device, with `kia/ev9/status` as availability.
+automatically, grouped under one device. Availability combines the
+connection's own LWT-backed status (`kia/ev9/status/<account>-<hash>`,
+above) with this vehicle's own per-VIN status (`kia/ev9/<VIN>/status`) via
+HA's `availability_mode: "all"` — the entities show available only when
+BOTH the connection is actually up and this specific vehicle has reported
+recently, not just whichever one happens to be true.
 
 ## Time-series export (InfluxDB / Prometheus)
 
