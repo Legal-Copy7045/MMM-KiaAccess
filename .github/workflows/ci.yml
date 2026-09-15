@@ -76,6 +76,8 @@ jobs:
         run: python test/dump_vehicle_test.py
       - name: kia_client token file isolation
         run: python test/token_file_test.py
+      - name: kia_client auth-failure cooldown
+        run: python test/auth_cooldown_test.py
       - name: sessions engine
         run: python test/sessions_test.py
 

@@ -21,6 +21,7 @@ import math
 import os
 import stat
 import threading
+import time
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +54,80 @@ def account_token_file(job) -> str:
         job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
     )
     return os.path.join(_HERE, f"token-{h}.json")
+
+
+def _auth_state_file(job) -> str:
+    """Per-account, alongside the token file (same _HERE + account-hash
+    convention account_token_file() already uses)."""
+    h = _account_hash(
+        job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
+    )
+    return os.path.join(_HERE, f"authstate-{h}.json")
+
+
+# A live token that fails to re-auth means Kia is rejecting THIS account's
+# login, not "the network blipped" -- retrying it on the normal poll/retry
+# schedule just repeats the same failing login call over and over, which is
+# exactly the kind of pattern that gets an account rate-limited or locked
+# out (a real incident: repeated failed re-logins during a setup retry loop
+# preceded a user's Kia Connect account getting locked). AUTH_FAILURE_
+# THRESHOLD consecutive failures within AUTH_FAILURE_WINDOW_SEC trips a
+# cooldown -- connect() then refuses to even attempt check_and_refresh_
+# token() again until it expires, so a broken login stops generating any
+# further traffic to Kia at all instead of merely slowing down.
+AUTH_FAILURE_THRESHOLD = 3
+AUTH_FAILURE_WINDOW_SEC = 15 * 60
+AUTH_COOLDOWN_BASE_MIN = 30
+AUTH_COOLDOWN_MAX_MIN = 240  # 4h ceiling -- still eventually retries on its own
+
+
+def _load_auth_state(path) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            state = json.load(fh)
+        return state if isinstance(state, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_auth_state(path, state) -> None:
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(state, fh)
+    except OSError:
+        pass
+
+
+def _cooldown_remaining_sec(state, now=None) -> float:
+    """0 if not currently in a cooldown window, else seconds left in it."""
+    now = time.time() if now is None else now
+    until = state.get("cooldownUntil")
+    if until is None:
+        return 0.0
+    return max(0.0, until - now)
+
+
+def _record_auth_failure(state, now=None) -> dict:
+    """New state after one more consecutive auth failure. Escalates into
+    (and lengthens) a cooldown once AUTH_FAILURE_THRESHOLD is reached
+    within the window; resets the count outside the window (an isolated
+    failure weeks apart from the next isn't "repeated")."""
+    now = time.time() if now is None else now
+    last = state.get("lastFailureAt")
+    count = state.get("consecutiveFailures", 0)
+    if last is None or (now - last) > AUTH_FAILURE_WINDOW_SEC:
+        count = 0
+    count += 1
+    new_state = dict(state)
+    new_state["consecutiveFailures"] = count
+    new_state["lastFailureAt"] = now
+    if count >= AUTH_FAILURE_THRESHOLD:
+        prior = state.get("cooldownsTriggered", 0)
+        minutes = min(AUTH_COOLDOWN_BASE_MIN * (2 ** prior), AUTH_COOLDOWN_MAX_MIN)
+        new_state["cooldownUntil"] = now + minutes * 60
+        new_state["cooldownsTriggered"] = prior + 1
+        new_state["consecutiveFailures"] = 0  # this window's count is spent
+    return new_state
 
 
 def _migrate_legacy_token(token_file, account_hash) -> None:
@@ -375,10 +450,41 @@ def connect(job, token_file=None):
         geocode_api_enable=geocode,
         geocode_api_use_email=geocode,
     )
+
+    auth_state_file = _auth_state_file(job)
+    auth_state = _load_auth_state(auth_state_file)
+    remaining = _cooldown_remaining_sec(auth_state)
+    if remaining > 0:
+        mins = int(remaining // 60) + 1
+        # Refuses even the attempt -- no call to Kia's servers happens at
+        # all while cooling down, not just a slower retry.
+        raise ClientError(
+            f"cooling down after {AUTH_FAILURE_THRESHOLD} repeated "
+            f"authentication failures -- not contacting Kia's servers again "
+            f"for ~{mins} more min. This is deliberate: retrying a broken "
+            "login on the normal schedule is what can get an account "
+            "rate-limited or locked out in the first place."
+        )
+
     try:
         vm.check_and_refresh_token()
     except AuthenticationOTPRequired as exc:
         raise OtpRequired(ENROLL_HINT) from exc
+    except Exception as exc:
+        new_state = _record_auth_failure(auth_state)
+        _save_auth_state(auth_state_file, new_state)
+        if new_state.get("cooldownUntil"):
+            mins = int((new_state["cooldownUntil"] - time.time()) // 60) + 1
+            raise ClientError(
+                f"authentication failed {AUTH_FAILURE_THRESHOLD} times in a "
+                f"row ({exc}) -- cooling down for ~{mins} min instead of "
+                "continuing to retry, to avoid making a likely account "
+                "lockout worse. This will clear and retry normally on its own."
+            ) from exc
+        raise
+
+    if auth_state:  # only touch disk when there was something to clear
+        _save_auth_state(auth_state_file, {})
 
     # Persist the rotated token to token.json only for the file-based caller
     # (the MagicMirror bridge, which never puts a "token" key in the job). When

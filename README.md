@@ -1277,6 +1277,14 @@ reporting its last-known numbers forever.
   on the next success.
 - **Request cap.** `maxRequestsPerHour` (default off) pauses fetching once the cap
   is hit — Kia soft-locks accounts that poll too hard.
+- **Auth-failure cooldown.** 3 consecutive re-login failures in a row (bad
+  credentials, or `hyundai_kia_connect_api` itself choking on an unexpected
+  response — both look the same from here) stop contacting Kia's login
+  endpoint entirely for a cooldown (30 min, doubling on repeat, capped at
+  4h) instead of retrying on the normal schedule. Repeatedly retrying a
+  broken login is exactly the pattern that gets an account rate-limited or
+  locked out — this is deliberate, not a bug if fetches pause for a while
+  after several auth errors in a row.
 
 ## OTP expiry
 
