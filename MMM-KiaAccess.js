@@ -1768,9 +1768,18 @@ Module.register("MMM-KiaAccess", {
     const stops = this.destPlanner ? this.destPlanner.delayColorStops(dt.delayStops) : [];
     const delayColor = (r) => this.destPlanner ? this.destPlanner.delayColorFor(r, stops) : null;
 
+    // 99.8 (the EV9's own usable pack size) is only a valid last-resort
+    // guess for an actual EV9 -- see core/sessions.js's isEv9()/
+    // resolveCap() for why blindly applying it to any vehicle with an
+    // unconfigured/unreported capacity silently produces a wrong arrival-
+    // kWh estimate for every other model.
+    const vehicleModel = (this.rawPayload && this.rawPayload.vehicle || {}).model;
+    const packEv9Fallback =
+      this.sessionLib && this.sessionLib.isEv9(vehicleModel) ? this.sessionLib.DEFAULT_CAPACITY_KWH : null;
     const pack = Number(dt.packKwh) ||
       Number(((this.config.visuals || {}).chargeCost || {}).capacityKwh) ||
-      Number((this.rawPayload && this.rawPayload.vehicle || {}).ev_battery_capacity) || 99.8;
+      Number((this.rawPayload && this.rawPayload.vehicle || {}).ev_battery_capacity) ||
+      packEv9Fallback || null;
     const battPct = this.visualState().batteryPct;
 
     const el = document.createElement("div");

@@ -201,4 +201,14 @@ r4 = S.update(o4, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "bat
 assert r4["closed"], "an EV9 with no configured capacity must still fall back to its own default"
 assert r4["closed"]["kwh"] == 39.92, "40% of the EV9's 99.8kWh default"
 
+# _is_ev9()'s (?!\d) guard: a model whose name merely STARTS with "ev9" but
+# is actually some other, differently-numbered model (a hypothetical future
+# "EV90"/"EV99") must not match -- an adversarial-review finding on the
+# unanchored regex this replaced.
+assert S._is_ev9("EV90") is False, "a trailing digit means a different model, not an EV9"
+assert S._is_ev9("EV99") is False
+assert S._is_ev9("EV9") is True
+assert S._is_ev9("EV9 GT-Line") is True, "a real EV9 trim name must still match"
+assert S._is_ev9("ev9x") is True, "a non-digit suffix is still presumed an EV9 variant"
+
 print("all sessions tests passed")

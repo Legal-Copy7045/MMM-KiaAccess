@@ -23,6 +23,7 @@ import logging
 import time
 
 from . import kia_client
+from .const import CONF_BRAND, CONF_REGION, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +33,25 @@ _LOGGER = logging.getLogger(__name__)
 # a call outside this window always triggers a fresh fetch, so a longer-
 # interval entry still gets data as fresh as it asks for.
 DEDUP_WINDOW_SEC = 10.0
+
+# {account_hash: AccountPoller}, one per (region, brand, username) account --
+# shared by every config entry/coordinator for that account, however many
+# vehicles it has. Deliberately its own top-level hass.data key, not nested
+# under hass.data[DOMAIN] (which is {entry_id: coordinator} and unloading the
+# LAST entry clears that dict entirely -- a distinct key means this survives
+# any single entry's own reload independent of that). Lives here (not
+# __init__.py, where it originated) so config_flow.py's Options-flow VIN
+# discovery can also look up an already-running poller for this account
+# without a circular import (__init__.py already imports FROM config_flow.py).
+ACCOUNTS_KEY = f"{DOMAIN}_accounts"
+
+
+def account_hash_for(entry) -> str:
+    return kia_client._account_hash(  # noqa: SLF001
+        entry.data.get(CONF_REGION, "USA"),
+        entry.data.get(CONF_BRAND, "KIA"),
+        entry.data.get("username", ""),
+    )
 
 
 class AccountPoller:
@@ -46,23 +66,46 @@ class AccountPoller:
         self._lock = asyncio.Lock()
         self._last_payload: dict | None = None
         self._last_fetched_at: float = 0.0
+        # a FAILED fetch (bad credentials, Kia outage, cooldown already
+        # active) used to only be deduped by the asyncio.Lock's ordering --
+        # each sibling coordinator waiting on the lock would still go on to
+        # make its OWN independent (failing) kia_client.fetch() call once
+        # its turn came, instead of reusing the failure that just happened.
+        # That's the opposite of what this class exists for: several
+        # coordinators hitting a broken login in the same tick would retry
+        # that broken login several times over, which is exactly the
+        # repeated-failure pattern kia_client.py's own auth-failure cooldown
+        # (_record_auth_failure) is trying to detect and stop -- multiplying
+        # how fast an account trips it. Cache the failure itself for the
+        # same DEDUP_WINDOW_SEC so a sibling call within the window re-raises
+        # the SAME failure instead of generating a fresh one.
+        self._last_error: Exception | None = None
+        self._last_error_at: float = 0.0
 
     async def async_fetch(self, job: dict) -> dict:
         """job's own "vin"/"allVehicles" are ignored -- always fetches every
         vehicle on the account in one call. Returns kia_client.fetch()'s
-        normal {"ok", "vehicles": [...], "meta": {...}} shape (or re-raises
-        whatever it raised), reused across every caller within
-        DEDUP_WINDOW_SEC of the last real fetch."""
+        normal {"ok", "vehicles": [...], "meta": {...}} shape, or re-raises
+        whatever it raised -- either way, reused across every caller within
+        DEDUP_WINDOW_SEC of the last real attempt (success OR failure)."""
         async with self._lock:
             now = time.time()
             if self._last_payload is not None and (now - self._last_fetched_at) < DEDUP_WINDOW_SEC:
                 return self._last_payload
+            if self._last_error is not None and (now - self._last_error_at) < DEDUP_WINDOW_SEC:
+                raise self._last_error
             call_job = dict(job)
             call_job["vin"] = ""
             call_job["allVehicles"] = True
-            payload = await self.hass.async_add_executor_job(kia_client.fetch, call_job)
+            try:
+                payload = await self.hass.async_add_executor_job(kia_client.fetch, call_job)
+            except Exception as exc:  # noqa: BLE001
+                self._last_error = exc
+                self._last_error_at = now
+                raise
             self._last_payload = payload
             self._last_fetched_at = now
+            self._last_error = None
             return payload
 
 
@@ -81,13 +124,21 @@ def select_own_vehicle(vehicles: list[dict], vin: str) -> dict:
             # VIN at all (confirmed: Kia USA, via KiaUvoApiUSA)
             if kia_client._vehicle_key_dict(v) == vin:  # noqa: SLF001
                 return v
-        seen = sorted({kia_client._vehicle_key_dict(v) for v in vehicles} - {""})  # noqa: SLF001
-        if not seen:
+        if not vehicles:
             raise kia_client.ClientError(
                 f"no vehicle on the account matches the configured VIN {vin!r} -- "
                 "the account API returned 0 vehicles this poll (a transient gap, "
                 "or the account temporarily has no cloud-connected vehicle)"
             )
+        # a vehicle with neither a VIN nor an `id` (a badly degraded API
+        # response) would otherwise key to "" and silently vanish from this
+        # list -- worth still SHOWING that the account has one, even
+        # unidentified, rather than a diagnostic that undercounts what the
+        # account actually returned.
+        seen = sorted({
+            kia_client._vehicle_key_dict(v) or "(unidentified vehicle)"  # noqa: SLF001
+            for v in vehicles
+        })
         raise kia_client.ClientError(
             f"no vehicle on the account matches the configured VIN {vin!r} -- "
             f"the account currently has: {', '.join(seen)}. If the car's real VIN "

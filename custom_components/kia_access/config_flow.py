@@ -52,6 +52,7 @@ except ImportError:  # pragma: no cover — very old HA
         return str
 
 from . import kia_client
+from .account_poll import ACCOUNTS_KEY, account_hash_for
 from .const import (
     CONF_BRAND,
     CONF_GEOCODE,
@@ -69,18 +70,9 @@ _LOGGER = logging.getLogger(__name__)
 REGIONS = ["USA", "CA", "EU", "AU", "NZ", "IN", "BR", "CN"]
 BRANDS = ["KIA", "HYUNDAI", "GENESIS"]
 
-def _discover_vehicles_for_entry(entry) -> list[dict] | None:
-    """Auto-discover every vehicle currently on this entry's account (server-
-    cache only, no car wake-up) for the options flow's VIN picker below --
-    the same live discovery the INITIAL setup flow already uses (see
-    _list_vehicles), so "Configure" doesn't fall back to a free-typed VIN
-    (the one way this integration let a user's own typo silently point a
-    config entry at the wrong -- or no -- vehicle) unless discovery itself
-    fails. Returns None on any failure (offline, cooldown, etc.) so the
-    caller can fall back to the plain text field rather than blocking
-    Configure on a transient Kia API hiccup."""
+def _discovery_job(entry) -> dict:
     d = entry.data
-    job = {
+    return {
         "username": d.get("username"),
         "password": d.get("password"),
         "pin": d.get(CONF_PIN, ""),
@@ -93,8 +85,39 @@ def _discover_vehicles_for_entry(entry) -> list[dict] | None:
         "forceRefreshTimeout": 0,
         "allVehicles": True,
     }
+
+
+async def _discover_vehicles_for_entry(hass, entry) -> list[dict] | None:
+    """Auto-discover every vehicle currently on this entry's account (server-
+    cache only, no car wake-up) for the options flow's VIN picker below --
+    the same live discovery the INITIAL setup flow already uses (see
+    _list_vehicles), so "Configure" doesn't fall back to a free-typed VIN
+    (the one way this integration let a user's own typo silently point a
+    config entry at the wrong -- or no -- vehicle) unless discovery itself
+    fails. Returns None on any failure (offline, cooldown, etc.) so the
+    caller can fall back to the plain text field rather than blocking
+    Configure on a transient Kia API hiccup.
+
+    Prefers this account's already-running AccountPoller (account_poll.py)
+    when the entry is currently loaded -- sharing its lock/dedup-window/
+    failure-cache instead of making an unshared kia_client.fetch() call of
+    its own every time Configure is opened. That mattered for two reasons:
+    it was extra Kia API traffic outside the very AccountPoller built to
+    cut that down, AND (worse) it still went through kia_client.connect()'s
+    OWN auth-failure cooldown file for this account -- an unshared discovery
+    attempt with broken credentials could trip (or accelerate tripping) the
+    account-wide cooldown that then blocks every coordinator's regular poll,
+    just from a user opening Configure. Falls back to a direct, unshared
+    fetch only when no poller is running yet (e.g. the entry failed its
+    first setup and isn't loaded) -- there's nothing to share with then
+    anyway."""
+    job = _discovery_job(entry)
+    poller = hass.data.get(ACCOUNTS_KEY, {}).get(account_hash_for(entry))
     try:
-        result = kia_client.fetch(job)
+        if poller is not None:
+            result = await poller.async_fetch(job)
+        else:
+            result = await hass.async_add_executor_job(kia_client.fetch, job)
     except Exception as err:  # noqa: BLE001
         # a silent `return None` here means Configure falls back to the old
         # free-text VIN box with NOTHING in the logs to explain why -- log
@@ -403,9 +426,7 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
         vin_default = self._entry.data.get(CONF_VIN, "")
-        discovered = await self.hass.async_add_executor_job(
-            _discover_vehicles_for_entry, self._entry
-        )
+        discovered = await _discover_vehicles_for_entry(self.hass, self._entry)
         if user_input is not None:
             # VIN lives in entry.data (set at initial setup), not
             # entry.options like everything else this flow edits -- pull it
