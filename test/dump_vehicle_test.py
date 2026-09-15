@@ -206,6 +206,28 @@ assert kia_client._select_vehicles(_VMWithVehicles([clean_veh]), " vin1 ") == [c
     "a VIN with surrounding whitespace on the configured side must still match"
 )
 
+# --- _vehicle_key()/_select_vehicles(): Kia USA's own API implementation
+# (KiaUvoApiUSA.get_vehicles()) never populates Vehicle.VIN at all -- every
+# other region/brand does. Without a fallback, VIN-based selection silently
+# matched nothing for every Kia USA multi-vehicle account: the initial
+# "choose a vehicle" step, kia_client.fetch()'s own VIN filter, and the
+# Configure VIN picker all keyed strictly off a field that's always blank
+# there. Falls back to the vehicle's own account-issued `id` instead, which
+# is just as stable/unique per vehicle for selection purposes. ---
+no_vin_veh = _Veh(VIN=None, id="vehicle-id-123")
+assert kia_client._vehicle_key(no_vin_veh) == "VEHICLE-ID-123", (
+    "a vehicle with no VIN at all must fall back to its own id"
+)
+assert kia_client._select_vehicles(_VMWithVehicles([no_vin_veh]), "vehicle-id-123") == [no_vin_veh], (
+    "selecting by the id fallback must work exactly like selecting by a real VIN"
+)
+has_vin_veh = _Veh(VIN="REALVIN1", id="vehicle-id-456")
+assert kia_client._vehicle_key(has_vin_veh) == "REALVIN1", (
+    "a vehicle WITH a real VIN must still prefer it over its id"
+)
+assert kia_client._vehicle_key_dict({"VIN": None, "id": "vehicle-id-789"}) == "VEHICLE-ID-789"
+assert kia_client._vehicle_key_dict({"VIN": "REALVIN2", "id": "vehicle-id-000"}) == "REALVIN2"
+
 
 # --- fetch()'s "no matching vehicles" error must actually say something --
 # the configured VIN it looked for, and what the account currently has (or

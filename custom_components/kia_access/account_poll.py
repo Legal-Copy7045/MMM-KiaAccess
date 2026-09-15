@@ -76,9 +76,12 @@ def select_own_vehicle(vehicles: list[dict], vin: str) -> dict:
     vin = str(vin or "").strip().upper()
     if vin:
         for v in vehicles:
-            if str(v.get("VIN") or "").strip().upper() == vin:
+            # see kia_client._vehicle_key()'s docstring: falls back to the
+            # vehicle's own `id` when the connected region's API never sets
+            # VIN at all (confirmed: Kia USA, via KiaUvoApiUSA)
+            if kia_client._vehicle_key_dict(v) == vin:  # noqa: SLF001
                 return v
-        seen = sorted({str(v.get("VIN") or "").strip().upper() for v in vehicles} - {""})
+        seen = sorted({kia_client._vehicle_key_dict(v) for v in vehicles} - {""})  # noqa: SLF001
         if not seen:
             raise kia_client.ClientError(
                 f"no vehicle on the account matches the configured VIN {vin!r} -- "

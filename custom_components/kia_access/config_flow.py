@@ -108,7 +108,10 @@ def _discover_vehicles_for_entry(entry) -> list[dict] | None:
         return None
     out = []
     for v in result.get("vehicles") or []:
-        vin = str(v.get("VIN") or "").strip().upper()
+        # see kia_client._vehicle_key()'s docstring: Kia USA accounts never
+        # get a real VIN back from the API at all -- fall back to the
+        # vehicle's own `id` rather than dropping every vehicle from the list
+        vin = kia_client._vehicle_key_dict(v)  # noqa: SLF001
         if not vin:
             continue
         out.append({
@@ -318,7 +321,12 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _list_vehicles(self) -> list[dict]:
         out = []
         for v in (getattr(self._vm, "vehicles", None) or {}).values():
-            vin = str(getattr(v, "VIN", "") or "").strip().upper()
+            # see kia_client._vehicle_key()'s docstring: a Kia USA account's
+            # vehicles never carry a real VIN at all -- without this
+            # fallback, EVERY vehicle here got silently dropped, making the
+            # "choose a vehicle" step (and therefore this whole integration,
+            # for a second/third car) impossible to complete on Kia USA
+            vin = kia_client._vehicle_key(v)  # noqa: SLF001
             if not vin:
                 continue
             out.append({
