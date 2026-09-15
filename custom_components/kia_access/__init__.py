@@ -540,7 +540,11 @@ def _register_services(hass: HomeAssistant) -> None:
                     else f"Test alert cleared: {label}"
                 ),
                 "value": {},
-                "vin": coordinator.vehicle.get("VIN"),
+                # see coordinator.py's _emit_alerts() for why: Kia USA never
+                # reports a real VIN, so this must fall back to the vehicle's
+                # own id the same way, or a test_alert event for a Kia USA
+                # account always carries vin: null.
+                "vin": kia_client._vehicle_key_dict(coordinator.vehicle) or None,  # noqa: SLF001
             },
         )
 

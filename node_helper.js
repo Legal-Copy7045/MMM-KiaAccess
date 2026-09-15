@@ -326,6 +326,21 @@ module.exports = NodeHelper.create({
     // account-level failure can't just use `id` here in rotate mode.
     const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
 
+    // A vehicle removed from config.vehicles must be retired (MQTT
+    // "offline", Prometheus snapshot dropped) unconditionally, on the very
+    // next call, NOT only once a fetch happens to succeed -- this diff only
+    // needs config.vehicles (current) vs this.rotateVins[id] (the set as of
+    // the last time this ran), no account data at all. Retirement used to
+    // live only inside _handleBridgeClose's success branch: a vehicle
+    // removed from config while the account kept failing to fetch (bad
+    // credentials, a cooldown, an outage) stayed "online"/reporting stale
+    // numbers for as long as the fetch kept failing -- backwards, since the
+    // user's own config change is known immediately regardless of whether
+    // Kia's API is reachable at all. Safe to also still run (as a no-op)
+    // inside a later successful fetch's own diff -- see _retireVehicle()'s
+    // idempotency.
+    this._retireRemovedFromConfig(id, config);
+
     // ---- alternative source: pull from a Home Assistant instance ----
     // (local read — not subject to the Kia request/hour cap)
     if (String(config.source || "kia").toLowerCase() === "homeassistant") {
@@ -1056,6 +1071,22 @@ module.exports = NodeHelper.create({
   // them. This doesn't touch the vehicle's individual cache/history/session/
   // trip file -- those stay on disk exactly like a module instance that's
   // simply stopped polling would leave them, in case the vehicle comes back.
+  // See handleFetch()'s call site for why this runs unconditionally, before
+  // any fetch is even attempted -- not gated behind fetch success.
+  _retireRemovedFromConfig(id, config) {
+    if (!(Array.isArray(config.vehicles) && config.vehicles.length > 0)) return;
+    const configuredVins = new Set(
+      config.vehicles.map((v) => String(v.vin || "").toUpperCase())
+    );
+    const prevVins = this.rotateVins[id];
+    if (prevVins) {
+      prevVins.forEach((vin) => {
+        if (!configuredVins.has(vin)) this._retireVehicle(config, vin);
+      });
+    }
+    this.rotateVins[id] = configuredVins;
+  },
+
   _retireVehicle(config, vin) {
     const m = config && config.mqtt;
     if (m && m.enabled !== false && m.url) {
