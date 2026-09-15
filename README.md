@@ -207,7 +207,12 @@ API, not from Kia. So:
    for each additional vehicle. Each vehicle's VIN uniquely identifies its
    config entry, so two entries for the same account (one per vehicle) can
    coexist — and the VIN is editable afterward too, in that entry's
-   **Configure → VIN**, if you ever need to move an entry to a different car.
+   **Configure → VIN**, which (like the initial setup step) is a dropdown of
+   whatever vehicles the account currently reports, not a box you type a VIN
+   into — no risk of a fat-fingered VIN silently pointing an entry at the
+   wrong car (or none). Every vehicle on one account shares a single Kia
+   login/poll behind the scenes, so adding a second or third car's config
+   entry doesn't multiply how much account-level API traffic Kia sees.
    A few notes:
    - `Last charge` / `Charge session` need a price — **Configure → Price per kWh**.
    - The **seat / wheel-heat `select`s and `Climate run time` are stored
@@ -1285,6 +1290,14 @@ reporting its last-known numbers forever.
   broken login is exactly the pattern that gets an account rate-limited or
   locked out — this is deliberate, not a bug if fetches pause for a while
   after several auth errors in a row.
+- **One shared login per account (Home Assistant).** Every config entry for
+  the same Kia account — however many vehicles it has — shares a single
+  login and a single account-wide fetch, instead of each vehicle's entry
+  logging in and polling independently. An N-vehicle account therefore
+  generates roughly the same account-level Kia API traffic a single-vehicle
+  account does, not N times as much, which matters directly for the
+  auth-failure cooldown above: less traffic is less exposure to the kind of
+  repeated-failure pattern that trips it.
 
 ## OTP expiry
 

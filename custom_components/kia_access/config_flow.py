@@ -69,6 +69,48 @@ _LOGGER = logging.getLogger(__name__)
 REGIONS = ["USA", "CA", "EU", "AU", "NZ", "IN", "BR", "CN"]
 BRANDS = ["KIA", "HYUNDAI", "GENESIS"]
 
+def _discover_vehicles_for_entry(entry) -> list[dict] | None:
+    """Auto-discover every vehicle currently on this entry's account (server-
+    cache only, no car wake-up) for the options flow's VIN picker below --
+    the same live discovery the INITIAL setup flow already uses (see
+    _list_vehicles), so "Configure" doesn't fall back to a free-typed VIN
+    (the one way this integration let a user's own typo silently point a
+    config entry at the wrong -- or no -- vehicle) unless discovery itself
+    fails. Returns None on any failure (offline, cooldown, etc.) so the
+    caller can fall back to the plain text field rather than blocking
+    Configure on a transient Kia API hiccup."""
+    d = entry.data
+    job = {
+        "username": d.get("username"),
+        "password": d.get("password"),
+        "pin": d.get(CONF_PIN, ""),
+        "region": d.get(CONF_REGION, "USA"),
+        "brand": d.get(CONF_BRAND, "KIA"),
+        "vin": "",
+        "geocode": False,
+        "token": d.get(CONF_TOKEN),
+        "refresh": False,
+        "forceRefreshTimeout": 0,
+        "allVehicles": True,
+    }
+    try:
+        result = kia_client.fetch(job)
+    except Exception:  # noqa: BLE001
+        return None
+    out = []
+    for v in result.get("vehicles") or []:
+        vin = str(v.get("VIN") or "").strip().upper()
+        if not vin:
+            continue
+        out.append({
+            "vin": vin,
+            "name": str(v.get("name") or ""),
+            "model": str(v.get("model") or ""),
+        })
+    out.sort(key=lambda x: x["vin"])
+    return out or None
+
+
 def _account_uid(region: str, brand: str, username: str, vin: str) -> str:
     """The config-entry identity: one entry per account, VIN-scoped once a
     VIN is set (needed so a multi-vehicle account can have one entry per
@@ -336,6 +378,9 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
         vin_default = self._entry.data.get(CONF_VIN, "")
+        discovered = await self.hass.async_add_executor_job(
+            _discover_vehicles_for_entry, self._entry
+        )
         if user_input is not None:
             # VIN lives in entry.data (set at initial setup), not
             # entry.options like everything else this flow edits -- pull it
@@ -379,16 +424,45 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
             if not errors:
                 return self.async_create_entry(title="", data=user_input)
         opts = dict(self._entry.options)
+
+        if discovered:
+            choices = {
+                v["vin"]: (
+                    f"{v['name']} ({v['model']} · {v['vin']})" if v["name"]
+                    else f"{v['model'] or 'Vehicle'} · {v['vin']}"
+                )
+                for v in discovered
+            }
+            if len(discovered) == 1:
+                # a single-vehicle account works fine with no VIN configured
+                # at all (AccountPoller's select_own_vehicle() auto-picks the
+                # one vehicle it gets back) -- offer that as the default
+                # rather than forcing a VIN to be set
+                choices = {"": "Auto (this account has one vehicle)", **choices}
+            elif vin_default and vin_default not in choices:
+                # the stored VIN isn't one Kia is reporting for this account
+                # right now (stale after a car swap, a fetch hiccup, or --
+                # the scenario this whole picker replaces -- a past typo);
+                # keep it selectable so the form doesn't silently discard it
+                choices = {vin_default: f"{vin_default} (not currently seen)", **choices}
+            vin_field = vol.Optional(CONF_VIN, default=vin_default)
+            vin_selector = vol.In(choices)
+        else:
+            # discovery failed (offline, cooldown, etc.) -- fall back to the
+            # old free-text field rather than blocking Configure entirely
+            vin_field = vol.Optional(
+                CONF_VIN,
+                default=vin_default,
+                description={"suggested_value": vin_default},
+            )
+            vin_selector = str
+
         return self.async_show_form(
             step_id="init",
             errors=errors,
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
-                        CONF_VIN,
-                        default=vin_default,
-                        description={"suggested_value": vin_default},
-                    ): str,
+                    vin_field: vin_selector,
                     vol.Optional(
                         "scan_interval",
                         default=opts.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES),

@@ -819,7 +819,8 @@ def _run_options_vin_change(new_vin, other_entries):
     flow.flow_id = "test"
     flow.handler = "kia_access"
     flow.hass = type("H", (), {
-        "config_entries": _FakeConfigEntries([entry_a, *other_entries])
+        "config_entries": _FakeConfigEntries([entry_a, *other_entries]),
+        "async_add_executor_job": _FakeHass.async_add_executor_job,
     })()
     user_input = {"vin": new_vin, "scan_interval": 30, "poll_car_directly": False,
                   "force_refresh_timeout": 45, "block_automated_climate": False,
@@ -830,7 +831,17 @@ def _run_options_vin_change(new_vin, other_entries):
                   "routing_api_key": "", "drive_time_routes": True,
                   "static_destinations": "", "geocoding_api_key": "", "zone_entities": "",
                   "away_cost_entity": ""}
-    result = asyncio.run(cf_mod.KiaAccessOptionsFlow.async_step_init(flow, user_input))
+    # this test is about the uid-sync/collision behaviour, not vehicle
+    # discovery -- stub the (real, network-calling) discovery helper so it
+    # can't reach out to Kia's servers with these fake credentials; a None
+    # return exercises the plain-free-text-field fallback path, matching
+    # what this test asserted against before the VIN picker existed
+    orig_discover = cf_mod._discover_vehicles_for_entry
+    cf_mod._discover_vehicles_for_entry = lambda entry: None
+    try:
+        result = asyncio.run(cf_mod.KiaAccessOptionsFlow.async_step_init(flow, user_input))
+    finally:
+        cf_mod._discover_vehicles_for_entry = orig_discover
     return result, entry_a, flow.hass.config_entries
 
 
@@ -852,6 +863,74 @@ assert res2["type"] == "form" and res2.get("errors", {}).get("vin") == "vin_in_u
 )
 assert entry_a2.data.get("vin") != "VIN2", "the collision must not have been applied"
 assert not ce2.updates, "no update should have been attempted once a collision was detected"
+
+# Options flow VIN field: prefer the account's own auto-discovered vehicle
+# list over a free-typed VIN (the exact thing a user can mistype), same as
+# the initial setup flow already does -- see _discover_vehicles_for_entry.
+def _show_options_form(entry_data, discovered):
+    entry = _fake_entry("a", "USA:KIA:user@example.com:VIN1", entry_data)
+    flow = object.__new__(cf_mod.KiaAccessOptionsFlow)
+    flow._entry = entry
+    flow.flow_id = "test"
+    flow.handler = "kia_access"
+    flow.hass = type("H", (), {
+        "async_add_executor_job": _FakeHass.async_add_executor_job,
+    })()
+    orig = cf_mod._discover_vehicles_for_entry
+    cf_mod._discover_vehicles_for_entry = lambda e: discovered
+    try:
+        return asyncio.run(cf_mod.KiaAccessOptionsFlow.async_step_init(flow, None))
+    finally:
+        cf_mod._discover_vehicles_for_entry = orig
+
+
+def _vin_schema_entry(form):
+    schema = form["data_schema"].schema
+    key = next(k for k in schema if str(k) == cf_mod.CONF_VIN)
+    return key, schema[key]
+
+
+# single-vehicle account: offered as a dropdown with an explicit "auto"
+# choice, not a free-typed field -- a blank VIN already auto-resolves via
+# AccountPoller.select_own_vehicle()
+_form_single = _show_options_form(
+    {"vin": "", "region": "USA", "brand": "KIA"},
+    [{"vin": "VIN1", "name": "My EV9", "model": "EV9"}],
+)
+_key1, _sel1 = _vin_schema_entry(_form_single)
+assert set(_sel1.container) == {"", "VIN1"}, _sel1.container
+assert _key1.default() == "", "single-vehicle default should be the blank/auto choice"
+
+# multi-vehicle account: only the account's real VINs are selectable, no
+# blank/auto choice (ambiguous which car "auto" would mean) and no free text
+_form_multi = _show_options_form(
+    {"vin": "VIN1", "region": "USA", "brand": "KIA"},
+    [{"vin": "VIN1", "name": "Work Car", "model": "EV6"},
+     {"vin": "VIN2", "name": "", "model": "Niro"}],
+)
+_key2, _sel2 = _vin_schema_entry(_form_multi)
+assert set(_sel2.container) == {"VIN1", "VIN2"}, _sel2.container
+
+# a stored VIN the account isn't currently reporting (stale, or a past typo)
+# must stay selectable rather than silently vanishing from the form
+_form_stale = _show_options_form(
+    {"vin": "VINSTALE", "region": "USA", "brand": "KIA"},
+    [{"vin": "VIN1", "name": "", "model": "EV6"},
+     {"vin": "VIN2", "name": "", "model": "Niro"}],
+)
+_key3, _sel3 = _vin_schema_entry(_form_stale)
+assert "VINSTALE" in set(_sel3.container), (
+    "a stored VIN missing from the current discovery must stay selectable, "
+    "not be silently dropped from the form"
+)
+
+# discovery failing entirely (offline, cooldown, etc.) must fall back to the
+# old plain-text field rather than blocking Configure
+_form_offline = _show_options_form(
+    {"vin": "VIN1", "region": "USA", "brand": "KIA"}, None
+)
+_key4, _sel4 = _vin_schema_entry(_form_offline)
+assert _sel4 is str, "discovery failure must fall back to a free-text VIN field"
 
 # --- __init__._migrate_unique_id(): a pre-v2.54 entry can have a VIN in
 # entry.data but still an account-only (no-VIN) unique_id -- either because
@@ -903,6 +982,38 @@ assert e4.unique_id == "USA:KIA:user@example.com", (
     "must not overwrite into a collision with another entry"
 )
 assert not ce4.updates
+
+# --- __init__._get_account_poller(): one AccountPoller per (region, brand,
+# username) account, shared across every config entry for that account --
+# see account_poll.py's module docstring for why (an N-vehicle account was
+# otherwise doing ~N times the account-level Kia API traffic of a
+# single-vehicle one). ---
+_hass_accounts = type("H", (), {"data": {}})()
+_entry_car1 = _fake_entry(
+    "car1", "USA:KIA:user@example.com:VIN1",
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+)
+_entry_car2 = _fake_entry(
+    "car2", "USA:KIA:user@example.com:VIN2",
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN2"},
+)
+_entry_other_acct = _fake_entry(
+    "other_acct", "USA:KIA:someone_else@example.com",
+    {"username": "someone_else@example.com", "region": "USA", "brand": "KIA"},
+)
+
+_poller_car1 = init._get_account_poller(_hass_accounts, _entry_car1)
+_poller_car2 = init._get_account_poller(_hass_accounts, _entry_car2)
+assert _poller_car1 is _poller_car2, (
+    "two vehicles on the SAME account must share one AccountPoller, "
+    "regardless of each entry's own (different) VIN"
+)
+assert init._get_account_poller(_hass_accounts, _entry_other_acct) is not _poller_car1, (
+    "a different account must get its OWN AccountPoller, never share one"
+)
+assert len(_hass_accounts.data[init._ACCOUNTS_KEY]) == 2, (
+    "exactly one poller per distinct account, not per entry"
+)
 
 # --- async_setup(): HA never calls async_setup_entry for a DISABLED entry,
 # so relying on that alone would leave a legacy entry's stale unique_id
