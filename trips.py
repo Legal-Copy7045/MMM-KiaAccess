@@ -6,6 +6,7 @@ Kept line-for-line with the JS; both are exercised in CI
 from __future__ import annotations
 
 import math
+import re
 import time
 
 DEFAULT_CAPACITY_KWH = 99.8  # Kia EV9 usable
@@ -31,6 +32,25 @@ def _round(n, dp=2):
     return round(n * f) / f
 
 
+# See core/sessions.js's resolveCap()/isEv9() (and sessions.py's mirror) for
+# why: DEFAULT_CAPACITY_KWH is the EV9's own usable pack size and must never
+# stand in as a generic "capacity unknown" guess for some other model, or
+# that model's own energy/cost/efficiency fields would silently be computed
+# off the wrong car's battery size.
+_EV9_RE = re.compile(r"ev\s*9", re.IGNORECASE)
+
+
+def _is_ev9(model) -> bool:
+    return bool(model) and bool(_EV9_RE.search(str(model)))
+
+
+def _resolve_cap(opts) -> float | None:
+    cap = _num(opts.get("capacityKwh"))
+    if cap is None and _is_ev9(opts.get("model")):
+        cap = DEFAULT_CAPACITY_KWH
+    return cap
+
+
 def haversine_km(a_lat, a_lon, b_lat, b_lon):
     # None already handled; also reject NaN/Infinity (both are real floats
     # that pass a bare None check, and their trig math can raise a "math
@@ -54,7 +74,7 @@ def haversine_km(a_lat, a_lon, b_lat, b_lon):
 
 
 def _close(open_t, opts, end_at):
-    cap = _num(opts.get("capacityKwh")) or DEFAULT_CAPACITY_KWH
+    cap = _resolve_cap(opts)
     price = _num(opts.get("pricePerKwh")) or 0
     dist = (max(0, open_t["lastOdo"] - open_t["anchorOdo"])
             if (open_t.get("lastOdo") is not None and open_t.get("anchorOdo") is not None)
@@ -69,7 +89,7 @@ def _close(open_t, opts, end_at):
                     and open_t.get("anchorPct") is not None
                     and open_t.get("lastPct") is not None)
                 else None)
-    kwh = (used_pct / 100) * cap if (used_pct is not None and used_pct > 0) else None
+    kwh = (used_pct / 100) * cap if (used_pct is not None and used_pct > 0 and cap is not None) else None
     mins = max(1, round((end_at - open_t["anchorAt"]) / 60000))
     mi = dist * MI_PER_KM
     anchor_pct = open_t.get("anchorPct")

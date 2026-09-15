@@ -30,6 +30,19 @@
     var f = Math.pow(10, dp == null ? 2 : dp);
     return Math.round(n * f) / f;
   }
+  // See core/sessions.js's resolveCap()/isEv9() for why: DEFAULT_CAPACITY_KWH
+  // is the EV9's own usable pack size and must never stand in as a generic
+  // "capacity unknown" guess for some other model, or that model's own
+  // energy/cost/efficiency fields would silently be computed off the wrong
+  // car's battery size.
+  function isEv9(model) {
+    return typeof model === "string" && /ev\s*9/i.test(model);
+  }
+  function resolveCap(opts) {
+    var cap = num(opts.capacityKwh);
+    if (cap == null && isEv9(opts.model)) cap = DEFAULT_CAPACITY_KWH;
+    return cap;
+  }
   function haversineKm(aLat, aLon, bLat, bLon) {
     if (aLat == null || aLon == null || bLat == null || bLon == null) return null;
     // null already handled; also reject NaN/Infinity (both pass a bare
@@ -51,7 +64,7 @@
   }
 
   function close(open, opts, endAt) {
-    var cap = num(opts.capacityKwh) || DEFAULT_CAPACITY_KWH;
+    var cap = resolveCap(opts);
     var price = num(opts.pricePerKwh) || 0;
     var dist = (open.lastOdo != null && open.anchorOdo != null)
       ? Math.max(0, open.lastOdo - open.anchorOdo) : null;
@@ -60,7 +73,7 @@
     }
     var usedPct = (!open.chargedSince && open.anchorPct != null && open.lastPct != null)
       ? open.anchorPct - open.lastPct : null;
-    var kwh = (usedPct != null && usedPct > 0) ? (usedPct / 100) * cap : null;
+    var kwh = (usedPct != null && usedPct > 0 && cap != null) ? (usedPct / 100) * cap : null;
     var mins = Math.max(1, Math.round((endAt - open.anchorAt) / 60000));
     return {
       startedAt: open.anchorAt,

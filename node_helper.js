@@ -640,7 +640,12 @@ module.exports = NodeHelper.create({
     }, {
       pricePerKwh: cl.pricePerKwh,
       awayPricePerKwh: cl.awayPricePerKwh || null,
-      capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity)
+      capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity),
+      // sessions.js's DEFAULT_CAPACITY_KWH fallback is the EV9's own pack
+      // size -- it only applies when this vehicle's own model actually
+      // looks like an EV9, so it never silently borrows the EV9's battery
+      // size for some other model with no configured/reported capacity.
+      model: vehicle.model
     });
     let sessChanged = JSON.stringify(sess.open) !== JSON.stringify(s.openSession);
     s.openSession = sess.open;
@@ -678,6 +683,8 @@ module.exports = NodeHelper.create({
     }, {
       pricePerKwh: cl.pricePerKwh,
       capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity),
+      // see the session-tracking block above for why
+      model: vehicle.model,
       minKm: tcfg.minKm,
       parkGapMin: tcfg.parkGapMin
     });

@@ -118,10 +118,12 @@ r = S.update(open, { t: t0 + 30 * MIN, charging: false, plugged: false, batteryP
 assert.strictEqual(r.closed.location, "home");
 assert.strictEqual(r.closed.cost, 7.4); // 40 * 0.185
 
-// unknown location (no home zone) -> home rate, location "home"
+// unknown location (no home zone, never resolved) -> priced at the home
+// rate (the best available guess), but the location itself must stay
+// "unknown", not silently claim a confirmed "home" it never had
 open = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 7, atHome: null }, haOpts).open;
 r = S.update(open, { t: t0 + 30 * MIN, charging: false, plugged: false, batteryPct: 60 }, haOpts);
-assert.strictEqual(r.closed.location, "home");
+assert.strictEqual(r.closed.location, "unknown");
 assert.strictEqual(r.closed.cost, 7.4);
 
 // away rate 0 -> away session falls back to the home rate
@@ -150,6 +152,20 @@ assert.strictEqual(ms.home.count, 2);
 assert.strictEqual(ms.home.kwh, 40);
 assert.strictEqual(ms.away.count, 1);
 assert.strictEqual(ms.away.cost, 22);
+
+// a session with the explicit "unknown" location must land in neither the
+// home nor the away bucket -- only in the overall total -- not get silently
+// counted as home (the bug this whole change fixes)
+const withUnknown = mixed.concat([
+  { endedAt: Date.now() - 1 * 864e5, kwh: 15, cost: 3, location: "unknown" }
+]);
+const mu = S.summary(withUnknown, 30);
+assert.strictEqual(mu.count, 4, "unknown session still counted in the overall total");
+assert.strictEqual(mu.home.count, 2, "unknown must not be folded into home");
+assert.strictEqual(mu.away.count, 1, "unknown must not be folded into away either");
+assert.strictEqual(mu.unknown.count, 1);
+assert.strictEqual(mu.unknown.kwh, 15);
+assert.strictEqual(mu.unknown.cost, 3);
 
 // --- per-zone rate override (cur.rate / cur.rateLabel) ---
 open = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 50,
@@ -197,5 +213,28 @@ assert.strictEqual(real2.cost, 20);
 // junk cost -> unchanged cost, still copied
 assert.strictEqual(S.applyCost(est, "x", "external").cost, 16.5);
 assert.strictEqual(S.applyCost(null, 5, "external"), null);
+
+// --- DEFAULT_CAPACITY_KWH (the EV9's own usable pack size) must never be
+// used as a generic "capacity unknown" guess for some OTHER model -- that
+// silently computes another car's kWh/cost off the wrong battery size. ---
+const noCapOpts = { pricePerKwh: 0.185 }; // no capacityKwh, no model
+let o2 = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 7 }, noCapOpts).open;
+let r2 = S.update(o2, { t: t0 + 30 * MIN, charging: false, plugged: false, batteryPct: 60 }, noCapOpts);
+assert.strictEqual(r2.closed, null,
+  "with no configured/reported capacity and no EV9 hint, a session with only a % delta must not be recorded with a guessed kWh");
+
+// a non-EV9 model must NOT get the EV9 default either
+const niroOpts = { pricePerKwh: 0.185, model: "Niro EV" };
+let o3 = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 7 }, niroOpts).open;
+let r3 = S.update(o3, { t: t0 + 30 * MIN, charging: false, plugged: false, batteryPct: 60 }, niroOpts);
+assert.strictEqual(r3.closed, null, "a non-EV9 model must not silently borrow the EV9's pack size");
+
+// an EV9 (identified by model) with no configured capacityKwh DOES still
+// get the 99.8kWh default -- this is the one case it's actually meant for
+const ev9Opts = { pricePerKwh: 0.185, model: "EV9" };
+let o4 = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 20, chargeKw: 7 }, ev9Opts).open;
+let r4 = S.update(o4, { t: t0 + 30 * MIN, charging: false, plugged: false, batteryPct: 60 }, ev9Opts);
+assert.ok(r4.closed, "an EV9 with no configured capacity must still fall back to its own default");
+assert.strictEqual(r4.closed.kwh, 39.92, "40% of the EV9's 99.8kWh default");
 
 console.log("all sessions tests passed");

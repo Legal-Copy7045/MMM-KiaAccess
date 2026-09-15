@@ -1298,6 +1298,20 @@ reporting its last-known numbers forever.
   account does, not N times as much, which matters directly for the
   auth-failure cooldown above: less traffic is less exposure to the kind of
   repeated-failure pattern that trips it.
+- **Charging analytics correctness.** Three related fixes: (1) a charge
+  session whose location genuinely couldn't be determined (no home zone
+  configured, or no GPS fix that poll) now reports `location: "unknown"`
+  and its own `unknown` bucket in charge summaries/`chargingPerformance`,
+  instead of silently being counted as "home"; (2) the EV9's 99.8kWh usable
+  pack size is no longer used as a generic capacity guess for a vehicle
+  whose own capacity isn't configured or reported — it only applies when
+  the vehicle's own model actually looks like an EV9, so another model's
+  kWh/cost figures are never silently computed off the wrong battery size;
+  (3) `core/analytics.js`'s monthly efficiency trend now buckets by UTC,
+  matching `analytics.py`, which already did — previously a trip near a
+  month boundary could land in a different month in the MagicMirror
+  module's own trend than in Home Assistant's, depending on which
+  timezone each process happened to be running in.
 - **VIN fallback for Kia USA.** `hyundai_kia_connect_api`'s Kia-brand/USA
   implementation never reports a vehicle's real VIN (every other
   region/brand does) — vehicle selection (the "choose a vehicle" step, the

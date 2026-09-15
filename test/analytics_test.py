@@ -66,6 +66,15 @@ assert eff["monthlyTrend"][1]["month"] == "2026-06"
 assert eff["monthlyTrend"][0]["tripCount"] == 2
 assert eff["monthlyTrend"][1]["tripCount"] == 2
 
+# ---- _month_key() must bucket by UTC (matches core/analytics.js's
+# monthKey(), which now explicitly uses getUTCMonth()/getUTCFullYear() for
+# exactly this reason) -- a timestamp at 23:00 UTC on the last day of
+# January is still January in UTC. datetime.fromtimestamp(..., tz=utc) is
+# unaffected by the host's local timezone by construction, so this pins
+# that guarantee down directly rather than relying on it being incidental. ----
+late_jan_utc_ms = datetime(2026, 1, 31, 23, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
+assert A._month_key(late_jan_utc_ms) == "2026-01"  # noqa: SLF001
+
 # ---- observed_efficiency(): no usable trips -> None, not a crash ----
 assert A.observed_efficiency([], {}) is None
 assert A.observed_efficiency([{"chargedDuring": True}], {}) is None
@@ -133,6 +142,20 @@ for b in cp["socBands"]:
 band_50_80 = next((b for b in cp["socBands"] if b["label"] == "50–80%"), None)
 assert band_50_80 is not None
 assert band_50_80["sessionCount"] == 2
+
+# ---- charging_performance(): a session with the explicit "unknown"
+# location (see sessions.py's update()) must land in NEITHER the home nor
+# the away group -- only in overall -- not get silently counted as home
+# (nor, by a naive "not home" filter, wrongly counted as away either) ----
+sessions_unknown = [
+    {"startPct": 20, "endPct": 45, "minutes": 100, "kwh": 25, "avgKw": 15, "location": "home", "cost": 3.5},
+    {"startPct": 30, "endPct": 90, "minutes": 45, "kwh": 60, "avgKw": 80, "location": "away", "cost": 22},
+    {"startPct": 40, "endPct": 70, "minutes": 60, "kwh": 20, "avgKw": 20, "location": "unknown", "cost": 3.7},
+]
+cpu = A.charging_performance(sessions_unknown)
+assert cpu["sessionsSampled"] == 3, "unknown session still counted in overall"
+assert cpu["home"]["count"] == 1, "unknown must not be folded into home"
+assert cpu["away"]["count"] == 1, "unknown must not be folded into away"
 
 # ---- charging_performance(): a session with a scheduled-charging pause
 # (avgKw diluted by the whole session span vs. activeAvgKw, the charger's

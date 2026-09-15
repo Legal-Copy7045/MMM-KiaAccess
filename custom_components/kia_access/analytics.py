@@ -233,8 +233,15 @@ def charging_performance(sessions):
     if not usable:
         return None
 
+    # "unknown" (see sessions.py's update()) is a session whose location
+    # genuinely couldn't be determined -- it must land in NEITHER bucket,
+    # not get folded into "away" by process of elimination (it isn't None
+    # and isn't "home", so a plain two-way filter here would silently
+    # miscategorize it the other direction from the same bug this whole
+    # change fixes).
     home = [s for s in usable if s.get("location") == "home" or s.get("location") is None]
-    away = [s for s in usable if s.get("location") is not None and s.get("location") != "home"]
+    away = [s for s in usable
+            if s.get("location") is not None and s.get("location") not in ("home", "unknown")]
 
     return {
         "sessionsSampled": len(usable),

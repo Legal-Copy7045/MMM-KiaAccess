@@ -454,6 +454,10 @@ class KiaAccessChargeSessionSensor(KiaAccessEntity, SensorEntity):
                 "pricePerKwh": c.entry.options.get("price_per_kwh") or 0,
                 "capacityKwh": c.entry.options.get("capacity_kwh")
                 or _num(v.get("ev_battery_capacity")),
+                # see coordinator.py's _update_sessions()/_update_trips()
+                # for why: sessions.py's EV9-pack-size fallback only
+                # applies for an actual EV9
+                "model": v.get("model"),
             },
         )
 

@@ -95,10 +95,13 @@ o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20
 r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ha)
 assert r["closed"]["location"] == "home" and r["closed"]["cost"] == 7.4
 
+# unknown location (no home zone, never resolved) -> priced at the home
+# rate (the best available guess), but the location itself must stay
+# "unknown", not silently claim a confirmed "home" it never had
 o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
                     "chargeKw": 7, "atHome": None}, ha)["open"]
 r = S.update(o, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ha)
-assert r["closed"]["location"] == "home" and r["closed"]["cost"] == 7.4
+assert r["closed"]["location"] == "unknown" and r["closed"]["cost"] == 7.4
 
 # away rate unset -> away session uses the home rate
 noaway = {"pricePerKwh": 0.185, "capacityKwh": 100}
@@ -122,6 +125,21 @@ ms = S.summary([
 assert ms["count"] == 3
 assert ms["home"]["count"] == 2 and ms["home"]["kwh"] == 40
 assert ms["away"]["count"] == 1 and ms["away"]["cost"] == 22
+
+# a session with the explicit "unknown" location must land in neither the
+# home nor the away bucket -- only in the overall total -- not get silently
+# counted as home (the bug this whole change fixes)
+mu = S.summary([
+    {"endedAt": now - 1 * 864e5, "kwh": 40, "cost": 22, "location": "away"},
+    {"endedAt": now - 2 * 864e5, "kwh": 30, "cost": 5.55, "location": "home"},
+    {"endedAt": now - 3 * 864e5, "kwh": 10, "cost": 1.85},
+    {"endedAt": now - 1 * 864e5, "kwh": 15, "cost": 3, "location": "unknown"},
+], 30)
+assert mu["count"] == 4, "unknown session still counted in the overall total"
+assert mu["home"]["count"] == 2, "unknown must not be folded into home"
+assert mu["away"]["count"] == 1, "unknown must not be folded into away either"
+assert mu["unknown"]["count"] == 1
+assert mu["unknown"]["kwh"] == 15 and mu["unknown"]["cost"] == 3
 
 # --- per-zone rate override (cur.rate / cur.rateLabel) ---
 o = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20,
@@ -157,5 +175,30 @@ real2 = S.apply_cost(real, 20, "manual")
 assert real2["estimatedCost"] == 16.5 and real2["cost"] == 20
 assert S.apply_cost(est, "x", "external")["cost"] == 16.5
 assert S.apply_cost(None, 5, "external") is None
+
+# --- DEFAULT_CAPACITY_KWH (the EV9's own usable pack size) must never be
+# used as a generic "capacity unknown" guess for some OTHER model -- that
+# silently computes another car's kWh/cost off the wrong battery size. ---
+no_cap_opts = {"pricePerKwh": 0.185}  # no capacityKwh, no model
+o2 = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20, "chargeKw": 7}, no_cap_opts)["open"]
+r2 = S.update(o2, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, no_cap_opts)
+assert r2["closed"] is None, (
+    "with no configured/reported capacity and no EV9 hint, a session with "
+    "only a % delta must not be recorded with a guessed kWh"
+)
+
+# a non-EV9 model must NOT get the EV9 default either
+niro_opts = {"pricePerKwh": 0.185, "model": "Niro EV"}
+o3 = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20, "chargeKw": 7}, niro_opts)["open"]
+r3 = S.update(o3, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, niro_opts)
+assert r3["closed"] is None, "a non-EV9 model must not silently borrow the EV9's pack size"
+
+# an EV9 (identified by model) with no configured capacityKwh DOES still
+# get the 99.8kWh default -- this is the one case it's actually meant for
+ev9_opts = {"pricePerKwh": 0.185, "model": "EV9"}
+o4 = S.update(None, {"t": t0, "charging": True, "plugged": True, "batteryPct": 20, "chargeKw": 7}, ev9_opts)["open"]
+r4 = S.update(o4, {"t": t0 + 30 * MIN, "charging": False, "plugged": False, "batteryPct": 60}, ev9_opts)
+assert r4["closed"], "an EV9 with no configured capacity must still fall back to its own default"
+assert r4["closed"]["kwh"] == 39.92, "40% of the EV9's 99.8kWh default"
 
 print("all sessions tests passed")

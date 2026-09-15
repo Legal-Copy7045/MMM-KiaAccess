@@ -535,7 +535,14 @@ function tmpCacheDir() {
   const notifications = [];
   helper.sendSocketNotification = (name, data) => notifications.push({ name, data });
   const id = helper.identifierFor({ region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1" });
-  const config = { units: "imperial", tripLog: { minKm: 0.5, parkGapMin: 1 } };
+  const config = {
+    units: "imperial",
+    tripLog: { minKm: 0.5, parkGapMin: 1 },
+    // the charging-session poll samples below sit at this exact GPS point --
+    // without a home point configured, atHome stays unknown/null and the
+    // session would land in the "unknown" bucket instead of "home"
+    chargeLog: { homeLat: 40.1, homeLon: -74.0, homeRadiusKm: 0.5 }
+  };
 
   const HOME = { lat: 40.0, lon: -74.0 };
   // onPayload() timestamps every sample with Date.now() internally (trips.js's
@@ -547,7 +554,12 @@ function tmpCacheDir() {
   Date.now = () => t;
 
   function poll(vehicle) {
-    helper.onPayload(id, config, { vehicle, _meta: {} });
+    // model: "EV9" -- this fixture has no configured capacity_kwh and no
+    // reported ev_battery_capacity, relying on sessions.js/trips.js's
+    // EV9-only DEFAULT_CAPACITY_KWH fallback to have a real pack size to
+    // compute kwh from at all (see that fallback's own tests for why it's
+    // gated on the model, not applied blindly to every vehicle).
+    helper.onPayload(id, config, { vehicle: Object.assign({ model: "EV9" }, vehicle), _meta: {} });
   }
 
   try {
@@ -581,7 +593,11 @@ function tmpCacheDir() {
 
     // -- one home charging session: plug in + charge (a second still-charging
     // sample so the session has nonzero minutes, since avgKw needs > 0) +
-    // stop --
+    // stop -- config.chargeLog.homeLat/homeLon (set on `config` above) makes
+    // node_helper.js's own atHome computation resolve to true for these GPS
+    // coords; without it atHome stays unknown/null and the session would
+    // land in the "unknown" location bucket instead of "home" (see
+    // sessions.js's update()).
     poll({ VIN: "VIN1", odometer: 1022, ev_battery_percentage: 89, engine_is_running: false,
       ev_battery_is_charging: true, ev_battery_is_plugged_in: true, ev_charging_power: 11,
       location_latitude: 40.1, location_longitude: -74.0 });
