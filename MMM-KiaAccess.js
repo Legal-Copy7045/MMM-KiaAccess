@@ -1658,8 +1658,23 @@ Module.register("MMM-KiaAccess", {
         sign + acc.accuracyPct + "% (" + acc.kiaEstimate + " vs " + acc.observedEstimate + " " + acc.unit + ")"
       ]);
     }
-    if (chg && chg.home && chg.home.avgKw != null) {
-      rows.push(["Home charging", chg.home.avgKw + " kW avg"]);
+    if (chg && chg.home) {
+      // activeAvgKw (the charger's real rate while actually drawing
+      // current) is the headline figure; avgKw (kWh over the WHOLE
+      // plugged-in session, pauses/tapering diluted in) only shown when it
+      // meaningfully differs -- otherwise two near-identical numbers is
+      // just noise
+      if (chg.home.activeAvgKw != null) {
+        const sameish = chg.home.avgKw != null &&
+          Math.abs(chg.home.activeAvgKw - chg.home.avgKw) < 0.15;
+        rows.push([
+          "Home charging",
+          chg.home.activeAvgKw + " kW" +
+            (sameish ? "" : " (session avg " + chg.home.avgKw + " kW)")
+        ]);
+      } else if (chg.home.avgKw != null) {
+        rows.push(["Home charging", chg.home.avgKw + " kW avg"]);
+      }
     }
     if (drv && drv.tripsPerWeek != null) {
       rows.push(["Driving pattern", drv.tripsPerWeek + " trips/wk · " + drv.avgTripDistance + " " + drv.unit + " avg"]);

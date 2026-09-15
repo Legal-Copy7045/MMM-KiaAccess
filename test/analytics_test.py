@@ -134,6 +134,43 @@ band_50_80 = next((b for b in cp["socBands"] if b["label"] == "50–80%"), None)
 assert band_50_80 is not None
 assert band_50_80["sessionCount"] == 2
 
+# ---- charging_performance(): a session with a scheduled-charging pause
+# (avgKw diluted by the whole session span vs. activeAvgKw, the charger's
+# real rate -- see sessions.py) must report BOTH, and socBands must
+# bucket by the active rate, not the diluted one -- otherwise a real
+# 1.4 kW-ish charger reads as ~1 kW just because the car sat plugged in
+# (but not drawing) for part of the session ----
+sessions_paused = [
+    # 22.5 kWh over a 1386-min (23.1h) session -> avgKw ~0.97, but only
+    # 964 active minutes -> activeAvgKw ~1.4 (matches an L1/trickle charger)
+    {"startPct": 30, "endPct": 52, "minutes": 1386, "kwh": 22.5, "avgKw": 1, "activeMinutes": 964,
+     "activeAvgKw": 1.4, "location": "home", "cost": 4.16},
+    {"startPct": 30, "endPct": 55, "minutes": 1200, "kwh": 25, "avgKw": 1.25, "activeMinutes": 1000,
+     "activeAvgKw": 1.5, "location": "home", "cost": 4.6},
+]
+cp2 = A.charging_performance(sessions_paused)
+assert cp2 is not None
+assert near(cp2["home"]["avgKw"], 1.1), f"whole-session average must stay the diluted figure: {cp2['home']['avgKw']}"
+assert near(cp2["home"]["activeAvgKw"], 1.4, 0.15), f"activeAvgKw must average the charger's real rate: {cp2['home']['activeAvgKw']}"
+band = next((b for b in cp2["socBands"] if b["label"] == "10–50%"), None)
+assert band is not None, "both sessions' ~41% midpoint must land in the 10-50% band"
+assert near(band["avgKw"], 1.4, 0.15), (
+    f"socBands must bucket by activeAvgKw (~1.45), not the diluted avgKw (~1.1): got {band['avgKw']}"
+)
+
+# ---- charging_performance(): sessions with no activeAvgKw at all (older
+# cache entries from before this field existed) must still work --
+# _group_sessions()'s activeAvgKw stays None rather than crashing or
+# silently mixing in avgKw, and socBands falls back to avgKw for exactly
+# those sessions ----
+sessions_old = [
+    {"startPct": 20, "endPct": 45, "minutes": 100, "kwh": 25, "avgKw": 15, "location": "home", "cost": 3.5},
+    {"startPct": 22, "endPct": 48, "minutes": 95, "kwh": 26, "avgKw": 16, "location": "home", "cost": 3.6},
+]
+cp3 = A.charging_performance(sessions_old)
+assert cp3["home"]["activeAvgKw"] is None, "no session here has activeAvgKw -- must stay None, not fall back to avgKw"
+assert near(cp3["socBands"][0]["avgKw"], 15.5), "socBands must fall back to avgKw for pre-upgrade sessions"
+
 # ---- charging_performance(): no usable sessions -> None ----
 assert A.charging_performance([]) is None
 assert A.charging_performance(None) is None

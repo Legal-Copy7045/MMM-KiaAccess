@@ -220,8 +220,25 @@
 
         {% if home %}
 
+        {% if home.activeAvgKw is not none %}
+
+        **{{ home.activeAvgKw }} kW** while actively charging · {{ home.count
+        }} sessions · {{ home.avgKwh }} kWh typical
+
+        {% if home.avgKw is not none and (home.activeAvgKw - home.avgKw) |
+        abs >= 0.15 %}
+
+        _(session average including plugged-in-but-idle time: {{ home.avgKw
+        }} kW over ~{{ home.avgMinutes }} min)_
+
+        {% endif %}
+
+        {% else %}
+
         **{{ home.avgKw }} kW** average · {{ home.count }} sessions · {{
         home.avgKwh }} kWh / {{ home.avgMinutes }} min typical
+
+        {% endif %}
 
         {% else %}
 

@@ -75,6 +75,10 @@ def update(open_s, cur, opts=None):
                 "atHome": _tri(cur.get("atHome")),
                 "rate": _num(cur.get("rate")),
                 "rateLabel": cur.get("rateLabel") or None,
+                # activeMs: sum of the gaps between CONSECUTIVE charging=True
+                # samples only -- see close()'s activeAvgKw comment below.
+                # 0, not None: this first sample has no prior one to diff.
+                "activeMs": 0, "lastSampleAt": t, "lastSampleCharging": True,
             },
             "closed": None,
         }
@@ -82,6 +86,10 @@ def update(open_s, cur, opts=None):
         return {"open": None, "closed": None}
 
     if charging:
+        if open_s.get("lastSampleCharging") is True and open_s.get("lastSampleAt") is not None:
+            open_s["activeMs"] = (open_s.get("activeMs") or 0) + (t - open_s["lastSampleAt"])
+        open_s["lastSampleAt"] = t
+        open_s["lastSampleCharging"] = True
         open_s["lastChargingAt"] = t
         if open_s.get("atHome") is None and _tri(cur.get("atHome")) is not None:
             open_s["atHome"] = cur.get("atHome")
@@ -98,6 +106,8 @@ def update(open_s, cur, opts=None):
 
     if (plugged_not_confirmed_unplugged
             and t - (open_s.get("lastChargingAt") or open_s["startedAt"]) < gap_ms):
+        open_s["lastSampleAt"] = t
+        open_s["lastSampleCharging"] = False
         if pct is not None:
             open_s["lastPct"] = pct
         return {"open": open_s, "closed": None}
@@ -107,19 +117,34 @@ def update(open_s, cur, opts=None):
     gained = max(0, end_pct - start_pct) if (start_pct is not None and end_pct is not None) else None
     kwh = (gained / 100) * cap if gained is not None else None
     mins = max(0, round((open_s.get("lastChargingAt", t) - open_s["startedAt"]) / 60000))
+    active_mins = max(0, round((open_s.get("activeMs") or 0) / 60000))
     rate = open_s["rate"] if open_s.get("rate") is not None else _rate_for(open_s.get("atHome"), opts)
     where = open_s.get("rateLabel") or ("away" if open_s.get("atHome") is False else "home")
     s = {
         "startedAt": open_s["startedAt"],
         "endedAt": open_s.get("lastChargingAt") or t,
         "minutes": mins,
+        # minutes actually spent mid-charge (consecutive charging=True
+        # samples only) -- excludes scheduled-charging pauses / tapering
+        # gaps that `minutes` above folds into the same session. Always
+        # <= minutes; the gap between the two IS the plugged-in-but-not-
+        # drawing time.
+        "activeMinutes": active_mins,
         "startPct": start_pct,
         "endPct": end_pct,
         "gainedPct": _round(gained, 1) if gained is not None else None,
         "kwh": _round(kwh, 2) if kwh is not None else None,
         "cost": _round(kwh * rate, 2) if (kwh is not None and rate > 0) else None,
         "peakKw": _round(open_s["peakKw"], 1),
+        # kWh delivered over the WHOLE session span, pauses included -- "if
+        # I leave it plugged in for a session shaped like this, what rate
+        # should I plan around". Kept for backwards compatibility; this is
+        # what the analytics/SoC-band aggregates already read.
         "avgKw": _round(kwh / (mins / 60), 1) if (kwh is not None and mins > 0) else None,
+        # kWh delivered over only the time actually spent charging -- the
+        # charger's real rate. Differs from avgKw whenever a session had a
+        # scheduled-charging pause or a long standby/taper.
+        "activeAvgKw": _round(kwh / (active_mins / 60), 1) if (kwh is not None and active_mins > 0) else None,
         "pricePerKwh": rate or None,
         "location": where,
         "costSource": "rate" if (kwh is not None and rate > 0) else None,
