@@ -19,6 +19,8 @@ from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 
+from . import kia_client
+from .account_poll import AccountPoller
 from .config_flow import _account_uid
 from .const import (
     COMMANDS,
@@ -36,6 +38,36 @@ _LOGGER = logging.getLogger(__name__)
 
 # module-level (not in hass.data[DOMAIN], which is the {entry_id: coordinator} map)
 _FRONTEND_REGISTERED = False
+
+# {account_hash: AccountPoller}, one per (region, brand, username) account --
+# shared by every config entry/coordinator for that account, however many
+# vehicles it has. Deliberately its own top-level hass.data key, not nested
+# under hass.data[DOMAIN] (which is {entry_id: coordinator} and unloading the
+# LAST entry clears that dict entirely -- a distinct key means this survives
+# any single entry's own reload independent of that).
+_ACCOUNTS_KEY = f"{DOMAIN}_accounts"
+
+
+def _account_hash_for(entry: ConfigEntry) -> str:
+    return kia_client._account_hash(  # noqa: SLF001
+        entry.data.get(CONF_REGION, "USA"),
+        entry.data.get(CONF_BRAND, "KIA"),
+        entry.data.get("username", ""),
+    )
+
+
+def _get_account_poller(hass: HomeAssistant, entry: ConfigEntry) -> AccountPoller:
+    """The shared AccountPoller for this entry's account, creating it (with
+    refcount 0) on first use. Callers must bump .refcount themselves --
+    kept explicit here rather than folded into this getter, since setup and
+    unload need to move the count in opposite, clearly-paired places."""
+    accounts = hass.data.setdefault(_ACCOUNTS_KEY, {})
+    h = _account_hash_for(entry)
+    poller = accounts.get(h)
+    if poller is None:
+        poller = AccountPoller(hass, h)
+        accounts[h] = poller
+    return poller
 
 
 def _migrate_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -164,9 +196,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = KiaAccessCoordinator(hass, entry)
     coordinator.last_options = dict(entry.options)
-    await coordinator.async_load_sessions()
-    await coordinator.async_load_prefs()
-    await coordinator.async_config_entry_first_refresh()
+    # See account_poll.py's module docstring: every entry for the SAME Kia
+    # account (same region+brand+username, any number of vehicles) shares
+    # ONE AccountPoller, so an N-vehicle account does roughly the same
+    # amount of Kia API traffic a single-vehicle account does, not N times
+    # as much. Bumped here / dropped in async_unload_entry below -- but a
+    # failed first_refresh (ConfigEntryNotReady) never REACHES
+    # async_unload_entry (the entry was never "loaded"), and HA retries
+    # async_setup_entry from scratch on the next attempt; without the
+    # try/except below, every failed retry would bump refcount again with
+    # no matching decrement, permanently over-counting how many entries
+    # are actually using this account's poller.
+    account_poller = _get_account_poller(hass, entry)
+    account_poller.refcount += 1
+    coordinator.account_poller = account_poller
+    try:
+        await coordinator.async_load_sessions()
+        await coordinator.async_load_prefs()
+        await coordinator.async_config_entry_first_refresh()
+    except BaseException:
+        account_poller.refcount -= 1
+        if account_poller.refcount <= 0:
+            hass.data.get(_ACCOUNTS_KEY, {}).pop(account_poller.account_hash, None)
+        raise
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -280,7 +332,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        coordinator = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        # drop this entry's share of its account's AccountPoller (see
+        # account_poll.py) -- once nothing references it any more, remove it
+        # entirely rather than leaving a dead poller (and its in-memory
+        # last-fetch cache) sitting in hass.data forever
+        poller = getattr(coordinator, "account_poller", None)
+        if poller is not None:
+            poller.refcount -= 1
+            if poller.refcount <= 0:
+                hass.data.get(_ACCOUNTS_KEY, {}).pop(poller.account_hash, None)
         if not hass.data.get(DOMAIN):
             for spec in COMMANDS:
                 hass.services.async_remove(DOMAIN, spec["key"])

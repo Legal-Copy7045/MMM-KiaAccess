@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
+from . import account_poll
 from . import analytics as observed_analytics
 from . import kia_client
 from . import range as drive_range
@@ -55,6 +56,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         )
         self.entry = entry
         self.last_options: dict = dict(entry.options)
+        # set by __init__.py's async_setup_entry right after construction,
+        # before this coordinator's first refresh -- see account_poll.py
+        self.account_poller: account_poll.AccountPoller | None = None
         self.vehicle: dict = {}
         self.meta: dict = {}
         self._prev_cond: dict = {}
@@ -1109,7 +1113,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             fetch_err: Exception | None = None
             otp_required = False
             try:
-                result = await self.hass.async_add_executor_job(kia_client.fetch, job)
+                # every coordinator for this account shares one login/fetch
+                # (see account_poll.py) -- this always requests every
+                # vehicle on the account; select_own_vehicle() below picks
+                # this coordinator's own one back out of that shared result
+                result = await self.account_poller.async_fetch(job)
             except kia_client.OtpRequired as err:
                 otp_required = True
                 fetch_err = err
@@ -1118,27 +1126,32 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             except Exception as err:  # noqa: BLE001
                 fetch_err = err
 
-            # A 200 response with an empty vehicle list is a fetch failure, not
-            # a real "no vehicle" state -- treat it like any other ClientError
-            # so DataUpdateCoordinator keeps the last good self.vehicle instead
-            # of silently blanking every entity.
-            vehicles = result.get("vehicles") if fetch_err is None else None
-            if fetch_err is None and not vehicles:
-                fetch_err = kia_client.ClientError("Kia API returned no vehicles")
+            vehicle = None
+            if fetch_err is None:
+                try:
+                    vehicle = account_poll.select_own_vehicle(
+                        result.get("vehicles") or [], self.entry.data.get(CONF_VIN, "")
+                    )
+                except kia_client.ClientError as err:
+                    fetch_err = err
 
             if fetch_err is None:
                 self.meta = result.get("meta", {}) or {}
                 # persist a rotated refresh token back into the config entry.
                 # async_update_entry fires the update listener, but
                 # _async_options_updated ignores data-only changes so this
-                # does not reload the integration.
+                # does not reload the integration. self.meta is the SHARED
+                # AccountPoller payload's own dict -- pop() here would mutate
+                # it out from under every sibling coordinator reusing the
+                # same cached fetch within the dedup window, so copy first.
+                self.meta = dict(self.meta)
                 new_token = self.meta.pop("token", None)
                 if new_token and new_token != self.entry.data.get(CONF_TOKEN):
                     self.hass.config_entries.async_update_entry(
                         self.entry,
                         data={**self.entry.data, CONF_TOKEN: new_token},
                     )
-                self.vehicle = vehicles[0]
+                self.vehicle = vehicle
                 await self._update_sessions()
                 await self._update_trips()
 
