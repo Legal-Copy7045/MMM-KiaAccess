@@ -182,16 +182,22 @@ def main():
     # Identity tag -- see kia_client._migrate_legacy_token()'s comment: it's
     # what stops a LATER account's setup from ever adopting this file.
     tok["_kiaAccessAccountHash"] = account_hash
+    # Write-then-rename, same as kia_client._save_token()'s own token
+    # writes: a catastrophic interruption mid-write can never leave
+    # token_file itself truncated/corrupt, since it's only ever replaced
+    # (atomically) by a fully-written temp file, never truncated in place.
+    tmp = token_file + ".tmp"
     # Create already owner-only rather than open()-then-chmod(), which briefly
     # leaves the refresh token world/group-readable (whatever the umask
     # allows) in the window before the chmod call below.
-    fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(tok, fh, indent=2, default=str)
     try:
-        os.chmod(token_file, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 0600
     except OSError:
         pass
+    os.replace(tmp, token_file)  # atomic on both POSIX and Windows
 
     names = ", ".join(sorted(vm.vehicles and (v.name for v in vm.vehicles.values()) or []))
     print(f"\nSaved {token_file}")
