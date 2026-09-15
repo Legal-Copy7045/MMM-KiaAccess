@@ -59,9 +59,16 @@ module.exports = NodeHelper.create({
     this.mqttPrefixOwners = {}; // topicPrefix -> the connection key that first claimed it
     this.promServers = {}; // key -> exporter.PromServer
     this.haLive = {}; // id -> HaLiveClient (source: "homeassistant", mode: "push")
-    this.state = {}; // id -> { failStreak, reqTimes[], lastGood, history[] }
+    this.state = {}; // id -> { failStreak, lastGood, history[] }
     this.rotateVins = {}; // account-level id -> Set of VINs configured as of the last fetch
     this.accountMissStreak = {}; // account-level id -> { vin: consecutive successful fetches missing it }
+    // acctKeyFor(config) (region|brand|username, no vin) -> { reqTimes[] } --
+    // the request/hour cap's own bucket, deliberately separate from `state`
+    // (which is keyed by the vin-inclusive `id`) so two module configs
+    // covering the SAME real Kia account under different vehicle scopes
+    // share one request budget instead of each getting their own -- see
+    // the request/hour guard in handleFetch().
+    this.acctState = {};
     // An instance field (defaulting to the real module-level CACHE_DIR)
     // rather than reading the module constant directly everywhere below --
     // lets a test point a helper instance at a throwaway temp directory
@@ -135,6 +142,16 @@ module.exports = NodeHelper.create({
     return [config.region, config.brand, config.username, config.vin || "auto"].join("|");
   },
 
+  // The real Kia account this config talks to -- deliberately WITHOUT the
+  // vin-or-"auto" suffix identifierFor() adds, so two module configs that
+  // cover the same login under different vehicle scopes (a single-vehicle
+  // block plus a separate rotate block for the same account, say) share one
+  // request-rate budget instead of each getting their own -- see the
+  // request/hour guard in handleFetch().
+  acctKeyFor(config) {
+    return [config.region, config.brand, config.username].join("|");
+  },
+
   // sha256 purely to get a fixed-length, filesystem-safe, non-cleartext name
   // for a local (git-ignored) cache file / identity tag — not a security
   // boundary.
@@ -187,7 +204,7 @@ module.exports = NodeHelper.create({
   st(id) {
     if (this.state[id]) return this.state[id];
     var s = {
-      failStreak: 0, reqTimes: [], lastGood: null, history: [],
+      failStreak: 0, lastGood: null, history: [],
       sessions: [], openSession: null, rangeMap: null,
       // HA's driving-times data (mode C only) -- emitData() keeps the last
       // known value when a poll doesn't carry a fresh one, but that only
@@ -343,11 +360,20 @@ module.exports = NodeHelper.create({
     }
 
     // ---- request/hour guard (Kia source only) ----
+    // Keyed by ACCOUNT (region|brand|username), not `id` -- `id` includes the
+    // vin-or-"auto" suffix, so two module configs covering the same real Kia
+    // account under different vin-scopes (e.g. one single-vehicle block plus
+    // one rotate block for the same login) used to each get their OWN
+    // request budget, silently doubling (or more) the real request rate
+    // against Kia's servers despite maxRequestsPerHour being set identically
+    // on both -- defeating the one thing this cap exists to guarantee.
+    const acctKey = this.acctKeyFor(config);
+    const acct = this.acctState[acctKey] || (this.acctState[acctKey] = { reqTimes: [] });
     const now = Date.now();
-    s.reqTimes = s.reqTimes.filter((t) => now - t < 3600e3);
+    acct.reqTimes = acct.reqTimes.filter((t) => now - t < 3600e3);
     const cap = Number(config.maxRequestsPerHour) || 0;
-    if (cap > 0 && s.reqTimes.length >= cap) {
-      const retryAfterMs = 3600e3 - (now - s.reqTimes[0]) + 1000;
+    if (cap > 0 && acct.reqTimes.length >= cap) {
+      const retryAfterMs = 3600e3 - (now - acct.reqTimes[0]) + 1000;
       Log.warn(`[MMM-KiaAccess] request cap reached (${cap}/hr) — serving cache`);
       return this._reportServe(id, config, rotating, {
         stale: true,
@@ -355,7 +381,7 @@ module.exports = NodeHelper.create({
         retryAfterMs
       });
     }
-    s.reqTimes.push(now);
+    acct.reqTimes.push(now);
     this.inFlight[id] = true;
 
     // One bridge call fetches every configured vehicle at once
@@ -799,6 +825,19 @@ module.exports = NodeHelper.create({
     if (this._rmInFlight[id] === key) return;
     this._rmInFlight[id] = key;
 
+    // Same out-of-order-resolution problem ha_source.js's HaLiveClient._emit()
+    // already guards against with its own _emitSeq counter: two overlapping
+    // calls for this SAME id (a slow one for an OLD position/key, a fast one
+    // for a NEWER one -- e.g. HA poll mode's 30s default interval is often
+    // shorter than this function's own up-to-~30s worst-case external-API
+    // time, so a moving car can genuinely trigger two overlapping calls with
+    // different keys) must not let the slower, now-stale call's result win
+    // just because it happened to finish last. Bumped here, checked again
+    // right before the write below -- only the call that's still the LATEST
+    // one started for this id is allowed to actually write s.rangeMap.
+    this._rmGen = this._rmGen || {};
+    const gen = (this._rmGen[id] = (this._rmGen[id] || 0) + 1);
+
     const timedFetch = async (url) => {
       const ctl = new AbortController();
       const to = setTimeout(() => ctl.abort(), 15000);
@@ -849,6 +888,13 @@ module.exports = NodeHelper.create({
         rings: [{ ring: ring, color: "#4caf50" }], markers: markers
       });
 
+      // A newer call for this same id (different, more current key) may have
+      // started -- and even already finished and written its own result --
+      // while these awaits were pending. Writing this now-stale result over
+      // it would silently regress the map to an out-of-date location/range
+      // until the NEXT poll happens to re-diverge from this stale key.
+      if (this._rmGen[id] !== gen) return;
+
       s.rangeMap = {
         key: key, at: Date.now(),
         oneWayKm: Math.round(oneWay), roundTripKm: round ? Math.round(round) : null,
@@ -862,7 +908,11 @@ module.exports = NodeHelper.create({
     } catch (e) {
       Log.warn("[MMM-KiaAccess] range map: " + e.message);
     } finally {
-      this._rmInFlight[id] = null;
+      // Only clear the in-flight marker if it's still ours -- a newer call
+      // may have already overwritten it with ITS OWN key, and this (older,
+      // now-finishing) call clearing that unconditionally would let a THIRD,
+      // redundant call for that same still-in-flight newer key slip through.
+      if (this._rmInFlight[id] === key) this._rmInFlight[id] = null;
     }
   },
 

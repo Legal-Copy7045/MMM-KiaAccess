@@ -315,4 +315,61 @@ function freshModule(overrides) {
   }
 }
 
+// ---- _modalReason: MagicMirror has exactly ONE mirror-wide alert-module
+// modal slot -- a hostile-audit finding: in rotate mode, two DIFFERENT
+// vehicles' critical conditions must never both believe they independently
+// own it. Car A's modal must stay open (car B falls back to a plain
+// notification growl) until car A's own condition actually clears. ----
+{
+  const mod = freshModule({
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }],
+    notifications: { enabled: true, criticalPopup: true, notifyOnStartup: true }
+  });
+  const sent = [];
+  mod.sendNotification = (n, payload) => sent.push({ n, payload });
+  mod.flatMap = {}; // just needs to be truthy for processConditions() to proceed
+  // A minimal conditions.evaluate() stub -- real threshold logic isn't the
+  // point of this test, only that TWO DIFFERENT reasons (one per vehicle)
+  // each independently go critical+active.
+  let reason;
+  mod.conditions = {
+    evaluate: () => ({
+      conditions: [{ reason, level: "critical", active: true, oneShot: false, title: "t", message: "m" }],
+      meta: { charging: null }
+    })
+  };
+
+  reason = "battery_critical_a";
+  mod._loadCondState("VIN_A");
+  mod.processConditions();
+  mod._saveCondState("VIN_A");
+  const modalsAfterA = sent.filter((s) => s.n === "SHOW_ALERT" && s.payload.type === "alert");
+  assert.strictEqual(modalsAfterA.length, 1, "car A's critical condition must open the modal");
+
+  reason = "battery_critical_b";
+  mod._loadCondState("VIN_B");
+  mod.processConditions();
+  mod._saveCondState("VIN_B");
+  const modalsAfterB = sent.filter((s) => s.n === "SHOW_ALERT" && s.payload.type === "alert");
+  assert.strictEqual(modalsAfterB.length, 1, (
+    "car B must NOT open a second modal while car A's own (different reason) modal is still open -- " +
+    "the whole mirror has exactly one modal slot, not one per vehicle"
+  ));
+  const growlsAfterB = sent.filter((s) => s.n === "SHOW_ALERT" && s.payload.type === "notification");
+  assert.strictEqual(growlsAfterB.length, 1, "car B must fall back to a plain notification growl instead");
+
+  // car A's condition clears (still car A's own context) -- its modal, and
+  // only its modal, must be the one dismissed
+  mod._loadCondState("VIN_A");
+  reason = "battery_critical_a";
+  mod.conditions.evaluate = () => ({
+    conditions: [{ reason: "battery_critical_a", level: "critical", active: false, oneShot: false, title: "t", message: "m" }],
+    meta: { charging: null }
+  });
+  mod.processConditions();
+  mod._saveCondState("VIN_A");
+  const hides = sent.filter((s) => s.n === "HIDE_ALERT");
+  assert.strictEqual(hides.length, 1, "car A's own modal clearing must dismiss it");
+}
+
 console.log("all mmm-kiaaccess tests passed");
