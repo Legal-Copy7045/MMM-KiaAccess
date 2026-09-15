@@ -596,7 +596,11 @@ class KiaAccessObservedRangeSensor(KiaAccessEntity, SensorEntity):
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "observed_range")
-        self._attr_name = "Observed range & efficiency"
+        # kept short/plain so it slugifies to a predictable
+        # sensor.<vehicle>_observed_range (has_entity_name=True combines
+        # this with the device name) -- the dashboard cards below hard-code
+        # that entity_id, so this name must not change casually
+        self._attr_name = "Observed range"
 
     def _data(self) -> dict:
         return self.coordinator.analytics
