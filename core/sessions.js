@@ -27,6 +27,23 @@
     var f = Math.pow(10, dp == null ? 2 : dp);
     return Math.round(n * f) / f;
   }
+  // DEFAULT_CAPACITY_KWH is the EV9's own usable pack size -- it must never
+  // be applied as a generic "we don't know this car's capacity" guess, or
+  // every OTHER model whose capacity is neither configured (capacity_kwh)
+  // nor reported by the API (ev_battery_capacity) would silently have its
+  // kWh/cost derived from the wrong car's battery size, contaminating that
+  // vehicle's own energy/cost analytics. Only apply it when the caller has
+  // told us (via opts.model) this really is an EV9; otherwise leave
+  // capacity genuinely unknown so the kWh/cost fields degrade to null,
+  // same as any other missing-data case elsewhere in this module.
+  function isEv9(model) {
+    return typeof model === "string" && /ev\s*9/i.test(model);
+  }
+  function resolveCap(opts) {
+    var cap = num(opts.capacityKwh);
+    if (cap == null && isEv9(opts.model)) cap = DEFAULT_CAPACITY_KWH;
+    return cap;
+  }
 
   /** which per-kWh rate applies to a session, given where it charged */
   function rateFor(atHome, opts) {
@@ -51,7 +68,7 @@
    */
   function update(open, cur, opts) {
     opts = opts || {};
-    var cap = num(opts.capacityKwh) || DEFAULT_CAPACITY_KWH;
+    var cap = resolveCap(opts);
     var minKwh = num(opts.minKwh);
     if (minKwh == null) minKwh = MIN_KWH;
     var gapMs = (num(opts.gapMin) || GAP_MIN) * 60000;
@@ -124,11 +141,19 @@
     var endPct = pct != null ? pct : open.lastPct;
     var gained = (open.startPct != null && endPct != null)
       ? Math.max(0, endPct - open.startPct) : null;
-    var kwh = gained != null ? (gained / 100) * cap : null;
+    var kwh = (gained != null && cap != null) ? (gained / 100) * cap : null;
     var mins = Math.max(0, Math.round((open.lastChargingAt - open.startedAt) / 60000));
     var activeMins = Math.max(0, Math.round((open.activeMs || 0) / 60000));
     var rate = open.rate != null ? open.rate : rateFor(open.atHome, opts);
-    var where = open.rateLabel || (open.atHome === false ? "away" : "home");
+    // atHome === true/false -> a confirmed bucket; atHome left null (no
+    // home zone configured, or no GPS fix ever came in this session) is
+    // genuinely UNKNOWN, not "assume home" -- rateFor() above still prices
+    // it at the home rate (the best guess available for cost purposes),
+    // but the bucket a session is filed under for home/away analytics must
+    // not silently claim a confirmed location we never actually had.
+    var where = open.rateLabel || (
+      open.atHome === true ? "home" : open.atHome === false ? "away" : "unknown"
+    );
     var s = {
       startedAt: open.startedAt,
       endedAt: open.lastChargingAt || t,
@@ -191,12 +216,12 @@
   function progress(open, cur, opts) {
     if (!open) return null;
     opts = opts || {};
-    var cap = num(opts.capacityKwh) || DEFAULT_CAPACITY_KWH;
+    var cap = resolveCap(opts);
     var price = open.rate != null ? open.rate : rateFor(open.atHome, opts);
     var t = num(cur.t) || Date.now();
     var pct = num(cur.batteryPct);
     var lastPct = pct != null ? pct : open.lastPct;
-    var kwhSoc = (open.startPct != null && lastPct != null)
+    var kwhSoc = (open.startPct != null && lastPct != null && cap != null)
       ? Math.max(0, ((lastPct - open.startPct) / 100) * cap) : 0;
     var kw = num(cur.chargeKw);
     if (kw == null) kw = open.peakKw || 0;
@@ -218,13 +243,19 @@
     var acc = {
       all: { count: 0, kwh: 0, cost: 0, haveCost: false },
       home: { count: 0, kwh: 0, cost: 0, haveCost: false },
-      away: { count: 0, kwh: 0, cost: 0, haveCost: false }
+      away: { count: 0, kwh: 0, cost: 0, haveCost: false },
+      unknown: { count: 0, kwh: 0, cost: 0, haveCost: false }
     };
     (sessions || []).forEach(function (s) {
       if (!s || num(s.endedAt) == null || s.endedAt < cutoff) return;
-      // "home" (or no location) is the home bucket; any other label — "away"
-      // or a specific public-charger zone name — is the away bucket
-      var where = (s.location == null || s.location === "home") ? "home" : "away";
+      // "home" (or a session from before location tracking existed at all,
+      // which has no `location` field whatsoever) is the home bucket; the
+      // explicit "unknown" value (see update() above) means this specific
+      // session's location genuinely couldn't be determined and must NOT
+      // be folded into either home or away; anything else — "away" or a
+      // named public-charger zone — is the away bucket.
+      var where = s.location === "unknown" ? "unknown"
+        : (s.location == null || s.location === "home") ? "home" : "away";
       [acc.all, acc[where]].forEach(function (a) {
         a.count += 1;
         if (s.kwh != null) a.kwh += s.kwh;
@@ -241,6 +272,7 @@
     var r = out(acc.all);
     r.home = out(acc.home);
     r.away = out(acc.away);
+    r.unknown = out(acc.unknown);
     return r;
   }
 

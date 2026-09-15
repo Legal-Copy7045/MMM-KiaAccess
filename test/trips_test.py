@@ -145,4 +145,32 @@ assert s["kwh"] == 10
 assert near(s["cost"], 1.85, 0.01)
 assert 0 < s["costPerMi"] < 0.1
 
+# --- DEFAULT_CAPACITY_KWH (the EV9's own usable pack size) must never be
+# used as a generic "capacity unknown" guess for some OTHER model -- see
+# core/sessions.js's identical fix for the reasoning. ---
+_drive_samples = [
+    {"t": t + 0 * MIN, "odometerKm": 1000, "batteryPct": 90, "carOn": False,
+     "locationLat": 40.7539, "locationLon": -79.8103},
+    {"t": t + 5 * MIN, "odometerKm": 1000, "batteryPct": 90, "carOn": False,
+     "locationLat": 40.7539, "locationLon": -79.8103},
+    {"t": t + 20 * MIN, "odometerKm": 1015, "batteryPct": 87, "carOn": True,
+     "locationLat": 40.62, "locationLon": -79.80},
+    {"t": t + 45 * MIN, "odometerKm": 1030, "batteryPct": 84, "carOn": False,
+     "locationLat": 40.55, "locationLon": -79.88},
+    {"t": t + 60 * MIN, "odometerKm": 1030, "batteryPct": 84, "carOn": False,
+     "locationLat": 40.55, "locationLon": -79.88},
+]
+_, no_cap_closed = run(_drive_samples, {"pricePerKwh": 0.185})  # no capacityKwh, no model
+assert no_cap_closed[0]["kwh"] is None, (
+    "with no configured/reported capacity and no EV9 hint, kwh must stay "
+    "None, not borrow the EV9's pack size"
+)
+_, niro_closed = run(_drive_samples, {"pricePerKwh": 0.185, "model": "Niro EV"})
+assert niro_closed[0]["kwh"] is None, "a non-EV9 model must not silently borrow the EV9's pack size"
+_, ev9_closed = run(_drive_samples, {"pricePerKwh": 0.185, "model": "EV9"})
+assert near(ev9_closed[0]["kwh"], 5.988), (
+    "an EV9 with no configured capacity must still fall back to its own "
+    "99.8kWh default (6% of it)"
+)
+
 print("all trips tests passed")

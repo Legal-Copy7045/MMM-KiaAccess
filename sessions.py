@@ -5,11 +5,30 @@ Kept line-for-line with the JS; both are exercised in CI
 """
 from __future__ import annotations
 
+import re
 import time
 
 DEFAULT_CAPACITY_KWH = 99.8  # Kia EV9 usable
 GAP_MIN = 45
 MIN_KWH = 0.3
+
+# See trips.py's mirror of this same helper for why: DEFAULT_CAPACITY_KWH is
+# the EV9's own usable pack size and must never stand in as a generic
+# "capacity unknown" guess for some other model, or that model's own
+# energy/cost analytics would silently be computed off the wrong car's
+# battery size.
+_EV9_RE = re.compile(r"ev\s*9", re.IGNORECASE)
+
+
+def _is_ev9(model) -> bool:
+    return bool(model) and bool(_EV9_RE.search(str(model)))
+
+
+def _resolve_cap(opts) -> float | None:
+    cap = _num(opts.get("capacityKwh"))
+    if cap is None and _is_ev9(opts.get("model")):
+        cap = DEFAULT_CAPACITY_KWH
+    return cap
 
 
 def _num(v):
@@ -48,7 +67,7 @@ def update(open_s, cur, opts=None):
     -> {"open": dict|None, "closed": dict|None}
     """
     opts = opts or {}
-    cap = _num(opts.get("capacityKwh")) or DEFAULT_CAPACITY_KWH
+    cap = _resolve_cap(opts)
     min_kwh = _num(opts.get("minKwh"))
     if min_kwh is None:
         min_kwh = MIN_KWH
@@ -115,11 +134,20 @@ def update(open_s, cur, opts=None):
     end_pct = pct if pct is not None else open_s.get("lastPct")
     start_pct = open_s.get("startPct")
     gained = max(0, end_pct - start_pct) if (start_pct is not None and end_pct is not None) else None
-    kwh = (gained / 100) * cap if gained is not None else None
+    kwh = (gained / 100) * cap if (gained is not None and cap is not None) else None
     mins = max(0, round((open_s.get("lastChargingAt", t) - open_s["startedAt"]) / 60000))
     active_mins = max(0, round((open_s.get("activeMs") or 0) / 60000))
     rate = open_s["rate"] if open_s.get("rate") is not None else _rate_for(open_s.get("atHome"), opts)
-    where = open_s.get("rateLabel") or ("away" if open_s.get("atHome") is False else "home")
+    # atHome True/False -> a confirmed bucket; atHome left None (no home
+    # zone configured, or no GPS fix ever came in this session) is
+    # genuinely UNKNOWN, not "assume home" -- _rate_for() above still
+    # prices it at the home rate (the best guess available for cost
+    # purposes), but the bucket a session is filed under for home/away
+    # analytics must not silently claim a confirmed location we never had.
+    at_home = open_s.get("atHome")
+    where = open_s.get("rateLabel") or (
+        "home" if at_home is True else "away" if at_home is False else "unknown"
+    )
     s = {
         "startedAt": open_s["startedAt"],
         "endedAt": open_s.get("lastChargingAt") or t,
@@ -174,7 +202,7 @@ def progress(open_s, cur, opts=None):
     if not open_s:
         return None
     opts = opts or {}
-    cap = _num(opts.get("capacityKwh")) or DEFAULT_CAPACITY_KWH
+    cap = _resolve_cap(opts)
     price = open_s["rate"] if open_s.get("rate") is not None else _rate_for(open_s.get("atHome"), opts)
     t = _num(cur.get("t")) or (time.time() * 1000)
     pct = _num(cur.get("batteryPct"))
@@ -182,7 +210,7 @@ def progress(open_s, cur, opts=None):
     start_pct = open_s.get("startPct")
     kwh_soc = (
         max(0, (last_pct - start_pct) / 100 * cap)
-        if (start_pct is not None and last_pct is not None) else 0
+        if (start_pct is not None and last_pct is not None and cap is not None) else 0
     )
     kw = _num(cur.get("chargeKw"))
     if kw is None:
@@ -204,13 +232,18 @@ def summary(sessions, days=30):
     """totals over the last `days`, split home / away"""
     cutoff = (time.time() * 1000) - days * 864e5
     acc = {k: {"count": 0, "kwh": 0.0, "cost": 0.0, "have": False}
-           for k in ("all", "home", "away")}
+           for k in ("all", "home", "away", "unknown")}
     for s in sessions or []:
         if not s or _num(s.get("endedAt")) is None or s["endedAt"] < cutoff:
             continue
-        # "home" (or no location) -> home bucket; "away" or a specific
-        # public-charger zone name -> away bucket
-        where = "home" if s.get("location") in (None, "home") else "away"
+        # "home" (or a session from before location tracking existed at
+        # all, which has no `location` field whatsoever) -> home bucket;
+        # the explicit "unknown" value (see update() above) means this
+        # specific session's location genuinely couldn't be determined and
+        # must NOT be folded into either home or away; anything else --
+        # "away" or a named public-charger zone -- is the away bucket.
+        loc = s.get("location")
+        where = "unknown" if loc == "unknown" else ("home" if loc in (None, "home") else "away")
         for a in (acc["all"], acc[where]):
             a["count"] += 1
             if s.get("kwh") is not None:
@@ -226,4 +259,5 @@ def summary(sessions, days=30):
     r = out(acc["all"])
     r["home"] = out(acc["home"])
     r["away"] = out(acc["away"])
+    r["unknown"] = out(acc["unknown"])
     return r

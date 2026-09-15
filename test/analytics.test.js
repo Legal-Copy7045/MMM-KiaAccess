@@ -63,6 +63,33 @@ const near = (a, b, tol) => a != null && b != null && Math.abs(a - b) <= (tol ||
   assert.strictEqual(eff.monthlyTrend[1].tripCount, 2);
 }
 
+// ---- monthKey() must bucket by UTC, not the host process's local
+// timezone -- otherwise the exact same trip lands in a different month
+// here (MagicMirror's Node process) than in analytics.py's coordinator
+// (which has always explicitly used UTC), depending on whichever
+// timezone each process happens to be running in. A timestamp right at
+// 23:00 UTC on the last day of January is still January in UTC, but
+// would read as February 1st local time in a timezone ahead of UTC
+// (e.g. UTC+14) -- exactly the scenario that silently split JS/Python
+// monthly trends apart before this fix. ----
+{
+  const origTz = process.env.TZ;
+  process.env.TZ = "Pacific/Kiritimati"; // UTC+14 -- reads Feb 1 local for this instant
+  try {
+    const lateJan = Date.UTC(2026, 0, 31, 23, 0, 0);
+    const trips = [
+      { distanceKm: 40, usedPct: 15, minutes: 45, endedAt: lateJan, chargedDuring: false }
+    ];
+    const eff = A.observedEfficiency(trips, {});
+    assert.strictEqual(eff.monthlyTrend.length, 1);
+    assert.strictEqual(eff.monthlyTrend[0].month, "2026-01",
+      "must bucket by the UTC month (Jan 31 23:00Z), not the local month " +
+      "(Feb 1 in a UTC+14 timezone) -- this is what kept JS/Python parity");
+  } finally {
+    process.env.TZ = origTz;
+  }
+}
+
 // ---- observedEfficiency(): no usable trips -> null, not a crash ----
 {
   assert.strictEqual(A.observedEfficiency([], {}), null);
@@ -144,6 +171,23 @@ const near = (a, b, tol) => a != null && b != null && Math.abs(a - b) <= (tol ||
   const band5080 = cp.socBands.find((b) => b.label === "50–80%");
   assert.ok(band5080, "the 50-80% band must have enough home sessions to report");
   assert.strictEqual(band5080.sessionCount, 2);
+}
+
+// ---- chargingPerformance(): a session with the explicit "unknown"
+// location (see core/sessions.js's update()) must land in NEITHER the
+// home nor the away group -- only in `overall` -- not get silently
+// counted as home (nor, by a naive "not home" filter, wrongly counted as
+// away either) ----
+{
+  const sessions = [
+    { startPct: 20, endPct: 45, minutes: 100, kwh: 25, avgKw: 15, location: "home", cost: 3.5 },
+    { startPct: 30, endPct: 90, minutes: 45, kwh: 60, avgKw: 80, location: "away", cost: 22 },
+    { startPct: 40, endPct: 70, minutes: 60, kwh: 20, avgKw: 20, location: "unknown", cost: 3.7 }
+  ];
+  const cp = A.chargingPerformance(sessions);
+  assert.strictEqual(cp.sessionsSampled, 3, "unknown session still counted in overall");
+  assert.strictEqual(cp.home.count, 1, "unknown must not be folded into home");
+  assert.strictEqual(cp.away.count, 1, "unknown must not be folded into away");
 }
 
 // ---- chargingPerformance(): a session with a scheduled-charging pause

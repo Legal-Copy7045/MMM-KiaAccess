@@ -248,6 +248,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "pricePerKwh": opts.get("price_per_kwh") or 0,
                 "awayPricePerKwh": opts.get("away_price_per_kwh"),
                 "capacityKwh": opts.get("capacity_kwh") or _num(v.get("ev_battery_capacity")),
+                # sessions.py's DEFAULT_CAPACITY_KWH fallback is the EV9's
+                # own pack size -- it only applies when this vehicle's own
+                # model actually looks like an EV9 (see _resolve_cap()),
+                # so it never silently borrows the EV9's battery size for
+                # some other model with no configured/reported capacity.
+                "model": v.get("model"),
             },
         )
         changed = res["open"] != self._open_session
@@ -410,6 +416,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             {
                 "pricePerKwh": opts.get("price_per_kwh") or 0,
                 "capacityKwh": opts.get("capacity_kwh") or _num(v.get("ev_battery_capacity")),
+                # see _update_sessions()'s identical comment above
+                "model": v.get("model"),
             },
         )
         changed = res["open"] != self._open_trip

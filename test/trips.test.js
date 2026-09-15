@@ -139,4 +139,37 @@ assert.strictEqual(sum.kwh, 10);
 assert.ok(near(sum.cost, 1.85, 0.01));
 assert.ok(sum.costPerMi > 0 && sum.costPerMi < 0.1, sum.costPerMi);
 
+// --- DEFAULT_CAPACITY_KWH (the EV9's own usable pack size) must never be
+// used as a generic "capacity unknown" guess for some OTHER model -- see
+// core/sessions.js's identical fix for the reasoning. ---
+{
+  const noCap = run([
+    { t: t + 0 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 5 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 20 * MIN, odometerKm: 1015, batteryPct: 87, carOn: true, locationLat: 40.62, locationLon: -79.80 },
+    { t: t + 45 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 },
+    { t: t + 60 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 }
+  ], { pricePerKwh: 0.185 }); // no capacityKwh, no model
+  assert.strictEqual(noCap.closed[0].kwh, null,
+    "with no configured/reported capacity and no EV9 hint, kwh must stay null, not borrow the EV9's pack size");
+
+  const niro = run([
+    { t: t + 0 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 5 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 20 * MIN, odometerKm: 1015, batteryPct: 87, carOn: true, locationLat: 40.62, locationLon: -79.80 },
+    { t: t + 45 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 },
+    { t: t + 60 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 }
+  ], { pricePerKwh: 0.185, model: "Niro EV" });
+  assert.strictEqual(niro.closed[0].kwh, null, "a non-EV9 model must not silently borrow the EV9's pack size");
+
+  const ev9 = run([
+    { t: t + 0 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 5 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 20 * MIN, odometerKm: 1015, batteryPct: 87, carOn: true, locationLat: 40.62, locationLon: -79.80 },
+    { t: t + 45 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 },
+    { t: t + 60 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 }
+  ], { pricePerKwh: 0.185, model: "EV9" });
+  assert.ok(near(ev9.closed[0].kwh, 5.988), "an EV9 with no configured capacity must still fall back to its own 99.8kWh default (6% of it)");
+}
+
 console.log("all trips tests passed");

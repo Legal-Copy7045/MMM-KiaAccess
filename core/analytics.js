@@ -81,9 +81,18 @@
   }
 
   function monthKey(ms) {
+    // UTC, explicitly -- matching analytics.py's _month_key(), which uses
+    // datetime.fromtimestamp(ms/1000, tz=timezone.utc). Plain Date getters
+    // (getMonth()/getFullYear()) read the HOST'S local timezone instead,
+    // which silently disagreed with Python's UTC bucketing for any trip
+    // near a month boundary -- the exact same fleet of trips could land in
+    // different months in the MagicMirror module's own trend vs. Home
+    // Assistant's, depending on what timezone each process happened to be
+    // running in (e.g. a Docker container defaulting to UTC vs. a Pi with
+    // its local timezone set).
     const d = new Date(ms);
-    const m = d.getMonth() + 1;
-    return d.getFullYear() + "-" + (m < 10 ? "0" + m : String(m));
+    const m = d.getUTCMonth() + 1;
+    return d.getUTCFullYear() + "-" + (m < 10 ? "0" + m : String(m));
   }
 
   // ---- 1. observed efficiency --------------------------------------------
@@ -273,8 +282,14 @@
     );
     if (!usable.length) return null;
 
+    // "unknown" (see core/sessions.js's update()) is a session whose
+    // location genuinely couldn't be determined -- it must land in
+    // NEITHER bucket, not get folded into "away" by process of elimination
+    // (it isn't null and isn't "home", so a plain two-way filter here would
+    // silently miscategorize it the other direction from the same bug this
+    // whole change fixes).
     const home = usable.filter((s) => s.location === "home" || s.location == null);
-    const away = usable.filter((s) => s.location != null && s.location !== "home");
+    const away = usable.filter((s) => s.location != null && s.location !== "home" && s.location !== "unknown");
 
     return {
       sessionsSampled: usable.length,
