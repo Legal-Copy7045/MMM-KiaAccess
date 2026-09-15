@@ -979,7 +979,19 @@ shape per `reachRoundTrip`.
   ```
 
 - **`custom:kia-access-card`** with a `range_map:` block — the same thing as a
-  **static image** inside the main card (no Leaflet), for a lighter panel:
+  **static image** inside the main card (no Leaflet), for a lighter panel.
+  Unlike the interactive card above, this one needs a Geoapify key for the
+  image tiles themselves (there's no plain-OpenStreetMap fallback for a
+  static map) — but it too pulls that key from the integration's Options
+  automatically, so `range_map: {}` alone is enough as long as you've set
+  **Geocoding API key** there:
+
+  ```yaml
+  type: custom:kia-access-card
+  range_map: {}
+  ```
+
+  Or set `api_key` / `tomtom_key` here to override what the integration has:
 
   ```yaml
   type: custom:kia-access-card
