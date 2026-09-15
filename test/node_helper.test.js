@@ -597,9 +597,12 @@ function tmpCacheDir() {
 }
 
 // ---- publishMqtt(): discovery must be given BOTH the connection's LWT
-// topic and (in rotate mode) the per-vehicle status topic, so HA's
-// availability actually reflects an ungraceful process death -- not just
-// the best-effort, non-LWT-backed per-VIN "online" publish. ----
+// topic and the per-vehicle status topic, so HA's availability actually
+// reflects an ungraceful process death -- not just the best-effort,
+// non-LWT-backed per-VIN "online" publish. Every vehicle with a
+// resolvable identity gets its own scoped status topic now, rotating or
+// not -- see publishMqtt()'s own comment for why "only in rotate mode"
+// missed the equally-real multiple-single-vehicle-module-blocks case. ----
 {
   const helper = freshHelper();
   const haDiscovery = require("../core/ha-discovery.js");
@@ -624,14 +627,69 @@ function tmpCacheDir() {
       mqtt: { enabled: true, url: "mqtt://127.0.0.1:2", topicPrefix: "kia2", homeAssistant: { enabled: true } }
     };
     helper.publishMqtt(singleConfig, { vehicle: { VIN: "VIN9" }, _meta: {} });
-    assert.strictEqual(calls[0].vehicleStatusTopic, null, (
-      "non-rotating mode has no separate per-vehicle retirement concept -- must pass null, " +
-      "relying on the LWT topic alone"
+    assert.strictEqual(calls[0].vehicleStatusTopic, "kia2/VIN9/status", (
+      "a lone single-vehicle module config must ALSO get a per-vehicle status topic -- " +
+      "not just rotate mode -- since it can still share its mqtt connection with a " +
+      "DIFFERENT single-vehicle module block (two separate module instances is a " +
+      "documented way to run more than one car)"
     ));
   } finally {
     haDiscovery.publish = origPublish;
     Object.values(helper.mqttClients).forEach((c) => { if (c && c.end) c.end(true); });
   }
+}
+
+// ---- publishMqtt(): two SEPARATE module instances (each its own
+// single-vehicle `vin:` config, README's "add this module more than once"
+// option -- neither one "rotating") sharing one mqtt connection must NOT
+// collapse onto the same topics -- a hostile-review finding: this was
+// real cross-vehicle data corruption (car B's telemetry retained-
+// overwriting car A's under a topic/HA-discovery device still labelling
+// it car A), not just a missing convenience, since the old scoping logic
+// only looked at whether THIS config had config.vehicles set, never at
+// whether the underlying connection was actually shared. Proves both the
+// multi-module-block path and the single-module rotate path produce the
+// SAME isolation contract. ----
+{
+  const helper = freshHelper();
+  const published = [];
+  helper.mqttClient = () => ({ publish: (topic, payload) => published.push({ topic, payload }) });
+
+  const mqttCfg = { enabled: true, url: "mqtt://broker", topicPrefix: "kia" };
+  const configA = { region: "USA", brand: "KIA", username: "u@e.com", vin: "CAR_A", mqtt: mqttCfg };
+  const configB = { region: "USA", brand: "KIA", username: "u@e.com", vin: "CAR_B", mqtt: mqttCfg };
+
+  helper.publishMqtt(configA, { vehicle: { VIN: "CAR_A", ev_battery_percentage: 50 }, _meta: {} });
+  helper.publishMqtt(configB, { vehicle: { VIN: "CAR_B", ev_battery_percentage: 60 }, _meta: {} });
+
+  const stateTopics = published.filter((p) => p.topic.endsWith("/state")).map((p) => p.topic).sort();
+  assert.deepStrictEqual(stateTopics, ["kia/CAR_A/state", "kia/CAR_B/state"], (
+    "two separate single-vehicle module configs sharing one mqtt connection must publish " +
+    "to SEPARATE, per-vehicle-scoped topics, not the same unscoped kia/state for both: " +
+    JSON.stringify(stateTopics)
+  ));
+  const aState = JSON.parse(published.find((p) => p.topic === "kia/CAR_A/state").payload);
+  const bState = JSON.parse(published.find((p) => p.topic === "kia/CAR_B/state").payload);
+  assert.strictEqual(aState.VIN, "CAR_A", "kia/CAR_A/state must hold car A's own data, not car B's");
+  assert.strictEqual(bState.VIN, "CAR_B", "kia/CAR_B/state must hold car B's own data, not car A's");
+
+  // the same isolation contract, produced the ROTATE-mode way instead (one
+  // module config, config.vehicles listing both cars) -- must land on the
+  // exact same topic shape as the two-separate-module-blocks case above
+  const helper2 = freshHelper();
+  const published2 = [];
+  helper2.mqttClient = () => ({ publish: (topic, payload) => published2.push({ topic, payload }) });
+  const rotateConfig = {
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "CAR_A" }, { vin: "CAR_B" }], mqtt: mqttCfg
+  };
+  helper2.publishMqtt(rotateConfig, { vehicle: { VIN: "CAR_A", ev_battery_percentage: 50 }, _meta: {} });
+  helper2.publishMqtt(rotateConfig, { vehicle: { VIN: "CAR_B", ev_battery_percentage: 60 }, _meta: {} });
+  const rotateStateTopics = published2.filter((p) => p.topic.endsWith("/state")).map((p) => p.topic).sort();
+  assert.deepStrictEqual(rotateStateTopics, stateTopics, (
+    "rotate mode and multiple single-vehicle module blocks must produce the identical " +
+    "per-vehicle topic shape for the same two cars"
+  ));
 }
 
 // ---- onPayload(): a poll where ONLY rangeReach changed (no vehicle
