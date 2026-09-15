@@ -1109,7 +1109,12 @@ Module.register("MMM-KiaAccess", {
   },
 
   fireNotifications(res, cfg) {
-    const vin = (this.rawPayload && this.rawPayload.vehicle && this.rawPayload.vehicle.VIN) || null;
+    // Kia USA never reports a real VIN at all (see node_helper.js's
+    // vehicleIdentity() for why) -- fall back to the vehicle's own id so
+    // this notification's vin field isn't unconditionally null for a Kia
+    // USA account.
+    const v = (this.rawPayload && this.rawPayload.vehicle) || {};
+    const vin = v.VIN || v.vin || v.id || null;
     const startup = this.firstConditionRun;
     const startupAllows = (level) =>
       cfg.notifyOnStartup === true ||

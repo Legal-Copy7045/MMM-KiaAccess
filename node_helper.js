@@ -42,6 +42,28 @@ const CACHE_DIR = path.join(__dirname, "cache");
 // really there.
 const ACCOUNT_MISS_RETIRE_AFTER = 3;
 
+/** Kia USA (KiaUvoApiUSA) never populates a vehicle's real VIN at all --
+ * confirmed against the installed hyundai_kia_connect_api source, and
+ * against its latest upstream too; every other region/brand implementation
+ * does set it. kia_client.py's own _vehicle_key()/_vehicle_key_dict()
+ * already fall back to the vehicle's own account-issued `id` for exactly
+ * this reason (used by HA's config flow / AccountPoller.select_own_vehicle)
+ * -- this is the Node-side mirror of that SAME fallback, used everywhere a
+ * vehicle object needs to be turned into a stable per-vehicle identity:
+ * rotate-mode filtering/dispatch, MQTT topic scoping, and the Influx/
+ * Prometheus vin tag. Before this, every one of those sites read only
+ * vehicle.VIN/vehicle.vin -- for a Kia USA multi-vehicle rotate config,
+ * EVERY vehicle silently failed this check (both blank -> "" -> filtered
+ * out), and the module processed zero vehicles from an otherwise-
+ * successful account fetch, with no error surfaced anywhere. The config
+ * schema still calls the field "vin" for backwards compatibility, but for
+ * a Kia USA account it must be set to the vehicle's own `id` instead of a
+ * literal VIN -- see README's rotate-mode section. */
+function vehicleIdentity(vehicle) {
+  if (!vehicle) return "";
+  return String(vehicle.VIN || vehicle.vin || vehicle.id || "").trim().toUpperCase();
+}
+
 /** Prefer the bundled venv (built by setup_python.js) unless the user set pythonBin. */
 function resolvePython(configured) {
   if (configured && configured !== "python3") return configured;
@@ -506,7 +528,7 @@ module.exports = NodeHelper.create({
       // off `this.st(id)`, so giving each vehicle its own subId here is
       // what keeps two cars' trip/charge logs from ever mixing).
       result.vehicles.forEach((vehicle) => {
-        const vin = String(vehicle.VIN || vehicle.vin || "").toUpperCase();
+        const vin = vehicleIdentity(vehicle);
         if (!vin || !configuredVins.has(vin)) return;
         seenVins.add(vin);
         const subId = this.identifierFor(Object.assign({}, config, { vin }));
@@ -518,6 +540,24 @@ module.exports = NodeHelper.create({
           )
         });
       });
+
+      // The account genuinely returned vehicles this poll, but NONE of them
+      // matched anything in config.vehicles -- this is a fetch that
+      // "succeeded" (result.ok, non-empty result.vehicles) while silently
+      // processing zero cars, which is easy to mistake for "everything's
+      // fine, just nothing changed" rather than a config problem. Almost
+      // always means config.vehicles' vin: values don't match what
+      // vehicleIdentity() actually computes for this account (e.g. a Kia
+      // USA account, where it's the vehicle's own `id`, not its VIN --
+      // logging what the account actually returned turns this from a
+      // silent no-op into something fixable.
+      if (result.vehicles.length && !seenVins.size) {
+        Log.warn("[MMM-KiaAccess] rotate mode: account returned " +
+          result.vehicles.length + " vehicle(s) but none matched config.vehicles' vin: " +
+          "values -- account has: " +
+          result.vehicles.map((v) => vehicleIdentity(v) || "(no VIN or id)").join(", ") +
+          ". For a Kia USA account, set vin: to the vehicle's own id shown here, not its literal VIN.");
+      }
 
       // Retire any vehicle that WAS configured on a previous fetch but no
       // longer is (removed from vehicles: since then) -- otherwise its
@@ -750,8 +790,7 @@ module.exports = NodeHelper.create({
     if (!ex) return;
     const flat = flatten(payload.vehicle || {});
     const meta = payload._meta || {};
-    const vin =
-      (payload.vehicle && (payload.vehicle.VIN || payload.vehicle.vin)) || null;
+    const vin = vehicleIdentity(payload.vehicle) || null;
     const tags = Object.assign(vin ? { vin } : {}, ex.tags || {});
 
     if (ex.influx && ex.influx.url && ex.influx.bucket) {
@@ -1207,9 +1246,7 @@ module.exports = NodeHelper.create({
     // configured, so its topics are unchanged from before this feature
     // existed.
     const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
-    const vin = rotating
-      ? String((payload.vehicle && (payload.vehicle.VIN || payload.vehicle.vin)) || "").toUpperCase()
-      : "";
+    const vin = rotating ? vehicleIdentity(payload.vehicle) : "";
     const basePrefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
     const prefix = vin ? basePrefix + "/" + vin : basePrefix;
     const retain = m.retain !== false;
