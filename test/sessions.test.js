@@ -246,5 +246,6 @@ assert.strictEqual(S.isEv9("EV99"), false);
 assert.strictEqual(S.isEv9("EV9"), true);
 assert.strictEqual(S.isEv9("EV9 GT-Line"), true, "a real EV9 trim name must still match");
 assert.strictEqual(S.isEv9("ev9x"), true, "a non-digit suffix is still presumed an EV9 variant");
+assert.strictEqual(S.isEv9("EV-9"), true, "a hyphenated model string must also match -- Kia's own API-reported model isn't guaranteed one exact format");
 
 console.log("all sessions tests passed");

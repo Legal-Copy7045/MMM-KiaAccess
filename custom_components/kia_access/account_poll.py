@@ -54,6 +54,21 @@ def account_hash_for(entry) -> str:
     )
 
 
+def _wants_live_wakeup(job: dict) -> bool:
+    """Same condition kia_client.fetch() itself uses to decide whether to
+    wake the car (vs. just reading Kia's server-side cache) -- mirrored
+    here so the dedup cache below can recognise it too. Every real caller
+    (coordinator.py's _job(), config_flow.py's discovery job) always sets
+    "refresh" explicitly, so this default only matters for a hypothetical
+    caller that doesn't -- unlike kia_client.fetch()'s own "assume yes"
+    default (right for a single direct API call), the SAFE default for a
+    shared cache is "don't force", so an unset field never accidentally
+    bypasses the dedup window."""
+    raw_timeout = job.get("forceRefreshTimeout", 45)
+    timeout = float(raw_timeout) if raw_timeout is not None else 45.0
+    return bool(job.get("refresh", False)) and timeout > 0
+
+
 class AccountPoller:
     """One per Kia account, shared via hass.data[ACCOUNTS_KEY][account_hash]
     (see __init__.py) by every KiaAccessCoordinator for that account,
@@ -87,13 +102,23 @@ class AccountPoller:
         vehicle on the account in one call. Returns kia_client.fetch()'s
         normal {"ok", "vehicles": [...], "meta": {...}} shape, or re-raises
         whatever it raised -- either way, reused across every caller within
-        DEDUP_WINDOW_SEC of the last real attempt (success OR failure)."""
+        DEDUP_WINDOW_SEC of the last real attempt (success OR failure) --
+        UNLESS this job explicitly wants a live car wake-up (a manual
+        "Refresh now", or "poll car directly" on): the dedup cache exists to
+        collapse redundant server-cache-only reads from sibling coordinators
+        waking up in the same tick, not to silently hand a genuinely
+        requested live reading back as a few-seconds-stale cached one. A
+        forced call always does its own real fetch, but its result is still
+        cached afterward for any ordinary (non-forced) caller that follows
+        within the window."""
         async with self._lock:
             now = time.time()
-            if self._last_payload is not None and (now - self._last_fetched_at) < DEDUP_WINDOW_SEC:
-                return self._last_payload
-            if self._last_error is not None and (now - self._last_error_at) < DEDUP_WINDOW_SEC:
-                raise self._last_error
+            forced = _wants_live_wakeup(job)
+            if not forced:
+                if self._last_payload is not None and (now - self._last_fetched_at) < DEDUP_WINDOW_SEC:
+                    return self._last_payload
+                if self._last_error is not None and (now - self._last_error_at) < DEDUP_WINDOW_SEC:
+                    raise self._last_error
             call_job = dict(job)
             call_job["vin"] = ""
             call_job["allVehicles"] = True

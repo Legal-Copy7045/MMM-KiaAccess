@@ -152,6 +152,40 @@ assert _calls["n"] == 2 and r3["meta"]["call"] == 2, (
     "a call outside the dedup window must trigger a real fetch"
 )
 
+# an explicit live-wakeup request (a manual "Refresh now", or "poll car
+# directly" on) must ALWAYS do a real fetch, even inside the dedup window --
+# an adversarial-review finding: the dedup cache used to be blind to job
+# content entirely, so a user's explicit "Refresh now" landing within
+# DEDUP_WINDOW_SEC of a sibling coordinator's ordinary (cache-only) poll
+# would silently hand back that few-seconds-stale cached payload instead of
+# actually waking the car -- exactly what the user asked NOT to happen.
+assert (asyncio.run(poller.async_fetch(job)))["meta"]["call"] == 2, (
+    "sanity: still inside the dedup window for the ordinary case"
+)
+assert _calls["n"] == 2
+live_job = {"vin": "VIN1", "allVehicles": False, "username": "u",
+            "refresh": True, "forceRefreshTimeout": 45}
+r_live = asyncio.run(poller.async_fetch(live_job))
+assert _calls["n"] == 3 and r_live["meta"]["call"] == 3, (
+    "a live-wakeup request must bypass the dedup cache and do a real fetch, "
+    f"even inside the window -- got {_calls['n']} calls"
+)
+# its result is still cached for whoever calls next (an ordinary poll right
+# after a manual refresh shouldn't ALSO trigger its own real fetch)
+r_after_live = asyncio.run(poller.async_fetch(job))
+assert _calls["n"] == 3 and r_after_live is r_live, (
+    "a forced fetch's result must still populate the cache for later ordinary callers"
+)
+# refresh: True but forceRefreshTimeout: 0 is NOT a live-wakeup request
+# (matches kia_client.fetch()'s own "timeout > 0" gate) -- must still hit
+# the cache
+no_timeout_job = {"vin": "VIN1", "allVehicles": False, "username": "u",
+                   "refresh": True, "forceRefreshTimeout": 0}
+r_no_timeout = asyncio.run(poller.async_fetch(no_timeout_job))
+assert _calls["n"] == 3 and r_no_timeout is r_live, (
+    "refresh=True with forceRefreshTimeout=0 must still be treated as cache-only"
+)
+
 # a FAILED fetch must also be deduped within the same window -- a sibling
 # coordinator's call while the account is broken must reuse that failure
 # instead of independently retrying the same broken login, which is what

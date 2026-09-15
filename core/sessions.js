@@ -37,11 +37,17 @@
   // capacity genuinely unknown so the kWh/cost fields degrade to null,
   // same as any other missing-data case elsewhere in this module.
   function isEv9(model) {
+    // [\s-]* tolerates a space, hyphen, or nothing between "ev" and "9" --
+    // Kia's own API-reported model string isn't guaranteed to format it
+    // identically across regions/brands, so this is a best-effort
+    // heuristic, not a certainty; opts.capacityKwh (checked first, in
+    // resolveCap() below) is the reliable way to get a correct pack size
+    // for ANY vehicle, EV9 included, if this string match ever misses.
     // (?!\d) -- a trailing digit means this is some OTHER model whose name
     // merely starts with "ev9" (a hypothetical future "EV90"/"EV99"), not
     // an EV9 trim/variant (real examples like "EV9 GT-Line" still match
     // fine, since a space isn't a digit).
-    return typeof model === "string" && /ev\s*9(?!\d)/i.test(model);
+    return typeof model === "string" && /ev[\s-]*9(?!\d)/i.test(model);
   }
   function resolveCap(opts) {
     var cap = num(opts.capacityKwh);

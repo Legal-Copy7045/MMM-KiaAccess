@@ -37,8 +37,8 @@ def _round(n, dp=2):
 # stand in as a generic "capacity unknown" guess for some other model, or
 # that model's own energy/cost/efficiency fields would silently be computed
 # off the wrong car's battery size.
-# see sessions.py's mirror for the (?!\d) reasoning
-_EV9_RE = re.compile(r"ev\s*9(?!\d)", re.IGNORECASE)
+# see sessions.py's mirror for the [\s-]*/(?!\d) reasoning
+_EV9_RE = re.compile(r"ev[\s-]*9(?!\d)", re.IGNORECASE)
 
 
 def _is_ev9(model) -> bool:
