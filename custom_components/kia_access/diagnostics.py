@@ -23,6 +23,9 @@ _REDACT = {
     "longitude",
     "geocode",
     "key",                # per-vehicle API key/uuid
+    "routing_api_key",    # TomTom key, entry.options -- live, usable if leaked
+    "geocoding_api_key",  # Geoapify key, entry.options -- ditto
+    "static_destinations",  # entry.options free text -- typically home/frequent addresses
 }
 
 
@@ -36,7 +39,13 @@ async def async_get_config_entry_diagnostics(
     return {
         "entry": {
             "data": async_redact_data(dict(entry.data), _REDACT),
-            "options": dict(entry.options),
+            # entry.options carries routing_api_key/geocoding_api_key (live,
+            # usable API keys) and static_destinations (typically home/
+            # frequent addresses) -- this was never redacted at all before,
+            # so downloading diagnostics to attach to a bug report (exactly
+            # what HA's own UI invites a user to do) leaked them in plain
+            # text into whatever's read that file.
+            "options": async_redact_data(dict(entry.options), _REDACT),
         },
         "meta": async_redact_data(dict(getattr(coordinator, "meta", {}) or {}), _REDACT),
         "last_action": getattr(coordinator, "last_action", None),
