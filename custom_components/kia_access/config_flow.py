@@ -95,7 +95,16 @@ def _discover_vehicles_for_entry(entry) -> list[dict] | None:
     }
     try:
         result = kia_client.fetch(job)
-    except Exception:  # noqa: BLE001
+    except Exception as err:  # noqa: BLE001
+        # a silent `return None` here means Configure falls back to the old
+        # free-text VIN box with NOTHING in the logs to explain why -- log
+        # it (once discovery actually fails) so that fallback is diagnosable
+        # instead of looking like the feature just isn't there
+        _LOGGER.warning(
+            "Kia Access: could not auto-discover vehicles for entry %s "
+            "(falling back to a plain VIN field in Configure): %s: %s",
+            entry.entry_id, type(err).__name__, err,
+        )
         return None
     out = []
     for v in result.get("vehicles") or []:
@@ -108,7 +117,15 @@ def _discover_vehicles_for_entry(entry) -> list[dict] | None:
             "model": str(v.get("model") or ""),
         })
     out.sort(key=lambda x: x["vin"])
-    return out or None
+    if not out:
+        _LOGGER.warning(
+            "Kia Access: vehicle discovery for entry %s succeeded but "
+            "returned 0 usable vehicles (falling back to a plain VIN field "
+            "in Configure) -- raw fetch returned %s vehicle(s)",
+            entry.entry_id, len(result.get("vehicles") or []),
+        )
+        return None
+    return out
 
 
 def _account_uid(region: str, brand: str, username: str, vin: str) -> str:
