@@ -913,7 +913,14 @@ disabled_legacy = _fake_entry(
     "disabled", "USA:KIA:user@example.com",
     {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
 )
-hass_multi = type("H", (), {"config_entries": _FakeConfigEntries([disabled_legacy])})()
+hass_multi = type("H", (), {
+    "config_entries": _FakeConfigEntries([disabled_legacy]),
+    # async_setup() now also registers a websocket command (map_keys, for
+    # kia-range-map-card to pull its API keys from entry.options instead of
+    # the dashboard YAML) -- websocket_api.async_register_command() needs a
+    # real-shaped hass.data, same as any actual HomeAssistant instance has.
+    "data": {},
+})()
 assert asyncio.run(init.async_setup(hass_multi, {})) is True
 assert disabled_legacy.unique_id == "USA:KIA:user@example.com:VIN1", (
     "async_setup() must migrate every entry it finds, not rely on that "

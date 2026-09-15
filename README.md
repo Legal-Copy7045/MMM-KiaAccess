@@ -958,9 +958,22 @@ shape per `reachRoundTrip`.
   ```yaml
   type: custom:kia-range-map-card
   height: 420
+  ```
+
+  You don't have to put a key in the dashboard at all: if you've already set
+  **Geocoding API key** / **Routing API key** (with **Drive time provider**
+  set to `tomtom`) in the integration's own **Options** — the same ones
+  `sensor.<v>_range_reach` uses — the card pulls them from there automatically
+  over an admin-only websocket call, so a real API key never has to sit in
+  Lovelace YAML. An explicit `range_map.api_key` / `range_map.tomtom_key`
+  still overrides that if you set one:
+
+  ```yaml
+  type: custom:kia-range-map-card
+  height: 420
   range_map:
-    api_key: YOUR_GEOAPIFY_KEY     # optional — styled tiles + the ≤100 km isochrone
-    tomtom_key: YOUR_TOMTOM_KEY    # optional — real road isochrone at any distance
+    api_key: YOUR_GEOAPIFY_KEY     # optional — overrides the integration's own key
+    tomtom_key: YOUR_TOMTOM_KEY    # optional — overrides the integration's own key
     style: osm-bright-grey
     mode: drive
   ```
