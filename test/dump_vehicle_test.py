@@ -185,6 +185,65 @@ try:
         pass
 finally:
     kia_client.connect = orig_connect
+
+
+# --- _select_vehicles(): must strip whitespace on both sides of the
+# comparison, matching config_flow.py's own .strip().upper() normalization
+# of the stored VIN -- a stray space either side (copy-pasted from the app,
+# or however the API happens to format it) would otherwise silently break
+# the match forever with no visible cause. ---
+class _VMWithVehicles:
+    def __init__(self, vehicles):
+        self.vehicles = {i: v for i, v in enumerate(vehicles)}
+
+
+padded_veh = _Veh(VIN=" VIN1 ")
+assert kia_client._select_vehicles(_VMWithVehicles([padded_veh]), "vin1") == [padded_veh], (
+    "a VIN with surrounding whitespace on the vehicle side must still match"
+)
+clean_veh = _Veh(VIN="VIN1")
+assert kia_client._select_vehicles(_VMWithVehicles([clean_veh]), " vin1 ") == [clean_veh], (
+    "a VIN with surrounding whitespace on the configured side must still match"
+)
+
+
+# --- fetch()'s "no matching vehicles" error must actually say something --
+# the configured VIN it looked for, and what the account currently has (or
+# that the account returned nothing at all this poll), not just a bare
+# "no matching vehicles on the account" that leaves a multi-vehicle account
+# user with nothing to go on when this fires. ---
+def _run_fetch_real_select(job, vehicles):
+    vm = _VMWithVehicles(vehicles)
+    vm.token = None
+    vm.force_refresh_all_vehicles_states = lambda: None
+    vm.update_all_vehicles_with_cached_state = lambda: None
+    orig_connect = kia_client.connect
+    kia_client.connect = lambda *a, **k: (vm, None)
+    try:
+        kia_client.fetch(job)
+        raise AssertionError("fetch() should have raised ClientError")
+    except kia_client.ClientError as e:
+        return str(e)
+    finally:
+        kia_client.connect = orig_connect
+
+
+msg = _run_fetch_real_select(
+    {"vin": "VIN3", "forceRefreshTimeout": 0},
+    [_Veh(VIN="VIN1"), _Veh(VIN="VIN2")],
+)
+assert "VIN3" in msg, f"must name the VIN it was looking for: {msg!r}"
+assert "VIN1" in msg and "VIN2" in msg, f"must list what the account actually has: {msg!r}"
+
+msg2 = _run_fetch_real_select({"vin": "VIN9", "forceRefreshTimeout": 0}, [])
+assert "VIN9" in msg2, f"must still name the configured VIN even with 0 vehicles: {msg2!r}"
+assert "0 vehicles" in msg2, f"must say the account returned nothing, not just 'no match': {msg2!r}"
+
+msg3 = _run_fetch_real_select({"forceRefreshTimeout": 0}, [])
+assert "0 vehicles" in msg3, f"no configured VIN + 0 vehicles -> must say the account returned nothing: {msg3!r}"
+assert "VIN" not in msg3, (
+    f"no configured VIN at all -> must not fabricate one to 'look for': {msg3!r}"
+)
 assert slow_vm.cached_state_read is False, (
     "must not read vm state while the background refresh thread might still be writing it"
 )

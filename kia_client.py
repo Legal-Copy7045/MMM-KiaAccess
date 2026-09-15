@@ -391,13 +391,44 @@ def connect(job, token_file=None):
 
 
 def _select_vehicles(vm, vin):
-    vin = str(vin or "").upper()
+    vin = str(vin or "").strip().upper()
     out = []
     for vehicle in vm.vehicles.values():
-        if vin and str(getattr(vehicle, "VIN", "")).upper() != vin:
+        if vin and str(getattr(vehicle, "VIN", "")).strip().upper() != vin:
             continue
         out.append(vehicle)
     return out
+
+
+def _no_match_error(vm, vin) -> "ClientError":
+    """A "no matching vehicles" ClientError that actually says something --
+    plain "no matching vehicles on the account" told a real multi-vehicle
+    account user nothing (not even whether it was a configured VIN
+    mismatch or the account genuinely returning zero vehicles that poll),
+    which is exactly why there was nothing useful to find in the logs
+    when this fired."""
+    vin = str(vin or "").strip().upper()
+    seen = sorted({str(getattr(v, "VIN", "") or "").strip().upper() for v in vm.vehicles.values()} - {""})
+    if not vin:
+        return ClientError(
+            "no matching vehicles on the account (the account API returned "
+            "0 vehicles this poll -- if this persists, check the Kia/Hyundai "
+            "app itself shows the car, and that the account has cloud/remote "
+            "access, not just Bluetooth-only connectivity)"
+        )
+    if not seen:
+        return ClientError(
+            f"no vehicle on the account matches the configured VIN {vin!r} -- "
+            "the account API returned 0 vehicles this poll (a transient gap, "
+            "or the account temporarily has no cloud-connected vehicle)"
+        )
+    return ClientError(
+        f"no vehicle on the account matches the configured VIN {vin!r} -- "
+        f"the account currently has: {', '.join(seen)}. If the car's real VIN "
+        "isn't in that list, remove and re-add the integration to pick it up "
+        "fresh; if it IS in that list, the config's stored VIN doesn't match "
+        "it (re-run Configure and re-select the vehicle)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +475,7 @@ def fetch(job, token_file=None):
 
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
-        raise ClientError("no matching vehicles on the account")
+        raise _no_match_error(vm, job.get("vin", ""))
     if not job.get("vin") and not job.get("allVehicles") and len(selected) > 1:
         # Reads used to silently fall back to "vehicle 1" here, same as the
         # control path used to before it was locked down (see run_command()).
@@ -499,7 +530,7 @@ def run_command(job, token_file=None):
     vm.update_all_vehicles_with_cached_state()
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
-        raise ClientError("no matching vehicles on the account")
+        raise _no_match_error(vm, job.get("vin", ""))
     if not job.get("vin") and len(selected) > 1:
         # Reads can reasonably default to "vehicle 1" (see fetch()) -- a
         # remote command cannot. Without an explicit VIN, `selected[0]` is
