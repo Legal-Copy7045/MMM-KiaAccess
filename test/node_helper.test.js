@@ -18,6 +18,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const loadNodeHelper = require("./require-node-helper.js");
+const exporter = require("../exporter.js");
 
 function freshHelper(cacheDir) {
   const helper = loadNodeHelper();
@@ -250,6 +251,116 @@ function tmpCacheDir() {
     assert.strictEqual(onPayloadCalls.length, 1);
     assert.strictEqual(onPayloadCalls[0].id, singleId);
   }
+}
+
+// ---- _handleBridgeClose(): Kia USA rotate mode -- KiaUvoApiUSA never
+// populates a vehicle's real VIN at all (confirmed against the installed
+// hyundai_kia_connect_api source), so a Kia USA account's vehicles come
+// back with VIN blank and only `id` populated. Before vehicleIdentity()
+// existed, rotate filtering read ONLY vehicle.VIN/vehicle.vin -- every
+// vehicle on a Kia USA multi-vehicle account computed the SAME empty
+// identity, matched nothing in config.vehicles, and got silently dropped:
+// zero onPayload() calls from an otherwise-successful account fetch, with
+// no error anywhere. This is exactly the same fallback kia_client.py's
+// _vehicle_key()/_vehicle_key_dict() already use for HA's config flow and
+// AccountPoller.select_own_vehicle() -- proven here on the Node/rotate
+// side too. ----
+{
+  const helper = freshHelper();
+  const onPayloadCalls = [];
+  helper.onPayload = (id, config, payload) => onPayloadCalls.push({ id, payload });
+  helper._retireVehicle = () => {};
+
+  // config.vehicles' vin: is set to each car's own `id` (what a Kia USA
+  // user has to configure, per node_helper.js's vehicleIdentity() docstring
+  // and the README) -- neither vehicle in the account response below has
+  // a VIN at all.
+  const usaConfig = {
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "ABC123" }, { vin: "XYZ789" }]
+  };
+  const usaAcctId = helper.identifierFor({ ...usaConfig, vin: "" });
+  const usaStdout = JSON.stringify({
+    ok: true,
+    vehicles: [
+      { id: "ABC123", VIN: "", model: "EV9", ev_battery_percentage: 55 },
+      { id: "XYZ789", VIN: "", model: "EV9", ev_battery_percentage: 70 }
+    ]
+  });
+  helper._handleBridgeClose(usaAcctId, usaConfig, true, 0, usaStdout, "", () => {
+    throw new Error("must not report a failure for a clean Kia USA multi-vehicle result");
+  });
+  assert.strictEqual(onPayloadCalls.length, 2, (
+    "both Kia USA vehicles (VIN blank, id-only) must reach onPayload() -- not silently dropped"
+  ));
+  const usaSubIds = onPayloadCalls.map((c) => c.id).sort();
+  assert.deepStrictEqual(usaSubIds, [
+    "USA|KIA|u@e.com|ABC123", "USA|KIA|u@e.com|XYZ789"
+  ], "each Kia USA vehicle must still get its own separate subId (cache/MQTT/Influx/Prometheus identity)");
+
+  // mixed case: one vehicle reports a real VIN, the other (Kia USA-style)
+  // only an id -- exactly where identity normalisation tends to regress by
+  // working for the "easy" vehicle and silently dropping the other
+  onPayloadCalls.length = 0;
+  const mixedConfig = {
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "REALVIN1" }, { vin: "ONLYID2" }]
+  };
+  const mixedAcctId = helper.identifierFor({ ...mixedConfig, vin: "" });
+  const mixedStdout = JSON.stringify({
+    ok: true,
+    vehicles: [
+      { id: "internal-1", VIN: "REALVIN1", model: "EV6" },
+      { id: "ONLYID2", VIN: "", model: "EV9" }
+    ]
+  });
+  helper._handleBridgeClose(mixedAcctId, mixedConfig, true, 0, mixedStdout, "", () => {
+    throw new Error("must not report a failure for a clean mixed VIN/id result");
+  });
+  const mixedSubIds = onPayloadCalls.map((c) => c.id).sort();
+  assert.deepStrictEqual(mixedSubIds, [
+    "USA|KIA|u@e.com|ONLYID2", "USA|KIA|u@e.com|REALVIN1"
+  ], "a real-VIN vehicle and an id-only vehicle must BOTH reach onPayload(), each under its own identity");
+}
+
+// ---- runExporters()/publishMqtt(): the same VIN-or-id fallback must apply
+// to the Influx/Prometheus tag and the rotate-mode MQTT topic segment, not
+// just onPayload() dispatch -- otherwise a Kia USA rotate account would
+// still have every vehicle collide onto the SAME MQTT topics (the exact
+// scenario publishMqtt()'s own comment warns about) even after dispatch
+// itself was fixed. ----
+{
+  const helper = freshHelper();
+  const rotateConfig = {
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "ABC123" }],
+    mqtt: { enabled: true, url: "mqtt://broker" }
+  };
+  let published = null;
+  helper.mqttClient = () => ({
+    publish: (topic) => { published = published || topic; }
+  });
+  helper.publishMqtt(rotateConfig, { vehicle: { id: "ABC123", VIN: "" }, _meta: {} });
+  assert.ok(published && published.indexOf("/ABC123/") !== -1, (
+    "a Kia USA vehicle (VIN blank) in rotate mode must still get its own " +
+    "id-scoped MQTT topic segment, not collide onto the un-scoped base topic: " + published
+  ));
+
+  const exporterConfig = {
+    exporter: { influx: { url: "http://influx", bucket: "b" } }
+  };
+  let capturedTags = null;
+  const origPushInflux = exporter.pushInflux;
+  exporter.pushInflux = (cfg) => { capturedTags = cfg.tags; return Promise.resolve(204); };
+  try {
+    helper.runExporters(exporterConfig, { vehicle: { id: "ABC123", VIN: "" }, _meta: {} });
+  } finally {
+    exporter.pushInflux = origPushInflux;
+  }
+  assert.strictEqual(capturedTags && capturedTags.vin, "ABC123", (
+    "a Kia USA vehicle's Influx tag must fall back to its id, not be silently omitted: " +
+    JSON.stringify(capturedTags)
+  ));
 }
 
 // ---- _handleBridgeClose(): vehicle retirement (both the config-removal

@@ -503,6 +503,12 @@ cache when the data actually changed, so a fast rate costs almost nothing.
     //   { vin: "KND..." }            // header optional -- falls back to the car's own name
     // ],
     // vehicleRotateInterval: 20 * 1000,  // how long each vehicle stays on screen
+    // Kia USA accounts: the account's own API never reports a car's real
+    // VIN at all (a hyundai_kia_connect_api limitation, not this module's),
+    // so `vin:` here must be the vehicle's own internal id instead -- if a
+    // configured vehicle never shows up, check the log for a warning
+    // naming exactly what each of the account's vehicles' id/VIN actually
+    // is, and use that value.
 
     // --- runtime ---
     pythonBin: "python3",    // command that runs kia_bridge.py
