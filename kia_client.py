@@ -496,11 +496,45 @@ def connect(job, token_file=None):
     return vm, enrolled_at
 
 
+def _vehicle_key(vehicle) -> str:
+    """The stable per-vehicle identifier used for VIN-based selection/config:
+    the real VIN when the connected region's API implementation actually
+    reports one, falling back to the vehicle's own account-issued `id`
+    (vehicleIdentifier) when it doesn't.
+
+    As of the installed hyundai_kia_connect_api version (checked against its
+    latest upstream source too -- this isn't fixed even on main),
+    KiaUvoApiUSA.get_vehicles() -- Kia brand, USA region -- never sets
+    Vehicle.VIN at all; every other region/brand implementation
+    (KiaUvoApiCA/CN/IN, GspaApiEU, HyundaiBlueLinkApiUSA/BR, ApiImplType1)
+    does. A single-vehicle account never notices (nothing filters on VIN
+    when it's blank), but VIN-based vehicle SELECTION -- the "choose a
+    vehicle" step, the Configure VIN picker, kia_client.fetch()'s own VIN
+    matching -- silently matched nothing for every Kia USA multi-vehicle
+    account before this fallback existed. `.id` is just as stable/unique
+    per vehicle for this purpose (picking ONE vehicle out of an account),
+    even though it isn't literally the car's VIN."""
+    vin = str(getattr(vehicle, "VIN", "") or "").strip().upper()
+    if vin:
+        return vin
+    return str(getattr(vehicle, "id", "") or "").strip().upper()
+
+
+def _vehicle_key_dict(v: dict) -> str:
+    """Same as _vehicle_key() but for an already-dumped vehicle dict (e.g.
+    dump_vehicle()'s output, or fetch()'s "vehicles" list) rather than a
+    live Vehicle object."""
+    vin = str(v.get("VIN") or "").strip().upper()
+    if vin:
+        return vin
+    return str(v.get("id") or "").strip().upper()
+
+
 def _select_vehicles(vm, vin):
     vin = str(vin or "").strip().upper()
     out = []
     for vehicle in vm.vehicles.values():
-        if vin and str(getattr(vehicle, "VIN", "")).strip().upper() != vin:
+        if vin and _vehicle_key(vehicle) != vin:
             continue
         out.append(vehicle)
     return out
@@ -514,7 +548,7 @@ def _no_match_error(vm, vin) -> "ClientError":
     which is exactly why there was nothing useful to find in the logs
     when this fired."""
     vin = str(vin or "").strip().upper()
-    seen = sorted({str(getattr(v, "VIN", "") or "").strip().upper() for v in vm.vehicles.values()} - {""})
+    seen = sorted({_vehicle_key(v) for v in vm.vehicles.values()} - {""})
     if not vin:
         return ClientError(
             "no matching vehicles on the account (the account API returned "

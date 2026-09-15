@@ -1298,6 +1298,14 @@ reporting its last-known numbers forever.
   account does, not N times as much, which matters directly for the
   auth-failure cooldown above: less traffic is less exposure to the kind of
   repeated-failure pattern that trips it.
+- **VIN fallback for Kia USA.** `hyundai_kia_connect_api`'s Kia-brand/USA
+  implementation never reports a vehicle's real VIN (every other
+  region/brand does) — vehicle selection (the "choose a vehicle" step, the
+  Configure VIN picker, and every internal VIN match) falls back to the
+  vehicle's own account-issued id in that case, so a Kia USA multi-vehicle
+  account still works. The "VIN" shown in these pickers for a Kia USA
+  account is therefore this id, not the car's literal VIN — cosmetic only,
+  it still uniquely and stably identifies the vehicle.
 
 ## OTP expiry
 
