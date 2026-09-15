@@ -90,6 +90,34 @@ function mockFetch(routes) {
     /no Kia Access summary entity/
   );
 
+  // ambiguous auto-discovery: more than one Kia Access account/vehicle on
+  // this HA instance and no homeassistant.entity set -- must refuse to
+  // silently guess (picking the wrong one would mean showing account A's
+  // location/battery/alerts under a MagicMirror instance meant for account
+  // B), not just take whichever entity happens to be first in /api/states.
+  global.fetch = mockFetch({
+    "/api/states": [
+      { entity_id: "sensor.account_a_status", attributes: { kia_access_raw: true } },
+      { entity_id: "sensor.account_b_status", attributes: { kia_access_raw: true } }
+    ]
+  });
+  await assert.rejects(
+    () => fetchFromHA({ url: "http://ha.local:8123", token: "T" }),
+    /multiple Kia Access vehicles found.*sensor\.account_a_status.*sensor\.account_b_status/,
+    "must name every ambiguous candidate and point at homeassistant.entity, not silently pick one"
+  );
+  // ...but an explicit homeassistant.entity still resolves cleanly even
+  // when the account is ambiguous -- the whole point of the setting
+  global.fetch = mockFetch({
+    "/api/states/sensor.account_b_status": {
+      attributes: { kia_access_raw: true, ev_battery_percentage: 77 }
+    }
+  });
+  const outAmbiguousButExplicit = await fetchFromHA({
+    url: "http://ha.local:8123", token: "T", entity: "sensor.account_b_status"
+  });
+  assert.strictEqual(outAmbiguousButExplicit.vehicle.ev_battery_percentage, 77);
+
   // ---- HaLiveClient: drive a fake WebSocket through the handshake ----
   const sent = [];
   let fakeWs;

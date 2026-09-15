@@ -58,15 +58,28 @@ async function haGet(base, token, urlPath) {
 async function findSummaryEntity(base, token, configured) {
   if (configured) return configured;
   const states = await haGet(base, token, "/api/states");
-  const hit = states.find(
+  const hits = states.filter(
     (s) => s.attributes && s.attributes.kia_access_raw === true
   );
-  if (!hit) {
+  if (!hits.length) {
     throw new Error(
       "no Kia Access summary entity found in Home Assistant — set homeassistant.entity"
     );
   }
-  return hit.entity_id;
+  if (hits.length > 1) {
+    // More than one Kia Access account/vehicle on this HA instance -- nothing
+    // here ties an entity to the account this module is actually meant to be
+    // reading (no token/VIN/entry-id correlation is possible from the REST
+    // API alone), so silently picking the first one risks showing an
+    // entirely different car's location/battery/alerts under the wrong
+    // MagicMirror instance. Require an explicit pick instead.
+    throw new Error(
+      "multiple Kia Access vehicles found in Home Assistant (" +
+        hits.map((h) => h.entity_id).join(", ") +
+        ") — set homeassistant.entity to pick one"
+    );
+  }
+  return hits[0].entity_id;
 }
 
 /** turn an HA state object ({state, attributes, last_changed}) into our payload */

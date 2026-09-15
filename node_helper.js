@@ -68,7 +68,11 @@ module.exports = NodeHelper.create({
     // instead of writing into this repo's real cache/ folder.
     this.cacheDir = CACHE_DIR;
     try {
-      fs.mkdirSync(this.cacheDir, { recursive: true });
+      fs.mkdirSync(this.cacheDir, { recursive: true, mode: 0o700 });
+      // mkdirSync's `mode` only applies to a directory it actually creates --
+      // an existing cache/ from before this was added (or created under a
+      // permissive umask) needs its own chmod to actually get locked down.
+      fs.chmodSync(this.cacheDir, 0o700);
     } catch (e) {
       /* ignore */
     }
@@ -185,6 +189,13 @@ module.exports = NodeHelper.create({
     var s = {
       failStreak: 0, reqTimes: [], lastGood: null, history: [],
       sessions: [], openSession: null, rangeMap: null,
+      // HA's driving-times data (mode C only) -- emitData() keeps the last
+      // known value when a poll doesn't carry a fresh one, but that only
+      // helps within one process lifetime unless it's also round-tripped
+      // through the cache file like rangeMap/lastParked/etc: without this, a
+      // MagicMirror restart would silently drop it back to null and the
+      // "Driving times" widget would sit empty until HA supplied it again.
+      rangeReach: null,
       trips: [], openTrip: null,
       // moved-while-parked (tow/theft) anchor -- lives on the FRONTEND
       // (MMM-KiaAccess.js's processConditions()), not computed here, but
@@ -204,6 +215,7 @@ module.exports = NodeHelper.create({
         s.sessions = Array.isArray(disk.sessions) ? disk.sessions : [];
         s.openSession = disk.openSession || null;
         s.rangeMap = disk.rangeMap || null;
+        s.rangeReach = disk.rangeReach || null;
         s.trips = Array.isArray(disk.trips) ? disk.trips : [];
         s.openTrip = disk.openTrip || null;
         s.lastParked = disk.lastParked || null;
@@ -234,10 +246,16 @@ module.exports = NodeHelper.create({
           _kiaAccessIdHash: this._idHash(id),
           lastGood: s.lastGood, history: s.history,
           sessions: s.sessions, openSession: s.openSession,
-          rangeMap: s.rangeMap,
+          rangeMap: s.rangeMap, rangeReach: s.rangeReach,
           trips: s.trips, openTrip: s.openTrip,
           lastParked: s.lastParked
-        })
+        }),
+        // owner-only -- this file carries the vehicle's raw API dump
+        // (GPS/location history, VIN, odometer), the same class of
+        // personal data token.json's credentials get chmod'd for; on a
+        // shared/multi-user host the default umask would otherwise leave
+        // it group/world-readable.
+        { mode: 0o600 }
       );
       fs.renameSync(tmp, file);
     } catch (e) {
@@ -1004,8 +1022,15 @@ module.exports = NodeHelper.create({
     // (username, or the URL if anonymous) so it's stable across restarts
     // and never collides between two genuinely different accounts, even
     // sharing one topicPrefix.
-    const acctSeg = String(m.username || m.url || "account")
-      .toLowerCase().replace(/[^a-z0-9_.@-]/g, "_");
+    // Human-readable for recognisability, but that alone can collide: two
+    // DIFFERENT usernames/URLs can sanitise to the identical string (e.g.
+    // "foo/bar@x" and "foo_bar@x" both become "foo_bar@x" once "/" is
+    // stripped). A short hash of the actual (username, url) pair -- the same
+    // identity components `key` above is keyed on, password aside -- makes
+    // the segment collision-proof regardless of what the readable part does.
+    const acctReadable = String(m.username || m.url || "account")
+      .toLowerCase().replace(/[^a-z0-9_.@-]/g, "_").slice(0, 40);
+    const acctSeg = acctReadable + "-" + this._idHash((m.username || "") + "|" + (m.url || "")).slice(0, 8);
     const statusTopic = prefix + "/status/" + acctSeg;
 
     const owner = this.mqttPrefixOwners[prefix];
