@@ -210,5 +210,6 @@ assert S._is_ev9("EV99") is False
 assert S._is_ev9("EV9") is True
 assert S._is_ev9("EV9 GT-Line") is True, "a real EV9 trim name must still match"
 assert S._is_ev9("ev9x") is True, "a non-digit suffix is still presumed an EV9 variant"
+assert S._is_ev9("EV-9") is True, "a hyphenated model string must also match -- Kia's own API-reported model isn't guaranteed one exact format"
 
 print("all sessions tests passed")

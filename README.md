@@ -1305,8 +1305,15 @@ reporting its last-known numbers forever.
   instead of silently being counted as "home"; (2) the EV9's 99.8kWh usable
   pack size is no longer used as a generic capacity guess for a vehicle
   whose own capacity isn't configured or reported — it only applies when
-  the vehicle's own model actually looks like an EV9, so another model's
-  kWh/cost figures are never silently computed off the wrong battery size;
+  the vehicle's own model actually looks like an EV9 (a string match on
+  Kia's own API-reported model name — a best-effort heuristic, not a
+  certainty, since that string isn't guaranteed to format identically
+  across regions/brands), so another model's kWh/cost figures are never
+  silently computed off the wrong battery size. If your EV9's own model
+  string ever ISN'T recognised (charge sessions stop showing a kWh figure),
+  **Configure → Usable battery capacity kWh** set to `99.8` is the reliable
+  fallback for any vehicle, EV9 or not — it's always checked first, before
+  any model guessing;
   (3) `core/analytics.js`'s monthly efficiency trend now buckets by UTC,
   matching `analytics.py`, which already did — previously a trip near a
   month boundary could land in a different month in the MagicMirror

@@ -17,11 +17,17 @@ MIN_KWH = 0.3
 # "capacity unknown" guess for some other model, or that model's own
 # energy/cost analytics would silently be computed off the wrong car's
 # battery size.
+# [\s-]* tolerates a space, hyphen, or nothing between "ev" and "9" (Kia's
+# own API-reported model string isn't guaranteed to format it identically
+# across regions/brands -- this is a best-effort heuristic, not a certainty;
+# capacityKwh/capacity_kwh (checked first, in resolveCap()/_resolve_cap()
+# below) is the reliable way to get a correct pack size for ANY vehicle,
+# EV9 included, if this string match ever misses).
 # (?!\d) -- a trailing digit means this is some OTHER model whose name
 # merely starts with "ev9" (a hypothetical future "EV90"/"EV99"), not an
 # EV9 trim/variant (real examples like "EV9 GT-Line" still match fine,
 # since a space isn't a digit).
-_EV9_RE = re.compile(r"ev\s*9(?!\d)", re.IGNORECASE)
+_EV9_RE = re.compile(r"ev[\s-]*9(?!\d)", re.IGNORECASE)
 
 
 def _is_ev9(model) -> bool:
