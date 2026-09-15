@@ -365,8 +365,43 @@
     setConfig(config) {
       this._config = config || {};
       this._sig = null;
+      // range_map.api_key/tomtom_key sourced from the integration's own
+      // Options (kia_access/map_keys, admin-only websocket command -- see
+      // __init__.py's _map_keys_for_entry, and kia-range-map-card.src.js's
+      // identical _maybeFetchKeys()) when this card's config didn't set
+      // them explicitly -- so a real API key doesn't have to sit in
+      // Lovelace YAML just to get the static range-map image.
+      this._fetchedKeys = null;
+      this._fetchingFor = null;
       if (!this._root) this._root = this.attachShadow({ mode: "open" });
       if (this._hass) { this.hass = this._hass; }
+    }
+
+    // Fire-and-remember: kicks off the websocket fetch at most once per
+    // entry_id, and only when range_map itself is configured but didn't
+    // already supply a key (an explicit api_key always wins, no fetch
+    // needed). Re-renders once resolved so the map upgrades from nothing/a
+    // circle without needing a page reload.
+    _maybeFetchMapKeys() {
+      var cfg = this._config.range_map;
+      if (!cfg || cfg.api_key) return; // no range map configured, or config already has a key
+      if (!this._entryId || !this._hass || !this._hass.connection) return;
+      if (this._fetchedKeys !== null || this._fetchingFor === this._entryId) return;
+      var self0 = this;
+      var entryId = this._entryId;
+      this._fetchingFor = entryId;
+      this._hass.connection.sendMessagePromise({ type: "kia_access/map_keys", entry_id: entryId })
+        .then(function (res) {
+          if (self0._entryId !== entryId) return; // vehicle switched mid-flight
+          self0._fetchedKeys = res || {};
+          self0._sig = null; // force _render() to re-run _rangeInputs()/_fetchRangeMap()
+          self0._render();
+        })
+        .catch(function (e) {
+          if (self0._entryId !== entryId) return;
+          console.warn("kia-access-card: could not fetch map keys from the integration", e);
+          self0._fetchedKeys = {};
+        });
     }
 
     getCardSize() { return 8; }
@@ -485,8 +520,24 @@
       var s = loadRm(); s.mode = this._rmModeCache; saveRm(s);
       this._render();
     }
+    // The card config's own range_map.api_key always wins; otherwise fall
+    // back to whatever the integration's Options had (see
+    // _maybeFetchMapKeys() -- still null on the very first render, before
+    // that websocket call resolves).
+    _mapApiKey() {
+      var cfg = this._config.range_map;
+      if (!cfg) return null;
+      return cfg.api_key || (this._fetchedKeys && this._fetchedKeys.api_key) || null;
+    }
+    _mapTomtomKey() {
+      var cfg = this._config.range_map;
+      if (!cfg) return null;
+      return cfg.tomtom_key || (this._fetchedKeys && this._fetchedKeys.tomtom_key) || null;
+    }
     _rangeInputs(flat) {
-      if (!RNG || !(this._config.range_map || {}).api_key) return null;
+      if (!this._config.range_map) return null;
+      this._maybeFetchMapKeys();
+      if (!RNG || !this._mapApiKey()) return null;
       var lat = Number(flat["vehicle.location_latitude"]);
       var lon = Number(flat["vehicle.location_longitude"]);
       var rk = Number(flat["vehicle.ev_driving_range"]);
@@ -503,7 +554,9 @@
     _fetchRangeMap(inp, hass) {
       var self0 = this;
       var cfg = this._config.range_map || {};
-      if (!cfg.api_key || !ISO || !RNG || !inp || typeof fetch !== "function") return;
+      var apiKey = this._mapApiKey();
+      var tomtomKey = this._mapTomtomKey();
+      if (!apiKey || !ISO || !RNG || !inp || typeof fetch !== "function") return;
       var key = ISO.cacheKey(inp.lat, inp.lon, [inp.oneWay, inp.round]);
       if (this._rm && this._rm.key === key) return;
       var cache = loadRm();
@@ -521,7 +574,7 @@
         var circle = function () { return { ring: RNG.circleRing(inp.lat, inp.lon, km), approx: true }; };
         var geo = function () {
           if (!ISO.pastMax(km)) {
-            return fetch(ISO.isoUrl({ apiKey: cfg.api_key, lat: inp.lat, lon: inp.lon, rangesKm: [km], mode: mode }))
+            return fetch(ISO.isoUrl({ apiKey: apiKey, lat: inp.lat, lon: inp.lon, rangesKm: [km], mode: mode }))
               .then(function (r) { if (!r.ok) throw 0; return r.json(); })
               .then(function (j) {
                 var p = ISO.parseIso(j);
@@ -532,8 +585,8 @@
           }
           return Promise.resolve(circle());
         };
-        if (cfg.tomtom_key) {
-          return fetch(ISO.tomtomUrl({ apiKey: cfg.tomtom_key, lat: inp.lat, lon: inp.lon, distanceKm: km, mode: mode }))
+        if (tomtomKey) {
+          return fetch(ISO.tomtomUrl({ apiKey: tomtomKey, lat: inp.lat, lon: inp.lon, distanceKm: km, mode: mode }))
             .then(function (r) { if (!r.ok) throw 0; return r.json(); })
             .then(function (j) {
               var ring = ISO.parseTomtom(j);
@@ -563,7 +616,7 @@
         );
         function smap(ring) {
           return ring && ISO.staticMapUrl({
-            apiKey: cfg.api_key,
+            apiKey: apiKey,
             width: Number(cfg.width) || 600,
             height: Number(cfg.height) || 340,
             style: cfg.style || "osm-bright-grey",
