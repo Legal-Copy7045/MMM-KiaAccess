@@ -419,6 +419,47 @@ function tmpCacheDir() {
   assert.deepStrictEqual(retired, [], "reappearing must reset the miss streak, not just decrement it");
 }
 
+// ---- _retireRemovedFromConfig(): the config-removal retirement diff must
+// run unconditionally -- an adversarial-review finding: retirement used to
+// live ONLY inside _handleBridgeClose's success branch, so a vehicle
+// removed from config.vehicles while every fetch kept failing (bad
+// credentials, a cooldown, an outage) stayed "online"/reporting stale
+// numbers in MQTT/Prometheus for as long as the fetch kept failing --
+// backwards, since the config change itself needs no account data to
+// detect. handleFetch() now calls this at the very top, before any fetch
+// is even attempted; exercised directly here (not via handleFetch(), which
+// would need a real subprocess) to prove it's independent of fetch outcome
+// by construction, not just "still passes on the success path". ----
+{
+  const helper = freshHelper();
+  const retired = [];
+  helper._retireVehicle = (config, vin) => retired.push(vin);
+
+  const config = {
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  };
+  const acctId = helper.identifierFor({ ...config, vin: "" });
+
+  // establish rotateVins -- no fetch involved at all
+  helper._retireRemovedFromConfig(acctId, config);
+  assert.deepStrictEqual(retired, []);
+
+  // VIN_B removed from config -- must retire immediately, with NO fetch
+  // (successful or otherwise) ever having happened for this call
+  const configWithoutB = { ...config, vehicles: [{ vin: "VIN_A" }] };
+  helper._retireRemovedFromConfig(acctId, configWithoutB);
+  assert.deepStrictEqual(retired, ["VIN_B"], (
+    "removing a vehicle from config must retire it even with zero successful fetches -- " +
+    "this diff only needs config.vehicles, never account data"
+  ));
+
+  // a non-rotating config (no vehicles: list) must be a no-op, not throw
+  retired.length = 0;
+  helper._retireRemovedFromConfig(acctId, { region: "USA", brand: "KIA", username: "u@e.com" });
+  assert.deepStrictEqual(retired, []);
+}
+
 // ---- _retireVehicle(): MQTT offline publish + Prometheus snapshot removal ----
 {
   const helper = freshHelper();

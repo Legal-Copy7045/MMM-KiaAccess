@@ -1453,7 +1453,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         def _startup_allows(level: str) -> bool:
             return startup_mode is True or (startup_mode == "critical" and level == "critical")
 
-        vin = self.vehicle.get("VIN")
+        # kia_client._vehicle_key_dict()'s VIN-or-id fallback -- see its
+        # docstring: Kia USA never reports a real VIN at all, so a bare
+        # self.vehicle.get("VIN") was always None for those accounts,
+        # silently breaking any automation (e.g. a multi-car alert_to_phone
+        # routing setup) that filters/routes kia_access_alert events by
+        # event.data.vin.
+        vin = kia_client._vehicle_key_dict(self.vehicle) or None  # noqa: SLF001
         for c in res["conditions"]:
             reason = c["reason"]
             was = self._prev_cond.get(reason)
