@@ -430,6 +430,98 @@ function tmpCacheDir() {
   ));
 }
 
+// ---- mqttClient(): the LWT topic must be exposed on the client (as
+// _kiaStatusTopic) so publishMqtt() can hand it to ha-discovery.js -- a
+// hostile-audit finding: HA discovery previously pointed availability_topic
+// at a topic with no real MQTT Last-Will, so a vehicle stayed "online" in
+// HA forever after an ungraceful process death. ----
+{
+  const helper = freshHelper();
+  const client = helper.mqttClient({ url: "mqtt://127.0.0.1:1", username: "a@b.com", topicPrefix: "kia" });
+  assert.strictEqual(client._kiaStatusTopic, client.options.will.topic, (
+    "_kiaStatusTopic must be exactly the connection's real LWT-backed topic"
+  ));
+  Object.values(helper.mqttClients).forEach((c) => { if (c && c.end) c.end(true); });
+}
+
+// ---- publishMqtt(): discovery must be given BOTH the connection's LWT
+// topic and (in rotate mode) the per-vehicle status topic, so HA's
+// availability actually reflects an ungraceful process death -- not just
+// the best-effort, non-LWT-backed per-VIN "online" publish. ----
+{
+  const helper = freshHelper();
+  const haDiscovery = require("../core/ha-discovery.js");
+  const calls = [];
+  const origPublish = haDiscovery.publish;
+  haDiscovery.publish = (client, opts) => calls.push(opts);
+  try {
+    const rotateConfig = {
+      vehicles: [{ vin: "VIN1" }],
+      mqtt: { enabled: true, url: "mqtt://127.0.0.1:1", topicPrefix: "kia", homeAssistant: { enabled: true } }
+    };
+    helper.publishMqtt(rotateConfig, { vehicle: { VIN: "VIN1" }, _meta: {} });
+    assert.strictEqual(calls.length, 1);
+    const client = helper.mqttClients[Object.keys(helper.mqttClients)[0]];
+    assert.strictEqual(calls[0].lwtTopic, client._kiaStatusTopic);
+    assert.strictEqual(calls[0].vehicleStatusTopic, "kia/VIN1/status", (
+      "rotate mode must pass the per-VIN status topic alongside the LWT topic"
+    ));
+
+    calls.length = 0;
+    const singleConfig = {
+      mqtt: { enabled: true, url: "mqtt://127.0.0.1:2", topicPrefix: "kia2", homeAssistant: { enabled: true } }
+    };
+    helper.publishMqtt(singleConfig, { vehicle: { VIN: "VIN9" }, _meta: {} });
+    assert.strictEqual(calls[0].vehicleStatusTopic, null, (
+      "non-rotating mode has no separate per-vehicle retirement concept -- must pass null, " +
+      "relying on the LWT topic alone"
+    ));
+  } finally {
+    haDiscovery.publish = origPublish;
+    Object.values(helper.mqttClients).forEach((c) => { if (c && c.end) c.end(true); });
+  }
+}
+
+// ---- onPayload(): a poll where ONLY rangeReach changed (no vehicle
+// telemetry change, no session/trip change) must still persist to disk --
+// a hostile-audit finding. rangeReach is a sibling of payload.vehicle, not
+// part of it, so dataChanged (computed from payload.vehicle alone) never
+// reflects a rangeReach-only update; the persist decision used to run
+// BEFORE emitData() folded the new rangeReach into s.rangeReach, so such a
+// cycle could skip persist() entirely, leaving the disk cache stale until
+// some unrelated later change also happened to trigger one. ----
+{
+  const dir = tmpCacheDir();
+  const helper = freshHelper(dir);
+  const id = helper.identifierFor({ region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1" });
+  const config = {};
+
+  const vehicle = { VIN: "VIN1", ev_battery_percentage: 80 };
+  helper.onPayload(id, config, {
+    vehicle,
+    rangeReach: { driveTimeSource: "estimate", pois: [] },
+    _meta: {}
+  });
+  const onDiskFirst = JSON.parse(fs.readFileSync(helper.cacheFile(id), "utf8"));
+  assert.deepStrictEqual(onDiskFirst.rangeReach, { driveTimeSource: "estimate", pois: [] });
+
+  // second poll: identical vehicle telemetry (no dataChanged), no session/
+  // trip activity, but a genuinely NEW rangeReach (e.g. traffic conditions
+  // changed the routed drive time) -- this alone must still persist
+  helper.onPayload(id, config, {
+    vehicle, // same object/content -> dataChanged === false
+    rangeReach: { driveTimeSource: "tomtom", pois: [{ name: "Work", km: 10 }] },
+    _meta: {}
+  });
+  const onDiskSecond = JSON.parse(fs.readFileSync(helper.cacheFile(id), "utf8"));
+  assert.deepStrictEqual(onDiskSecond.rangeReach, { driveTimeSource: "tomtom", pois: [{ name: "Work", km: 10 }] }, (
+    "a rangeReach-only change must still be written to disk, not deferred until some unrelated " +
+    "later change also happens to trigger a persist"
+  ));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // ---- maybeRangeMap(): an older, slower fetch must never overwrite a
 // newer, faster one's result with stale data -- a hostile-audit finding.
 // s.rangeMap used to be written unconditionally with no check that the

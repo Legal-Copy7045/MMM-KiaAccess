@@ -3,7 +3,24 @@
  * Publishes retained <discoveryPrefix>/<component>/<node>/<key>/config messages
  * so a curated set of entities appears in Home Assistant automatically. Each
  * entity points at the per-key state topic the node_helper already publishes
- * (`<prefix>/<key>`), with `<prefix>/status` as the availability topic.
+ * (`<prefix>/<key>`).
+ *
+ * Availability: `opts.lwtTopic` (node_helper's per-connection
+ * <prefix>/status/<account> topic, the ONLY one actually backed by an
+ * MQTT Last-Will-and-Testament -- see node_helper.js's mqttClient())
+ * combines with `opts.vehicleStatusTopic` (rotate mode's per-VIN
+ * <prefix>/<VIN>/status, refreshed every poll and explicitly published
+ * "offline" on retirement, but with no LWT of its own -- mqtt.js allows
+ * only one static LWT per connection) via HA's `availability` list +
+ * `availability_mode: "all"`: HA shows the entity available only when
+ * BOTH the underlying connection is alive AND this specific vehicle
+ * hasn't been retired. Without combining them, a vehicle stays
+ * "online" in HA forever after an ungraceful process death, since
+ * nothing publishes "offline" to its own per-VIN topic in that case --
+ * only the connection-level LWT topic flips, which nothing here was
+ * ever listening to. Falls back to a single availability_topic when
+ * only one of the two is given (e.g. non-rotating mode, or a caller
+ * that hasn't been updated to pass lwtTopic).
  *
  * The entity list is generated from core/entities.json — the single catalogue
  * shared with the native HA integration and the docs.
@@ -60,6 +77,27 @@
       opts.device || {}
     );
 
+    // See the file header: combine the connection's real LWT-backed topic
+    // with the per-vehicle status topic when both are given; otherwise fall
+    // back to whichever one is available as a plain availability_topic.
+    var lwt = opts.lwtTopic || null;
+    var vehTopic = opts.vehicleStatusTopic || null;
+    var availabilityCfg;
+    if (lwt && vehTopic && vehTopic !== lwt) {
+      availabilityCfg = {
+        availability: [{ topic: lwt }, { topic: vehTopic }],
+        availability_mode: "all",
+        payload_available: "online",
+        payload_not_available: "offline"
+      };
+    } else {
+      availabilityCfg = {
+        availability_topic: lwt || vehTopic || (prefix + "/status"),
+        payload_available: "online",
+        payload_not_available: "offline"
+      };
+    }
+
     return SENSORS.map(function (row) {
       var component = row[0], key = row[1], extra = row[2];
       var cfg = Object.assign(
@@ -68,11 +106,9 @@
           unique_id: "mmm_kia_" + slug(vin) + "_" + key,
           object_id: node + "_" + key,
           state_topic: prefix + "/" + key,
-          availability_topic: prefix + "/status",
-          payload_available: "online",
-          payload_not_available: "offline",
           device: device
         },
+        availabilityCfg,
         extra
       );
       return {
