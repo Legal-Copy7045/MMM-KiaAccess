@@ -62,6 +62,43 @@ assert 3 < trip["miPerKwh"] < 3.2, trip["miPerKwh"]
 assert near(trip["cost"], 6.0 * 0.185)
 assert trip["chargedDuring"] is False
 
+# startRangeKm / outsideTempC / startPct / endPct -- must reflect the LAST
+# parked reading before departure (anchor refresh is gated on a fresh GPS
+# fix, same as lat/pct already are), not the first, and mid-drive readings
+# must never become the trip's "start". Omitting them entirely (every
+# pre-analytics.py caller) must keep working, both simply come back None.
+t2 = t + 100 * MIN
+_, closed = run([
+    {"t": t2 + 0 * MIN, "odometerKm": 2000, "batteryPct": 80, "carOn": False,
+     "locationLat": 40.60, "locationLon": -79.80, "rangeKm": 300, "outsideTempC": -5},
+    {"t": t2 + 5 * MIN, "odometerKm": 2000, "batteryPct": 80, "carOn": False,
+     "locationLat": 40.60, "locationLon": -79.80, "rangeKm": 295, "outsideTempC": -6},
+    {"t": t2 + 20 * MIN, "odometerKm": 2020, "batteryPct": 75, "carOn": True,
+     "locationLat": 40.55, "locationLon": -79.85, "rangeKm": 270, "outsideTempC": -6},
+    {"t": t2 + 35 * MIN, "odometerKm": 2040, "batteryPct": 71, "carOn": True,
+     "locationLat": 40.50, "locationLon": -79.90, "rangeKm": 250, "outsideTempC": -4},
+    {"t": t2 + 45 * MIN, "odometerKm": 2040, "batteryPct": 71, "carOn": False,
+     "locationLat": 40.50, "locationLon": -79.90, "rangeKm": 250, "outsideTempC": -4},
+    {"t": t2 + 60 * MIN, "odometerKm": 2040, "batteryPct": 71, "carOn": False,
+     "locationLat": 40.50, "locationLon": -79.90, "rangeKm": 250, "outsideTempC": -4},
+], {"pricePerKwh": 0.185, "capacityKwh": 100})
+assert len(closed) == 1
+tr = closed[0]
+assert tr["startPct"] == 80
+assert tr["endPct"] == 71
+assert tr["startRangeKm"] == 295, "must be the LAST parked reading before departure, not the first"
+assert tr["outsideTempC"] == -6
+
+_, closed = run([
+    {"t": t2 + 200 * MIN, "odometerKm": 3000, "batteryPct": 80, "carOn": False},
+    {"t": t2 + 220 * MIN, "odometerKm": 3020, "batteryPct": 75, "carOn": True},
+    {"t": t2 + 235 * MIN, "odometerKm": 3040, "batteryPct": 71, "carOn": False},
+    {"t": t2 + 250 * MIN, "odometerKm": 3040, "batteryPct": 71, "carOn": False},
+])
+assert len(closed) == 1
+assert closed[0]["startRangeKm"] is None
+assert closed[0]["outsideTempC"] is None
+
 # driveway shuffle never a trip
 _, closed = run([
     {"t": t, "odometerKm": 2000, "batteryPct": 50, "carOn": False},

@@ -1,0 +1,255 @@
+"""Real-world range & efficiency analytics - Python port of core/analytics.js.
+
+Kept in numeric lockstep with the JS; both are exercised against the same
+fixtures in CI (test/analytics_test.py's parity check). See core/analytics.js
+for the full rationale -- verified against the actual installed
+hyundai_kia_connect_api source before writing this: KiaUvoApiUSA.py never
+populates ev_battery_soh_percentage, so this deliberately never claims
+"battery health" and only ever reports OBSERVED performance from data the
+USA API genuinely provides (trip/session history, GPS, odometer, outside
+temperature).
+"""
+from __future__ import annotations
+
+import math
+import time
+from datetime import datetime, timezone
+
+MI_PER_KM = 0.621371
+
+_TEMP_BUCKETS_C = [
+    ("<20°F", -6.7),
+    ("20–32°F", 0),
+    ("32–45°F", 7.2),
+    ("45–60°F", 15.6),
+    ("60–75°F", 23.9),
+    (">75°F", float("inf")),
+]
+_SPEED_BUCKETS_KMH = [
+    ("city (<25 mph)", 40.2),
+    ("mixed (25–50 mph)", 80.5),
+    ("highway (>50 mph)", float("inf")),
+]
+_SOC_BANDS = [
+    ("10–50%", 10, 50),
+    ("50–80%", 50, 80),
+    ("80–100%", 80, 101),  # 101: an exact 100 must fall in the last band
+]
+_MIN_BUCKET_TRIPS = 2  # one trip isn't a "typical" for that bucket
+
+
+def _round(n, dp=2):
+    if n is None or not math.isfinite(n):
+        return None
+    f = 10 ** dp
+    return round(n * f) / f
+
+
+def _avg(nums):
+    vals = [v for v in nums if v is not None and math.isfinite(v)]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def _to_display(km, mi):
+    if km is None:
+        return None
+    return km * MI_PER_KM if mi else km
+
+
+def _usable_trips(trips):
+    return [
+        t for t in (trips or [])
+        if t and not t.get("chargedDuring")
+        and t.get("usedPct") is not None and t["usedPct"] > 0
+        and t.get("distanceKm") is not None and t["distanceKm"] > 0
+    ]
+
+
+def _km_per_pct(t):
+    return t["distanceKm"] / t["usedPct"]
+
+
+def _month_key(ms):
+    d = datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+    return f"{d.year:04d}-{d.month:02d}"
+
+
+def _bucket_by(usable, buckets, key_fn):
+    with_samples = [{"label": label, "max": mx, "samples": []} for label, mx in buckets]
+    for t in usable:
+        key = key_fn(t)
+        if key is None:
+            continue
+        bucket = None
+        for b in with_samples:
+            if key <= b["max"]:
+                bucket = b
+                break
+        (bucket or with_samples[-1])["samples"].append(_km_per_pct(t))
+    return with_samples
+
+
+def _summarize_buckets(buckets, mi):
+    out = []
+    for b in buckets:
+        if len(b["samples"]) < _MIN_BUCKET_TRIPS:
+            continue
+        out.append({
+            "label": b["label"],
+            "tripCount": len(b["samples"]),
+            "efficiency": _round(_to_display(_avg(b["samples"]), mi), 2),
+        })
+    return out
+
+
+def observed_efficiency(trips, opts=None):
+    opts = opts or {}
+    mi = opts.get("units") != "metric"
+    usable = _usable_trips(trips)
+    if not usable:
+        return None
+
+    overall_km_per_pct = _avg([_km_per_pct(t) for t in usable])
+
+    temp_usable = [t for t in usable if t.get("outsideTempC") is not None]
+    temperature_buckets = _summarize_buckets(
+        _bucket_by(temp_usable, _TEMP_BUCKETS_C, lambda t: t["outsideTempC"]), mi
+    )
+
+    speed_usable = [t for t in usable if t.get("minutes") and t["minutes"] > 0]
+    speed_buckets = _summarize_buckets(
+        _bucket_by(speed_usable, _SPEED_BUCKETS_KMH,
+                   lambda t: t["distanceKm"] / (t["minutes"] / 60)), mi
+    )
+
+    by_month = {}
+    for t in usable:
+        key = _month_key(t["endedAt"])
+        by_month.setdefault(key, []).append(_km_per_pct(t))
+    monthly_trend = [
+        {"month": key, "tripCount": len(by_month[key]), "efficiency": _round(_to_display(_avg(by_month[key]), mi), 2)}
+        for key in sorted(by_month.keys())
+    ]
+
+    return {
+        "unit": "mi/%" if mi else "km/%",
+        "tripsSampled": len(usable),
+        "overall": _round(_to_display(overall_km_per_pct, mi), 2),
+        "temperatureBuckets": temperature_buckets,
+        "speedBuckets": speed_buckets,
+        "monthlyTrend": monthly_trend,
+    }
+
+
+def range_accuracy(trips, opts=None):
+    opts = opts or {}
+    mi = opts.get("units") != "metric"
+    usable = [
+        t for t in _usable_trips(trips)
+        if t.get("startRangeKm") is not None and t["startRangeKm"] > 0
+        and t.get("startPct") is not None and t["startPct"] > 0
+    ]
+    if not usable:
+        return None
+
+    implied_km_each = [_km_per_pct(t) * t["startPct"] for t in usable]
+    ratios = [implied_km_each[i] / usable[i]["startRangeKm"] for i in range(len(usable))]
+    avg_ratio = _avg(ratios)
+    implied_km = _avg(implied_km_each)
+    kia_km = _avg([t["startRangeKm"] for t in usable])
+
+    return {
+        "tripsSampled": len(usable),
+        "unit": "mi" if mi else "km",
+        "kiaEstimate": _round(_to_display(kia_km, mi), 0),
+        "observedEstimate": _round(_to_display(implied_km, mi), 0),
+        "accuracyPct": _round((avg_ratio - 1) * 100, 1),
+        "personalRangeFactor": _round(max(0.5, min(1.5, avg_ratio)), 3),
+    }
+
+
+def _group_sessions(sessions):
+    if not sessions:
+        return None
+    costs = [s["cost"] for s in sessions if s.get("cost") is not None]
+    kws = [s["avgKw"] for s in sessions if s.get("avgKw") is not None]
+    return {
+        "count": len(sessions),
+        "avgKwh": _round(_avg([s.get("kwh") for s in sessions]), 1),
+        "avgMinutes": _round(_avg([s.get("minutes") for s in sessions]), 0),
+        "avgKw": _round(_avg(kws), 1) if kws else None,
+        "avgGainedPct": _round(_avg([
+            s["gainedPct"] if s.get("gainedPct") is not None else s["endPct"] - s["startPct"]
+            for s in sessions
+        ]), 0),
+        "avgCost": _round(_avg(costs), 2) if costs else None,
+    }
+
+
+def _soc_bands_for(sessions):
+    by_band = [{"label": label, "lo": lo, "hi": hi, "samples": []} for label, lo, hi in _SOC_BANDS]
+    for s in sessions:
+        mid = (s["startPct"] + s["endPct"]) / 2
+        band = None
+        for b in by_band:
+            if b["lo"] <= mid < b["hi"]:
+                band = b
+                break
+        if band and s.get("avgKw") is not None:
+            band["samples"].append(s["avgKw"])
+    return [
+        {"label": b["label"], "sessionCount": len(b["samples"]), "avgKw": _round(_avg(b["samples"]), 1)}
+        for b in by_band if len(b["samples"]) >= _MIN_BUCKET_TRIPS
+    ]
+
+
+def charging_performance(sessions):
+    usable = [
+        s for s in (sessions or [])
+        if s and s.get("kwh") is not None and s.get("minutes") and s["minutes"] > 0
+        and s.get("startPct") is not None and s.get("endPct") is not None
+    ]
+    if not usable:
+        return None
+
+    home = [s for s in usable if s.get("location") == "home" or s.get("location") is None]
+    away = [s for s in usable if s.get("location") is not None and s.get("location") != "home"]
+
+    return {
+        "sessionsSampled": len(usable),
+        "overall": _group_sessions(usable),
+        "home": _group_sessions(home),
+        "away": _group_sessions(away) if away else None,
+        # Deliberately HOME-only -- see core/analytics.js's comment: mixing
+        # a home L2 charger's power ceiling with a public DC fast
+        # charger's produces a number that describes neither.
+        "socBands": _soc_bands_for(home),
+    }
+
+
+def driving_patterns(trips, opts=None):
+    opts = opts or {}
+    mi = opts.get("units") != "metric"
+    days = opts.get("days") or 30
+    cutoff = (time.time() * 1000) - days * 864e5
+    recent = [t for t in (trips or []) if t and t.get("endedAt") is not None and t["endedAt"] >= cutoff]
+    if not recent:
+        return None
+
+    total_km = sum(t.get("distanceKm") or 0 for t in recent)
+    speeds_kmh = [
+        t["distanceKm"] / (t["minutes"] / 60)
+        for t in recent if t.get("minutes") and t["minutes"] > 0 and t.get("distanceKm") is not None
+    ]
+
+    return {
+        "unit": "mi" if mi else "km",
+        "windowDays": days,
+        "tripCount": len(recent),
+        "tripsPerWeek": _round((len(recent) / days) * 7, 1),
+        "totalDistance": _round(_to_display(total_km, mi), 0),
+        "avgTripDistance": _round(_to_display(total_km / len(recent), mi), 1),
+        "avgSpeed": _round(_to_display(_avg(speeds_kmh), mi), 0) if speeds_kmh else None,
+    }

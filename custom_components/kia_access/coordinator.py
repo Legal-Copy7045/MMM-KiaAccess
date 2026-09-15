@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
+from . import analytics as observed_analytics
 from . import kia_client
 from . import range as drive_range
 from . import routing as drive_routing
@@ -395,6 +396,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "carOn": state.get("carOn"),
                 "locationLat": state.get("locationLat"),
                 "locationLon": state.get("locationLon"),
+                # fed to analytics.py's rangeAccuracy()/observedEfficiency()
+                # via the closed trip record -- both already computed by
+                # build_state() above, no new data needed (mirrors
+                # node_helper.js's tripState.rangeKm/outsideTempC)
+                "rangeKm": state.get("rangeKm"),
+                "outsideTempC": state.get("outsideTempC"),
             },
             {
                 "pricePerKwh": opts.get("price_per_kwh") or 0,
@@ -430,6 +437,21 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "last_30_days": drive_trips.summary(self._trips, 30),
             "last_90_days": drive_trips.summary(self._trips, 90),
             "lifetime": drive_trips.summary(self._trips, 36500),
+        }
+
+    @property
+    def analytics(self) -> dict:
+        """Observed real-world range/efficiency -- see analytics.py. Pure
+        aggregation over self._trips/self._sessions (mirrors node_helper.js's
+        s.analytics, but computed on each read like trip_log above rather
+        than cached, since a HA sensor read is not a hot path)."""
+        units = "metric" if self.hass.config.units is METRIC_SYSTEM else "imperial"
+        opts = {"units": units}
+        return {
+            "observedEfficiency": observed_analytics.observed_efficiency(self._trips, opts),
+            "rangeAccuracy": observed_analytics.range_accuracy(self._trips, opts),
+            "chargingPerformance": observed_analytics.charging_performance(self._sessions),
+            "drivingPatterns": observed_analytics.driving_patterns(self._trips, opts),
         }
 
     # A destination further than this from home is treated as "not really

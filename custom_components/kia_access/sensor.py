@@ -67,6 +67,7 @@ async def async_setup_entry(
     entities.append(KiaAccessRangeReachSensor(coordinator))
     entities.append(KiaAccessLastTripSensor(coordinator))
     entities.append(KiaAccessCostPerMileSensor(coordinator))
+    entities.append(KiaAccessObservedRangeSensor(coordinator))
     entities.append(KiaAccessParkedSensor(coordinator))
     entities += [
         KiaAccessSeatSensor(coordinator, key, name) for key, name in _SEATS.items()
@@ -574,6 +575,71 @@ class KiaAccessCostPerMileSensor(KiaAccessEntity, SensorEntity):
             "mi_per_kwh_lifetime": log["lifetime"].get("miPerKwh"),
             "miles_30d": log["last_30_days"].get("distanceMi"),
             "cost_30d": log["last_30_days"].get("cost"),
+        }
+
+
+class KiaAccessObservedRangeSensor(KiaAccessEntity, SensorEntity):
+    """Real-world range & efficiency, derived entirely from this vehicle's
+    own trip/charge history -- see analytics.py. Never claims "battery
+    health": the USA Kia Connect API doesn't report true state-of-health,
+    only OBSERVED performance from data it genuinely provides.
+
+    State is how far off Kia's own displayed range estimate has run
+    (percent, +over/-under what trips actually delivered); attributes carry
+    the efficiency buckets, charging performance, and usage profile.
+    """
+
+    _attr_icon = "mdi:chart-line"
+    _attr_native_unit_of_measurement = "%"
+    _attr_suggested_display_precision = 1
+    _unrecorded_attributes = frozenset({MATCH_ALL})
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "observed_range")
+        self._attr_name = "Observed range & efficiency"
+
+    def _data(self) -> dict:
+        return self.coordinator.analytics
+
+    @property
+    def available(self) -> bool:
+        d = self._data()
+        return super().available and any(d.get(k) for k in (
+            "observedEfficiency", "rangeAccuracy", "chargingPerformance", "drivingPatterns"
+        ))
+
+    @property
+    def native_value(self):
+        acc = self._data().get("rangeAccuracy")
+        return acc.get("accuracyPct") if acc else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        d = self._data()
+        eff = d.get("observedEfficiency") or {}
+        acc = d.get("rangeAccuracy") or {}
+        chg = d.get("chargingPerformance") or {}
+        drv = d.get("drivingPatterns") or {}
+        return {
+            "efficiency_unit": eff.get("unit"),
+            "efficiency_overall": eff.get("overall"),
+            "efficiency_trips_sampled": eff.get("tripsSampled"),
+            "efficiency_by_temperature": eff.get("temperatureBuckets"),
+            "efficiency_by_speed": eff.get("speedBuckets"),
+            "efficiency_monthly_trend": eff.get("monthlyTrend"),
+            "range_unit": acc.get("unit"),
+            "kia_estimated_range": acc.get("kiaEstimate"),
+            "observed_range": acc.get("observedEstimate"),
+            "personal_range_factor": acc.get("personalRangeFactor"),
+            "charging_sessions_sampled": chg.get("sessionsSampled"),
+            "charging_overall": chg.get("overall"),
+            "charging_home": chg.get("home"),
+            "charging_away": chg.get("away"),
+            "charging_by_soc_band": chg.get("socBands"),
+            "driving_window_days": drv.get("windowDays"),
+            "driving_trips_per_week": drv.get("tripsPerWeek"),
+            "driving_avg_trip_distance": drv.get("avgTripDistance"),
+            "driving_avg_speed": drv.get("avgSpeed"),
         }
 
 

@@ -48,6 +48,52 @@ assert.ok(near(trip.cost, 6.0 * 0.185), trip.cost);
 assert.strictEqual(trip.chargedDuring, false);
 assert.ok(trip.straightLineKm > 0 && trip.straightLineKm < trip.distanceKm);
 
+// ---- startRangeKm / outsideTempC / startPct / endPct: fed for
+// core/analytics.js -- must reflect the reading at the trip's START (the
+// parked anchor, refreshed right up until departure), and must not break
+// anything when omitted (every existing caller before analytics.js) ----
+{
+  // NOTE: anchor refresh (see trips.js's "still parked at the anchor" block)
+  // is gated on a fresh GPS fix arriving alongside the reading, same as
+  // pct/lat already are -- a sample with no locationLat can't refresh
+  // anything about the anchor, range/temp included.
+  const t2 = Date.UTC(2026, 8, 11, 7, 0, 0);
+  const withTelemetry = run([
+    // parked, range/temp reading settles right before departure
+    { t: t2 + 0 * MIN, odometerKm: 2000, batteryPct: 80, carOn: false,
+      locationLat: 40.60, locationLon: -79.80, rangeKm: 300, outsideTempC: -5 },
+    { t: t2 + 5 * MIN, odometerKm: 2000, batteryPct: 80, carOn: false,
+      locationLat: 40.60, locationLon: -79.80, rangeKm: 295, outsideTempC: -6 }, // must "stick" as the anchor
+    { t: t2 + 20 * MIN, odometerKm: 2020, batteryPct: 75, carOn: true,
+      locationLat: 40.55, locationLon: -79.85, rangeKm: 270, outsideTempC: -6 }, // mid-drive -- must NOT become the trip's start
+    { t: t2 + 35 * MIN, odometerKm: 2040, batteryPct: 71, carOn: true,
+      locationLat: 40.50, locationLon: -79.90, rangeKm: 250, outsideTempC: -4 },
+    { t: t2 + 45 * MIN, odometerKm: 2040, batteryPct: 71, carOn: false,
+      locationLat: 40.50, locationLon: -79.90, rangeKm: 250, outsideTempC: -4 },
+    { t: t2 + 60 * MIN, odometerKm: 2040, batteryPct: 71, carOn: false,
+      locationLat: 40.50, locationLon: -79.90, rangeKm: 250, outsideTempC: -4 },
+  ], { pricePerKwh: 0.185, capacityKwh: 100 });
+
+  assert.strictEqual(withTelemetry.closed.length, 1);
+  const tr = withTelemetry.closed[0];
+  assert.strictEqual(tr.startPct, 80);
+  assert.strictEqual(tr.endPct, 71);
+  assert.strictEqual(tr.startRangeKm, 295, "must be the LAST parked reading before departure, not the first");
+  assert.strictEqual(tr.outsideTempC, -6, "same for temperature");
+
+  // omitting rangeKm/outsideTempC entirely (every pre-analytics.js caller)
+  // must keep working exactly as before -- both fields simply come back null
+  const noTelemetry = run([
+    { t: t2 + 0 * MIN, odometerKm: 3000, batteryPct: 80, carOn: false },
+    { t: t2 + 20 * MIN, odometerKm: 3020, batteryPct: 75, carOn: true },
+    { t: t2 + 35 * MIN, odometerKm: 3040, batteryPct: 71, carOn: false },
+    { t: t2 + 50 * MIN, odometerKm: 3040, batteryPct: 71, carOn: false },
+  ], { pricePerKwh: 0.185, capacityKwh: 100 });
+  assert.strictEqual(noTelemetry.closed.length, 1);
+  assert.strictEqual(noTelemetry.closed[0].startRangeKm, null);
+  assert.strictEqual(noTelemetry.closed[0].outsideTempC, null);
+}
+
 // ---- a driveway shuffle (< MIN_KM) never becomes a trip ----
 const shuffle = run([
   { t: t, odometerKm: 2000, batteryPct: 50, carOn: false },

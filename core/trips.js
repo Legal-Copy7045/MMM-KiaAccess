@@ -69,6 +69,11 @@
       distanceKm: round(dist, 1),
       distanceMi: round(dist * MI_PER_KM, 1),
       usedPct: usedPct != null ? round(usedPct, 1) : null,
+      // raw start/end % (not just the usedPct delta) -- core/analytics.js's
+      // rangeAccuracy() needs the actual starting % to compare against
+      // what Kia displayed AT that %, not just how much was consumed.
+      startPct: open.anchorPct != null ? round(open.anchorPct, 1) : null,
+      endPct: open.lastPct != null ? round(open.lastPct, 1) : null,
       kwh: round(kwh, 2),
       // efficiency both ways round — mi/kWh reads high-is-good, kWh/100mi low-is-good
       miPerKwh: (kwh != null && kwh > 0) ? round(dist * MI_PER_KM / kwh, 2) : null,
@@ -80,7 +85,20 @@
       toLat: open.lastLat, toLon: open.lastLon,
       straightLineKm: round(
         haversineKm(open.anchorLat, open.anchorLon, open.lastLat, open.lastLon), 1),
-      chargedDuring: !!open.chargedSince
+      chargedDuring: !!open.chargedSince,
+      // Kia's own displayed EV range at the trip's START (the anchor) --
+      // core/analytics.js's rangeAccuracy() compares this against what
+      // this trip's own observed efficiency implies was actually
+      // achievable from that same starting %. null if the car didn't
+      // report a range reading at that moment (e.g. combustion/fuel-only
+      // range showing instead, or a momentary gap in the poll).
+      startRangeKm: open.anchorRangeKm != null ? round(open.anchorRangeKm, 1) : null,
+      // outside temperature at the trip's start -- core/analytics.js
+      // buckets observed efficiency by this. Average of start+end would
+      // blur a trip that started cold and warmed up; the START reading is
+      // what the driver actually experienced deciding whether to trust
+      // the car's range estimate that morning.
+      outsideTempC: open.anchorTempC != null ? round(open.anchorTempC, 1) : null
     };
   }
 
@@ -88,7 +106,10 @@
    * Fold one state sample into trip tracking.
    * @param {object|null} open  trip in progress, or null
    * @param {object} cur  { t, odometerKm, batteryPct, charging, carOn,
-   *                         locationLat, locationLon }
+   *                         locationLat, locationLon, rangeKm, outsideTempC }
+   *   rangeKm/outsideTempC are optional -- only used by core/analytics.js's
+   *   rangeAccuracy()/observedEfficiency() temperature buckets; everything
+   *   else here works exactly as before when they're omitted.
    * @param {object} opts { pricePerKwh, capacityKwh, minKm, parkGapMin }
    * @returns {{ open: (object|null), closed: (object|null) }}
    */
@@ -99,6 +120,8 @@
     var pct = num(cur.batteryPct);
     var lat = num(cur.locationLat);
     var lon = num(cur.locationLon);
+    var rangeKm = num(cur.rangeKm);
+    var tempC = num(cur.outsideTempC);
     var charging = cur.charging === true;
     var carOn = cur.carOn === true;
     var gapMs = (num(opts.parkGapMin) || PARK_GAP_MIN) * 60000;
@@ -111,8 +134,10 @@
         open: {
           anchorOdo: odo, anchorPct: pct, anchorAt: t,
           anchorLat: lat, anchorLon: lon,
+          anchorRangeKm: rangeKm, anchorTempC: tempC,
           lastOdo: odo, lastPct: pct, lastAt: t,
           lastLat: lat, lastLon: lon,
+          lastRangeKm: rangeKm, lastTempC: tempC,
           movedAt: t, chargedSince: false
         },
         closed: null
@@ -129,17 +154,23 @@
       open.movedAt = t;
       if (pct != null) open.lastPct = pct;
       if (lat != null) { open.lastLat = lat; open.lastLon = lon; }
+      if (rangeKm != null) open.lastRangeKm = rangeKm;
+      if (tempC != null) open.lastTempC = tempC;
       open.lastAt = t;
       return { open: open, closed: null };
     }
 
     // not moving this sample
     if (pct != null) open.lastPct = pct;
+    if (rangeKm != null) open.lastRangeKm = rangeKm;
+    if (tempC != null) open.lastTempC = tempC;
     if (lat != null && open.lastOdo === open.anchorOdo) {
       // still parked at the anchor — keep the anchor fresh so a later charge
       // there is attributed correctly
       open.anchorLat = lat; open.anchorLon = lon;
       if (pct != null) open.anchorPct = pct;
+      if (rangeKm != null) open.anchorRangeKm = rangeKm;
+      if (tempC != null) open.anchorTempC = tempC;
     }
     open.lastAt = t;
 
@@ -150,8 +181,10 @@
         open: {
           anchorOdo: open.lastOdo, anchorPct: open.lastPct, anchorAt: t,
           anchorLat: open.lastLat, anchorLon: open.lastLon,
+          anchorRangeKm: open.lastRangeKm, anchorTempC: open.lastTempC,
           lastOdo: open.lastOdo, lastPct: open.lastPct, lastAt: t,
           lastLat: open.lastLat, lastLon: open.lastLon,
+          lastRangeKm: open.lastRangeKm, lastTempC: open.lastTempC,
           movedAt: t, chargedSince: false
         },
         closed: trip
@@ -164,6 +197,8 @@
       open.anchorAt = t;
       open.anchorLat = open.lastLat;
       open.anchorLon = open.lastLon;
+      open.anchorRangeKm = open.lastRangeKm;
+      open.anchorTempC = open.lastTempC;
       open.chargedSince = false;
     }
     return { open: open, closed: null };

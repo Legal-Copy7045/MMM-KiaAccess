@@ -522,6 +522,144 @@ function tmpCacheDir() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ---- onPayload() -> core/analytics.js: a full trip/charge cycle driven
+// through the real onPayload() must flow rangeKm/outsideTempC into closed
+// trips and come out the other end as real, non-null payload.analytics
+// (observedEfficiency/rangeAccuracy/chargingPerformance/drivingPatterns) --
+// proving the wiring added tonight (tripState.rangeKm/outsideTempC ->
+// trips.update() -> s.analytics) actually works end to end, not just at
+// the unit level each piece was already tested at. ----
+{
+  const dir = tmpCacheDir();
+  const helper = freshHelper(dir);
+  const notifications = [];
+  helper.sendSocketNotification = (name, data) => notifications.push({ name, data });
+  const id = helper.identifierFor({ region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1" });
+  const config = { units: "imperial", tripLog: { minKm: 0.5, parkGapMin: 1 } };
+
+  const HOME = { lat: 40.0, lon: -74.0 };
+  // onPayload() timestamps every sample with Date.now() internally (trips.js's
+  // parkGapMin gating needs real elapsed time, not a `t` field this test can
+  // pass in directly) -- fake the clock so trip 1/2's park->drive->park cycles
+  // actually cross the 1-minute parkGapMin without the test itself sleeping.
+  let t = Date.now() - 10 * 864e5; // 10 days ago -- well inside drivingPatterns' 30-day window
+  const realNow = Date.now;
+  Date.now = () => t;
+
+  function poll(vehicle) {
+    helper.onPayload(id, config, { vehicle, _meta: {} });
+  }
+
+  try {
+    // -- trip 1: park (anchor: range 250km, 20C outside) -> drive 10km,
+    // using 5% -> park again long enough to close --
+    poll({ VIN: "VIN1", odometer: 1000, ev_battery_percentage: 80, engine_is_running: false,
+      location_latitude: HOME.lat, location_longitude: HOME.lon,
+      ev_driving_range: 250, outside_temperature: 20 });
+    t += 10e3;
+    poll({ VIN: "VIN1", odometer: 1010, ev_battery_percentage: 75, engine_is_running: true,
+      location_latitude: 40.05, location_longitude: -74.0,
+      ev_driving_range: 235, outside_temperature: 20 });
+    t += 70e3; // past the 1-minute parkGapMin from the drive sample above
+    poll({ VIN: "VIN1", odometer: 1010, ev_battery_percentage: 75, engine_is_running: false,
+      location_latitude: 40.05, location_longitude: -74.0,
+      ev_driving_range: 235, outside_temperature: 20 });
+
+    // -- trip 2: same shape, a second closed trip so tripsSampled > 1 --
+    t += 10e3;
+    poll({ VIN: "VIN1", odometer: 1010, ev_battery_percentage: 95, engine_is_running: false,
+      location_latitude: 40.05, location_longitude: -74.0,
+      ev_driving_range: 300, outside_temperature: 18 });
+    t += 10e3;
+    poll({ VIN: "VIN1", odometer: 1022, ev_battery_percentage: 89, engine_is_running: true,
+      location_latitude: 40.1, location_longitude: -74.0,
+      ev_driving_range: 283, outside_temperature: 18 });
+    t += 70e3;
+    poll({ VIN: "VIN1", odometer: 1022, ev_battery_percentage: 89, engine_is_running: false,
+      location_latitude: 40.1, location_longitude: -74.0,
+      ev_driving_range: 283, outside_temperature: 18 });
+
+    // -- one home charging session: plug in + charge (a second still-charging
+    // sample so the session has nonzero minutes, since avgKw needs > 0) +
+    // stop --
+    poll({ VIN: "VIN1", odometer: 1022, ev_battery_percentage: 89, engine_is_running: false,
+      ev_battery_is_charging: true, ev_battery_is_plugged_in: true, ev_charging_power: 11,
+      location_latitude: 40.1, location_longitude: -74.0 });
+    t += 30 * 60e3;
+    poll({ VIN: "VIN1", odometer: 1022, ev_battery_percentage: 93, engine_is_running: false,
+      ev_battery_is_charging: true, ev_battery_is_plugged_in: true, ev_charging_power: 11,
+      location_latitude: 40.1, location_longitude: -74.0 });
+    t += 30 * 60e3;
+    poll({ VIN: "VIN1", odometer: 1022, ev_battery_percentage: 97, engine_is_running: false,
+      ev_battery_is_charging: false, ev_battery_is_plugged_in: false, ev_charging_power: 0,
+      location_latitude: 40.1, location_longitude: -74.0 });
+
+    assert.ok(helper.st(id).trips.length >= 2, "both trips must have closed: " + JSON.stringify(helper.st(id).trips));
+    assert.ok(helper.st(id).sessions.length >= 1, "the charge session must have closed");
+
+    const last = notifications[notifications.length - 1];
+    assert.strictEqual(last.name, "KIA_DATA");
+    const a = last.data.payload.analytics;
+    assert.ok(a, "onPayload() must produce payload.analytics");
+    assert.ok(a.observedEfficiency && a.observedEfficiency.overall > 0, (
+      "observedEfficiency must reflect the closed trips' rangeKm/outsideTempC-bearing samples: " +
+      JSON.stringify(a.observedEfficiency)
+    ));
+    assert.ok(a.rangeAccuracy && a.rangeAccuracy.kiaEstimate > 0, (
+      "rangeAccuracy needs startRangeKm, which only flows through if tripState.rangeKm reached " +
+      "trips.update() -- " + JSON.stringify(a.rangeAccuracy)
+    ));
+    assert.ok(a.chargingPerformance && a.chargingPerformance.home && a.chargingPerformance.home.count === 1);
+    assert.ok(a.drivingPatterns && a.drivingPatterns.tripCount >= 2);
+  } finally {
+    Date.now = realNow;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---- emitData(): the post-restart lazy-analytics fallback -- a cache file
+// with trips/sessions but no persisted `analytics` key (an old cache file
+// written before this feature existed, or any restart, since s.analytics is
+// a derived value and deliberately never persisted) must still produce
+// payload.analytics on the very first emitData() call, not sit empty until
+// the next trip/session change. ----
+{
+  const dir = tmpCacheDir();
+  const helper = freshHelper(dir);
+  const id = helper.identifierFor({ region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN1" });
+
+  const cacheOnDisk = {
+    _kiaAccessIdHash: helper._idHash(id),
+    trips: [{
+      startedAt: Date.now() - 3600e3, endedAt: Date.now() - 3000e3, minutes: 10,
+      distanceKm: 10, distanceMi: 6.2, usedPct: 5, startPct: 80, endPct: 75,
+      chargedDuring: false, startRangeKm: 250, outsideTempC: 20
+    }],
+    sessions: [{
+      startedAt: Date.now() - 7200e3, endedAt: Date.now() - 7000e3, minutes: 60,
+      startPct: 40, endPct: 80, gainedPct: 40, kwh: 40, avgKw: 40, location: "home"
+    }],
+    openTrip: null, openSession: null, history: [], lastGood: null, failStreak: 0
+  };
+  fs.writeFileSync(helper.cacheFile(id), JSON.stringify(cacheOnDisk));
+
+  const s = helper.st(id);
+  assert.strictEqual(s.analytics, undefined, "a restored cache with no analytics key must leave s.analytics unset until first access");
+
+  const notifications = [];
+  helper.sendSocketNotification = (name, data) => notifications.push({ name, data });
+  helper.emitData(id, { units: "imperial" }, { vehicle: {}, _meta: {} });
+
+  const a = notifications[0].data.payload.analytics;
+  assert.ok(a, "emitData() must lazily compute analytics on first access after a restart");
+  assert.ok(a.observedEfficiency && a.observedEfficiency.overall > 0);
+  assert.ok(a.rangeAccuracy && a.rangeAccuracy.kiaEstimate > 0);
+  assert.ok(a.chargingPerformance && a.chargingPerformance.home && a.chargingPerformance.home.count === 1);
+  assert.strictEqual(helper.st(id).analytics, a, "the lazily-computed value must be cached on s.analytics, not recomputed every call");
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // ---- maybeRangeMap(): an older, slower fetch must never overwrite a
 // newer, faster one's result with stale data -- a hostile-audit finding.
 // s.rangeMap used to be written unconditionally with no check that the
