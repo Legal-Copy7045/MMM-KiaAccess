@@ -691,9 +691,22 @@ module.exports = NodeHelper.create({
 
     s.failStreak = 0;
     s.lastGood = payload;
+    // rangeReach (HA's driving-times data, mode C) must be folded into s
+    // BEFORE the persist decision below, not inside emitData() (which used
+    // to do this) -- emitData() runs AFTER persist(), so a cycle where
+    // rangeReach changed but nothing else did (a plausible common case:
+    // traffic/route data changes without the vehicle's own telemetry
+    // moving, since rangeReach is a sibling of payload.vehicle, not part of
+    // it) would see dataChanged/histChanged/sessChanged all false, skip
+    // persist() entirely, and leave the disk cache holding a stale
+    // rangeReach indefinitely -- until some unrelated later change happened
+    // to also trigger a persist.
+    const rangeReachChanged = !!payload.rangeReach &&
+      JSON.stringify(payload.rangeReach) !== JSON.stringify(s.rangeReach);
+    if (payload.rangeReach) s.rangeReach = payload.rangeReach;
     // only touch the disk cache when something changed — avoids an SD-card
     // write every poll when nothing moved
-    if (dataChanged || histChanged || sessChanged) this.persist(id);
+    if (dataChanged || histChanged || sessChanged || rangeReachChanged) this.persist(id);
 
     this.emitData(id, config, payload);
     this.publishMqtt(config, payload);
@@ -1023,10 +1036,15 @@ module.exports = NodeHelper.create({
     payload.sessions = s.sessions.slice(-60);
     payload.openSession = s.openSession || null;
     payload.rangeMap = s.rangeMap || null;
-    // driving times come from HA (mode C); keep the last known set if a poll
-    // couldn't fetch them
-    if (payload.rangeReach) s.rangeReach = payload.rangeReach;
-    else if (s.rangeReach) payload.rangeReach = s.rangeReach;
+    // driving times come from HA (mode C); keep the last known set if this
+    // payload didn't carry one. (Folding a FRESH payload.rangeReach into
+    // s.rangeReach happens earlier, in onPayload() -- before the persist
+    // decision, see its comment -- not here; every other caller of
+    // emitData() [serve()'s stale replay, handleFetch()'s healthy-socket
+    // replay] passes an already-cloned s.lastGood whose rangeReach, if any,
+    // already reflects the last real update, so re-assigning it here would
+    // only ever be a same-value no-op for them.)
+    if (!payload.rangeReach && s.rangeReach) payload.rangeReach = s.rangeReach;
     payload.trips = s.trips.slice(-60);
     payload.openTrip = s.openTrip || null;
     // round-tripped so the frontend can restore its moved-while-parked
@@ -1103,6 +1121,11 @@ module.exports = NodeHelper.create({
       reconnectPeriod: 30000,
       will: { topic: statusTopic, payload: "offline", retain: true, qos: 0 }
     });
+    // Stashed so publishMqtt() can hand it to ha-discovery.js as the
+    // real LWT-backed availability topic -- see that file's header for why
+    // neither the legacy plain <prefix>/status nor a per-VIN <prefix>/VIN/status
+    // topic can serve as availability_topic on its own.
+    client._kiaStatusTopic = statusTopic;
     client._kiaDiscovered = false;
     client.on("connect", () => {
       Log.info("[MMM-KiaAccess] mqtt connected to " + m.url);
@@ -1166,7 +1189,13 @@ module.exports = NodeHelper.create({
       const already = vin ? discoveredVins[vin] : client._kiaDiscovered;
       if (!already) {
         try {
-          haDiscovery.publish(client, { prefix, discoveryPrefix: ha.discoveryPrefix, device: ha.device, vehicle: payload.vehicle });
+          haDiscovery.publish(client, {
+            prefix, discoveryPrefix: ha.discoveryPrefix, device: ha.device, vehicle: payload.vehicle,
+            lwtTopic: client._kiaStatusTopic,
+            // rotate mode only -- matches the per-VIN topic published
+            // "online" above and "offline" by _retireVehicle()
+            vehicleStatusTopic: vin ? prefix + "/status" : null
+          });
           if (vin) discoveredVins[vin] = true;
           else client._kiaDiscovered = true;
         } catch (e) {
