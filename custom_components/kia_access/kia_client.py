@@ -17,6 +17,7 @@ import datetime
 import hashlib
 import json
 import logging
+import math
 import os
 import stat
 import threading
@@ -193,6 +194,31 @@ def dump_vehicle(vehicle):
             if base + "_unit" in out:
                 out[base + "_unit"] = "km"
 
+    # Domain-range guard: NaN/Infinity/coordinate-range hardening already
+    # exists throughout the HA coordinator (_haversine_km, _zone_radius_m,
+    # _valid_ll) for GPS specifically -- this is the equivalent for the
+    # vehicle's own percentage/range readings, at the one place both MM and
+    # HA share (dump_vehicle() is this shared function's whole job). A
+    # structurally-valid-looking but semantically impossible reading (Kia's
+    # API has been seen, rarely, to report a battery percentage outside
+    # 0-100 mid-sync) becomes None ("no data this poll") rather than a fake
+    # but plausible-looking number -- clamping to a boundary instead could
+    # read as a genuine "fully charged"/"empty" and trigger a false alert,
+    # where None just means the next poll's real value is awaited, the same
+    # as any other momentarily-missing field.
+    for key in ("ev_battery_percentage", "ev_battery_soh_percentage",
+                "car_battery_percentage", "fuel_level"):
+        val = out.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            if not math.isfinite(val) or val < 0 or val > 100:
+                out[key] = None
+    for key in ("odometer", "ev_driving_range", "total_driving_range",
+                "fuel_driving_range"):
+        val = out.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            if not math.isfinite(val) or val < 0:
+                out[key] = None
+
     return out
 
 
@@ -237,6 +263,14 @@ def token_dict(vm, enrolled_at=None):
 def _save_token(token_file, vm, enrolled_at, account_hash=None):
     if vm.token is None:
         return
+    # Write-then-rename (same pattern node_helper.js's persist() uses for the
+    # vehicle cache): a catastrophic interruption -- power loss, the process
+    # killed -- mid-write used to be able to leave token_file itself
+    # truncated/corrupt, since the write truncated it in place. Writing to a
+    # sibling .tmp file first and only replacing the real file with an
+    # atomic os.replace() means the real file is always either the old
+    # complete token or the new complete one, never a partial write.
+    tmp = token_file + ".tmp"
     try:
         tok = vm.token.to_dict()
         tok["enrolled_at"] = enrolled_at or datetime.datetime.now(
@@ -252,10 +286,11 @@ def _save_token(token_file, vm, enrolled_at, account_hash=None):
         # latter briefly leaves the refresh token world/group-readable
         # (whatever the umask allows) between the write and the chmod call --
         # a real window on every token rotation, not just at enrollment.
-        fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(tok, fh, indent=2, default=str)
-        os.chmod(token_file, stat.S_IRUSR | stat.S_IWUSR)
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(tmp, token_file)  # atomic on both POSIX and Windows
     except Exception as exc:  # noqa: BLE001
         # non-fatal (the caller already has a good fetch to hand back this
         # cycle) but must NOT be silent -- a failed rotation here means the
@@ -263,6 +298,10 @@ def _save_token(token_file, vm, enrolled_at, account_hash=None):
         # that's invisible without this line.
         _LOGGER.warning("Kia Access: could not persist rotated token to %s: %s",
                          token_file, exc)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------

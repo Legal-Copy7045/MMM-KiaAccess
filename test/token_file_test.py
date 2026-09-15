@@ -165,4 +165,58 @@ def _a_b_a_isolation(tmp):
 
 with_tmp_module_dir(_a_b_a_isolation)
 
+
+class _CircularToken:
+    """A token whose to_dict() contains a circular reference -- json.dump()
+    always raises ValueError on this, PARTWAY through writing (it will have
+    already written the opening brace and the first key before hitting the
+    self-reference and raising), regardless of the `default=str` fallback
+    _save_token passes (default=str only helps for non-serializable leaf
+    VALUES; a circular reference is a structural error json can't route
+    around at all). This simulates "the process died/crashed mid-write"
+    deterministically, without needing an actual OS-level interruption."""
+
+    def to_dict(self):
+        bad = {"refresh_token": "SHOULD-NEVER-APPEAR-PARTIALLY-WRITTEN"}
+        bad["self"] = bad
+        return bad
+
+
+class _VmBad:
+    def __init__(self):
+        self.token = _CircularToken()
+
+
+# ---- _save_token(): write-then-rename means a write that fails PARTWAY
+# through serialization (simulating a crash mid-write) must never corrupt
+# the existing token file -- only ever a .tmp file, which itself gets
+# cleaned up. Before this, _save_token wrote directly into token_file with
+# O_TRUNC, so a failure at this exact point would have left the file
+# truncated (valid JSON gone, replaced by a partial write), forcing
+# re-enrollment on the next run. ----
+def _failed_write_never_corrupts_existing_file(tmp):
+    jobA = {"region": "USA", "brand": "KIA", "username": "alice@example.com"}
+    hashA = kia_client._account_hash("USA", "KIA", "alice@example.com")
+    fileA = kia_client.account_token_file(jobA)
+
+    # a genuinely good, prior token already on disk
+    kia_client._save_token(fileA, _Vm("GOOD-TOKEN"), None, hashA)
+    with open(fileA, encoding="utf-8") as fh:
+        before = fh.read()
+    assert "GOOD-TOKEN" in before
+
+    # this save fails partway through serialization -- must not touch fileA
+    kia_client._save_token(fileA, _VmBad(), None, hashA)
+
+    with open(fileA, encoding="utf-8") as fh:
+        after = fh.read()
+    assert after == before, (
+        "a write that fails partway through must leave the existing token file "
+        "completely untouched, not truncated/corrupted"
+    )
+    assert not os.path.exists(fileA + ".tmp"), "the temp file must be cleaned up after a failed write"
+
+
+with_tmp_module_dir(_failed_write_never_corrupts_existing_file)
+
 print("all token_file tests passed")

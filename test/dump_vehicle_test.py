@@ -351,4 +351,52 @@ default_eu_car = [_ClimateVeh("VIN1")]
 _run_climate({"command": "start_climate", "region": "EU"}, default_eu_car)
 assert default_eu_car[0].set_temp == 21, "omitted set_temp must use the metric default for an EU vehicle"
 
+# --- domain-range guard: a structurally-valid-looking but semantically
+# impossible reading (percentage outside 0-100, a negative range/odometer)
+# becomes None rather than propagating as a fake but plausible-looking
+# number. isFinite/NaN/Infinity protection already exists throughout the
+# HA coordinator for GPS specifically; this is the equivalent for the
+# vehicle's own numeric readings, at the one place (dump_vehicle()) both
+# MM and HA share. ---
+garbage = kia_client.dump_vehicle(
+    _Veh(
+        ev_battery_percentage=137,       # Kia has, rarely, reported >100 mid-sync
+        ev_battery_soh_percentage=-5,
+        car_battery_percentage=float("nan"),
+        fuel_level=float("inf"),
+        ev_driving_range=-1,             # never legitimately negative
+        odometer=-42,
+    )
+)
+assert garbage["ev_battery_percentage"] is None, "137% must be rejected, not passed through"
+assert garbage["ev_battery_soh_percentage"] is None, "-5% must be rejected"
+assert garbage["car_battery_percentage"] is None, "NaN must be rejected"
+assert garbage["fuel_level"] is None, "Infinity must be rejected"
+assert garbage["ev_driving_range"] is None, "a negative range must be rejected"
+assert garbage["odometer"] is None, "a negative odometer must be rejected"
+
+# ordinary, plausible values must pass through completely unchanged
+sane = kia_client.dump_vehicle(
+    _Veh(
+        ev_battery_percentage=0,   # boundary values are valid, not "out of range"
+        ev_battery_soh_percentage=100,
+        car_battery_percentage=82.5,
+        fuel_level=0,
+        ev_driving_range=0,        # an empty battery is a real, valid range reading
+        odometer=45231.7,
+    )
+)
+assert sane["ev_battery_percentage"] == 0
+assert sane["ev_battery_soh_percentage"] == 100
+assert sane["car_battery_percentage"] == 82.5
+assert sane["fuel_level"] == 0
+assert sane["ev_driving_range"] == 0
+assert sane["odometer"] == 45231.7
+
+# a missing/None reading must stay None, not be treated as "0, therefore
+# in range" or crash the guard
+missing = kia_client.dump_vehicle(_Veh())
+assert missing.get("ev_battery_percentage") is None
+assert missing.get("odometer") is None
+
 print("dump_vehicle tests passed")
