@@ -191,7 +191,12 @@ def _save_token(token_file, vm, enrolled_at):
         tok["enrolled_at"] = enrolled_at or datetime.datetime.now(
             datetime.timezone.utc
         ).isoformat()
-        with open(token_file, "w", encoding="utf-8") as fh:
+        # Create already owner-only rather than open()-then-chmod(): the
+        # latter briefly leaves the refresh token world/group-readable
+        # (whatever the umask allows) between the write and the chmod call --
+        # a real window on every token rotation, not just at enrollment.
+        fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(tok, fh, indent=2, default=str)
         os.chmod(token_file, stat.S_IRUSR | stat.S_IWUSR)
     except Exception as exc:  # noqa: BLE001

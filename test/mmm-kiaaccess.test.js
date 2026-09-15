@@ -265,4 +265,54 @@ function freshModule(overrides) {
   clearTimeout(mod._watchdog);
 }
 
+// ---- drivingTimesEl(): every value interpolated into its innerHTML must be
+// escaped, even when it comes from Home Assistant (driveTimeSource,
+// dbg.errors) or from the local delayStops config (a colour dropped
+// straight into a style="color:..." attribute) rather than the Kia API --
+// a security-review finding: these two were building `hint`/the style
+// attribute by string concatenation without this.escape(), unlike every
+// other dynamic value in this file. Needs a minimal `document` stub since
+// this method (deliberately, see recommendation #5's scoping) was not
+// extracted into the DOM-free core/dest-planner.js split. ----
+{
+  const prevDocument = global.document;
+  global.document = {
+    createElement: () => ({ className: "", innerHTML: "", style: {} })
+  };
+  try {
+    const mod = freshModule({
+      visuals: { drivingTimes: { enabled: true, delayStops: [{ pctOver: 10, color: 'red" onmouseover="alert(3)' }] } }
+    });
+    // core/dest-planner.js isn't loaded as a browser global in this harness
+    // (see require-mm-module.js) -- wire it in directly so delayColorFor()
+    // actually runs, same as getScripts() would in a real MagicMirror page.
+    mod.destPlanner = require("../core/dest-planner.js");
+    mod.rangeReach = {
+      pois: [{ name: "Home", source: "zone", km: 10, duration_min: 20, delay_min: 5, delay_pct: 80, routed: false }],
+      driveTimeSource: "<img src=x onerror=alert(1)>",
+      debug: { errors: ["<script>alert(2)</script>"] }
+    };
+    const el = mod.drivingTimesEl();
+    assert.ok(el, "drivingTimesEl() must return an element for this setup");
+
+    assert.ok(!el.innerHTML.includes("<img src=x onerror"), (
+      "driveTimeSource from Home Assistant must be escaped before landing in the hint text"
+    ));
+    assert.ok(el.innerHTML.includes("&lt;img src=x onerror"), "the escaped form must be present instead");
+
+    assert.ok(!el.innerHTML.includes("<script>alert(2)"), (
+      "dbg.errors[0] from Home Assistant must be escaped"
+    ));
+    assert.ok(el.innerHTML.includes("&lt;script&gt;alert(2)"), "the escaped form must be present instead");
+
+    assert.ok(!el.innerHTML.includes('onmouseover="alert(3)'), (
+      "a delayStops colour from local config must be escaped before landing in a style attribute " +
+      "-- an unescaped quote would let it break out and inject an attribute"
+    ));
+    assert.ok(el.innerHTML.includes("&quot; onmouseover=&quot;alert(3)"), "the escaped form must be present instead");
+  } finally {
+    global.document = prevDocument;
+  }
+}
+
 console.log("all mmm-kiaaccess tests passed");

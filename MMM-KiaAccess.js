@@ -1704,7 +1704,7 @@ Module.register("MMM-KiaAccess", {
         '<div class="kiaaccess-dt-row">' +
           '<div class="kiaaccess-dt-line">' +
             '<span class="kiaaccess-dt-name">' + icon + " " + this.escape(r.name || "?") + "</span>" +
-            '<span class="kiaaccess-dt-time"' + (col ? ' style="color:' + col + '"' : "") + ">" +
+            '<span class="kiaaccess-dt-time"' + (col ? ' style="color:' + this.escape(col) + '"' : "") + ">" +
               this.escape(timeTxt + delayTxt) + "</span>" +
           "</div>" +
           (subBits.length
@@ -1714,7 +1714,11 @@ Module.register("MMM-KiaAccess", {
     });
     if (rr && rr.length && !anyRouted && dt.showVia !== false) {
       const dbg = this.rangeReach && this.rangeReach.debug;
-      const src = (this.rangeReach && this.rangeReach.driveTimeSource) || "estimate";
+      // driveTimeSource/dbg.errors come from Home Assistant (the range_reach
+      // sensor's attributes), not from static config -- escape before
+      // interpolating into `hint`, same as everything else that ends up in
+      // innerHTML below.
+      const src = this.escape((this.rangeReach && this.rangeReach.driveTimeSource) || "estimate");
       let hint;
       if (src === "estimate") {
         hint = "Estimated times — set a Drive-time provider (TomTom) in Home Assistant for routes + traffic";

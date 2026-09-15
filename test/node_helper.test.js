@@ -59,17 +59,31 @@ function tmpCacheDir() {
   sA.lastGood = { vehicle: { VIN: "VIN_A" } };
   sA.history = [{ t: 1, ev: 50, v12: 90 }];
   sA.lastParked = { lat: 1, lon: 2, odo: 100 };
+  // rangeReach (HA's driving-times data, mode C) must round-trip through the
+  // cache the same as lastParked/rangeMap/etc, or a MagicMirror restart
+  // silently drops the "Driving times" widget back to empty until HA
+  // supplies fresh data.
+  sA.rangeReach = { driveTimeSource: "tomtom", pois: [{ name: "Work", km: 12 }] };
   helper.persist(idA);
 
   const onDisk = JSON.parse(fs.readFileSync(helper.cacheFile(idA), "utf8"));
   assert.ok(onDisk._kiaAccessIdHash, "persist() must tag the file with an identity hash");
   assert.deepStrictEqual(onDisk.lastParked, { lat: 1, lon: 2, odo: 100 });
+  assert.deepStrictEqual(onDisk.rangeReach, { driveTimeSource: "tomtom", pois: [{ name: "Work", km: 12 }] });
+  if (process.platform !== "win32") {
+    const mode = fs.statSync(helper.cacheFile(idA)).mode & 0o777;
+    assert.strictEqual(mode, 0o600, (
+      "the cache file carries the vehicle's raw API dump (GPS/location " +
+      "history, VIN) -- it must be owner-only, same as token.json"
+    ));
+  }
 
   // a second st() call for the SAME id after clearing in-memory state must
   // restore from disk, not start blank
   delete helper.state[idA];
   const reloaded = helper.st(idA);
   assert.deepStrictEqual(reloaded.lastParked, { lat: 1, lon: 2, odo: 100 });
+  assert.deepStrictEqual(reloaded.rangeReach, { driveTimeSource: "tomtom", pois: [{ name: "Work", km: 12 }] });
   assert.strictEqual(reloaded.history.length, 1);
 
   // migrateLegacyCache(): a genuinely untagged (pre-v2.43.1) leftover file,
@@ -343,6 +357,28 @@ function tmpCacheDir() {
 
   // clean up: close every real (if never-actually-connected) client so the
   // test process can exit promptly
+  Object.values(helper.mqttClients).forEach((c) => { if (c && c.end) c.end(true); });
+}
+
+// ---- mqttClient(): the account-scoped status topic's identity segment must
+// never collide between two genuinely different accounts, even when their
+// usernames sanitise to the same readable text (e.g. "/" stripped makes
+// "foo/bar@x" and "foo_bar@x" identical) ----
+{
+  const helper = freshHelper();
+  const a = helper.mqttClient({
+    url: "mqtt://127.0.0.1:1", username: "foo/bar@example.com", topicPrefix: "kia"
+  });
+  const b = helper.mqttClient({
+    url: "mqtt://127.0.0.1:1", username: "foo_bar@example.com", topicPrefix: "kia"
+  });
+  assert.notStrictEqual(a.options.will.topic, b.options.will.topic, (
+    "two different usernames that sanitise to the same text must still get " +
+    "different status topics, or one account's online/offline status can " +
+    "silently apply to the other"
+  ));
+  assert.ok(a.options.will.topic.startsWith("kia/status/foo_bar@example.com-"), a.options.will.topic);
+
   Object.values(helper.mqttClients).forEach((c) => { if (c && c.end) c.end(true); });
 }
 

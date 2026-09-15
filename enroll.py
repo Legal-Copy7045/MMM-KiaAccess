@@ -157,7 +157,11 @@ def main():
     tok["enrolled_at"] = __import__("datetime").datetime.now(
         __import__("datetime").timezone.utc
     ).isoformat()
-    with open(TOKEN_FILE, "w") as fh:
+    # Create already owner-only rather than open()-then-chmod(), which briefly
+    # leaves the refresh token world/group-readable (whatever the umask
+    # allows) in the window before the chmod call below.
+    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
         json.dump(tok, fh, indent=2, default=str)
     try:
         os.chmod(TOKEN_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0600
