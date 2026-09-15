@@ -170,6 +170,33 @@ assert.ok(sum.costPerMi > 0 && sum.costPerMi < 0.1, sum.costPerMi);
     { t: t + 60 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 }
   ], { pricePerKwh: 0.185, model: "EV9" });
   assert.ok(near(ev9.closed[0].kwh, 5.988), "an EV9 with no configured capacity must still fall back to its own 99.8kWh default (6% of it)");
+
+  // isEv9()'s (?!\d) guard and [\s-]* tolerance, proven independently at
+  // the TRIP level too -- core/trips.js has its OWN copy of this logic
+  // (not shared with core/sessions.js), and a v2.72.0 fix to sessions.js's
+  // regex was initially missed here entirely (caught only by checking the
+  // generated frontend bundle still had the old pattern) -- these trip-
+  // level assertions exist so a future regex change to one copy without
+  // the other fails a test instead of silently drifting again.
+  const ev90 = run([
+    { t: t + 0 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 5 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 20 * MIN, odometerKm: 1015, batteryPct: 87, carOn: true, locationLat: 40.62, locationLon: -79.80 },
+    { t: t + 45 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 },
+    { t: t + 60 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 }
+  ], { pricePerKwh: 0.185, model: "EV90" });
+  assert.strictEqual(ev90.closed[0].kwh, null,
+    "a hypothetical differently-numbered model ('EV90') must not match the EV9 regex and borrow its pack size");
+
+  const evHyphen9 = run([
+    { t: t + 0 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 5 * MIN, odometerKm: 1000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 20 * MIN, odometerKm: 1015, batteryPct: 87, carOn: true, locationLat: 40.62, locationLon: -79.80 },
+    { t: t + 45 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 },
+    { t: t + 60 * MIN, odometerKm: 1030, batteryPct: 84, carOn: false, locationLat: 40.55, locationLon: -79.88 }
+  ], { pricePerKwh: 0.185, model: "EV-9" });
+  assert.ok(near(evHyphen9.closed[0].kwh, 5.988),
+    "a hyphenated 'EV-9' model string must still match and fall back to the 99.8kWh default");
 }
 
 console.log("all trips tests passed");

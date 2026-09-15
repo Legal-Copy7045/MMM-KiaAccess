@@ -173,4 +173,22 @@ assert near(ev9_closed[0]["kwh"], 5.988), (
     "99.8kWh default (6% of it)"
 )
 
+# _is_ev9()'s (?!\d) guard and [\s-]* tolerance, proven independently at
+# the TRIP level too -- trips.py has its OWN copy of this logic (not
+# shared with sessions.py), and a v2.72.0 fix to sessions.py's regex was
+# initially missed here entirely (caught only by checking the vendored
+# custom_components copy still had the old pattern) -- these trip-level
+# assertions exist so a future regex change to one copy without the
+# other fails a test instead of silently drifting again.
+_, ev90_closed = run(_drive_samples, {"pricePerKwh": 0.185, "model": "EV90"})
+assert ev90_closed[0]["kwh"] is None, (
+    "a hypothetical differently-numbered model ('EV90') must not match "
+    "the EV9 regex and borrow its pack size"
+)
+_, ev_hyphen9_closed = run(_drive_samples, {"pricePerKwh": 0.185, "model": "EV-9"})
+assert near(ev_hyphen9_closed[0]["kwh"], 5.988), (
+    "a hyphenated 'EV-9' model string must still match and fall back to "
+    "the 99.8kWh default"
+)
+
 print("all trips tests passed")
