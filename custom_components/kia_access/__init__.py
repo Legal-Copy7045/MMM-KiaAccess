@@ -12,6 +12,7 @@ import os
 from datetime import timedelta
 
 import voluptuous as vol
+from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
@@ -90,6 +91,53 @@ def _migrate_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.config_entries.async_update_entry(entry, unique_id=target)
 
 
+def _map_keys_for_entry(entry: ConfigEntry) -> dict:
+    """The geocoding/TomTom keys custom:kia-range-map-card needs, sourced
+    from an entry's own Options instead of the dashboard -- pulled out of
+    _ws_map_keys() below so it's testable without a real websocket
+    connection (see test/coordinator_analytics_test.py's fake-self pattern
+    for why: exercising the actual function beats reimplementing its
+    logic in a test)."""
+    opts = entry.options
+    provider = (opts.get("drive_time_provider") or "").strip()
+    return {
+        "api_key": opts.get("geocoding_api_key") or None,
+        # routing_api_key is only a TomTom key when the entry is actually
+        # configured for that provider -- handing it to the card as
+        # `tomtom_key` while provider is "geoapify" or "estimate" would
+        # either silently fail the TomTom call or, worse, leak a Geoapify
+        # key to a TomTom endpoint that then logs/rejects it.
+        "tomtom_key": (opts.get("routing_api_key") or None) if provider == "tomtom" else None,
+    }
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "kia_access/map_keys",
+    vol.Required("entry_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _ws_map_keys(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """custom:kia-range-map-card's alternative to typing api_key/tomtom_key
+    into the dashboard: the geocoding/routing keys already sit in this
+    entry's own Options (used server-side for range_reach's drive times --
+    see coordinator.py's _geocode_address/_route_status), so the card can
+    ask for them here instead of duplicating them into Lovelace YAML, where
+    they end up sitting in plain text in a place people paste around,
+    screenshot, and hand to an LLM. require_admin: these ARE real API keys,
+    still visible to the requesting browser session once returned (the
+    card's own isochrone/tile fetches are plain client-side `fetch()` calls
+    -- see _ring() -- so there was never a way to keep the key off the
+    browser entirely), but the least this endpoint can do is refuse anyone
+    who isn't already trusted with the HA instance's admin-level config.
+    """
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(msg["id"], websocket_api.const.ERR_NOT_FOUND, "no such Kia Access entry")
+        return
+    connection.send_result(msg["id"], _map_keys_for_entry(entry))
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Domain-level setup, called once at HA startup regardless of any one
     entry's enabled/disabled state (unlike async_setup_entry below, which
@@ -98,6 +146,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     across the v2.54/v2.55 upgrade still gets repaired instead of carrying
     a stale identity indefinitely (it would otherwise only self-heal the
     next time it's individually reloaded or re-enabled)."""
+    websocket_api.async_register_command(hass, _ws_map_keys)
     for entry in hass.config_entries.async_entries(DOMAIN):
         _migrate_unique_id(hass, entry)
     return True

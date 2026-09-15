@@ -1,8 +1,13 @@
 # Add this as a THIRD grid column inside the existing "EV9 Range" section
 # (path: ev9-range), alongside the two grids already there. Uses the new
-# sensor.<vehicle>_observed_range entity (core/analytics.js / analytics.py),
-# added in v2.66.0. Written against sensor.my_ev9_observed_range -- adjust
-# the entity_id prefix if your device name differs.
+# analytics sensor (core/analytics.js / analytics.py), added in v2.66.0.
+# Written against sensor.melodev_observed_range_efficiency -- your own
+# entity_id will differ if your device has a different name. Note: HA only
+# assigns an entity_id once, at first creation, from the entity's name at
+# that time -- renaming the sensor in code later does NOT rename an
+# already-created entity's entity_id (that's why this ends in
+# "_efficiency" even though the current code names it just "Observed
+# range"). Check Settings -> Devices & Services -> Entities to find yours.
 #
 # No credentials in here -- this only touches the new analytics sensor.
 
@@ -15,7 +20,7 @@
 
     - type: gauge
       name: Kia's range estimate vs. reality
-      entity: sensor.my_ev9_observed_range
+      entity: sensor.melodev_observed_range_efficiency
       min: -30
       max: 30
       needle: true
@@ -34,28 +39,28 @@
           max: 30
           decimals: 0
       series:
-        - entity: sensor.my_ev9_observed_range
+        - entity: sensor.melodev_observed_range_efficiency
           name: "% vs Kia's displayed range"
           type: line
           stroke_width: 2
 
     - type: markdown
       content: >
-        {% set acc = states('sensor.my_ev9_observed_range') %}
+        {% set acc = states('sensor.melodev_observed_range_efficiency') %}
 
-        {% set kia = state_attr('sensor.my_ev9_observed_range',
+        {% set kia = state_attr('sensor.melodev_observed_range_efficiency',
         'kia_estimated_range') %}
 
-        {% set obs = state_attr('sensor.my_ev9_observed_range',
+        {% set obs = state_attr('sensor.melodev_observed_range_efficiency',
         'observed_range') %}
 
-        {% set unit = state_attr('sensor.my_ev9_observed_range', 'range_unit')
+        {% set unit = state_attr('sensor.melodev_observed_range_efficiency', 'range_unit')
         or 'mi' %}
 
-        {% set prf = state_attr('sensor.my_ev9_observed_range',
+        {% set prf = state_attr('sensor.melodev_observed_range_efficiency',
         'personal_range_factor') %}
 
-        {% set n = state_attr('sensor.my_ev9_observed_range',
+        {% set n = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_trips_sampled') %}
 
         {% set bad = ['unknown', 'unavailable', 'none', 'None'] %}
@@ -86,16 +91,16 @@
 
     - type: markdown
       content: >
-        {% set unit = state_attr('sensor.my_ev9_observed_range',
+        {% set unit = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_unit') or '' %}
 
-        {% set overall = state_attr('sensor.my_ev9_observed_range',
+        {% set overall = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_overall') %}
 
-        {% set temp = state_attr('sensor.my_ev9_observed_range',
+        {% set temp = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_by_temperature') %}
 
-        {% set speed = state_attr('sensor.my_ev9_observed_range',
+        {% set speed = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_by_speed') %}
 
         {% set temp_rows = temp if (temp is iterable and temp is not string)
@@ -148,10 +153,10 @@
 
     - type: markdown
       content: >
-        {% set trend = state_attr('sensor.my_ev9_observed_range',
+        {% set trend = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_monthly_trend') %}
 
-        {% set unit = state_attr('sensor.my_ev9_observed_range',
+        {% set unit = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_unit') or '' %}
 
         {% set rows = trend if (trend is iterable and trend is not string)
@@ -181,31 +186,31 @@
       title: Driving pattern
       entities:
         - type: attribute
-          entity: sensor.my_ev9_observed_range
+          entity: sensor.melodev_observed_range_efficiency
           attribute: driving_trips_per_week
           name: Trips / week
         - type: attribute
-          entity: sensor.my_ev9_observed_range
+          entity: sensor.melodev_observed_range_efficiency
           attribute: driving_avg_trip_distance
           name: Avg trip distance
         - type: attribute
-          entity: sensor.my_ev9_observed_range
+          entity: sensor.melodev_observed_range_efficiency
           attribute: driving_avg_speed
           name: Avg speed
         - type: attribute
-          entity: sensor.my_ev9_observed_range
+          entity: sensor.melodev_observed_range_efficiency
           attribute: driving_window_days
           name: Window (days)
 
     - type: markdown
       content: >
-        {% set home = state_attr('sensor.my_ev9_observed_range',
+        {% set home = state_attr('sensor.melodev_observed_range_efficiency',
         'charging_home') %}
 
-        {% set away = state_attr('sensor.my_ev9_observed_range',
+        {% set away = state_attr('sensor.melodev_observed_range_efficiency',
         'charging_away') %}
 
-        {% set bands = state_attr('sensor.my_ev9_observed_range',
+        {% set bands = state_attr('sensor.melodev_observed_range_efficiency',
         'charging_by_soc_band') %}
 
         {% set band_rows = bands if (bands is iterable and bands is not

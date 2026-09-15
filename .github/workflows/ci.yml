@@ -86,6 +86,8 @@ jobs:
           python test/ha_import_check.py
       - name: Coordinator analytics wiring
         run: python test/coordinator_analytics_test.py
+      - name: Range-map key wiring
+        run: python test/map_keys_test.py
 
   hacs:
     runs-on: ubuntu-latest

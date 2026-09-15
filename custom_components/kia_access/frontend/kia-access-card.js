@@ -3270,8 +3270,65 @@ g.KiaAccessCommands={
       this._built = false;
       this._map = null;
       this._isoCache = {};
+      // api_key/tomtom_key sourced from the integration's own Options
+      // (kia_access/map_keys, an admin-only websocket command -- see
+      // __init__.py's _map_keys_for_entry) when this card's config didn't
+      // set them explicitly, so nobody has to duplicate a real API key
+      // into Lovelace YAML just to get a routed range map.
+      this._fetchedKeys = null;
+      this._fetchingFor = null;
       if (!this._root) this._root = this.attachShadow({ mode: "open" });
       if (this._hass) this._render();
+    }
+
+    // Fire-and-remember: kicks off the websocket fetch at most once per
+    // entry_id, and only when the card config didn't already supply a key
+    // itself (an explicit api_key/tomtom_key always wins, no fetch needed).
+    _maybeFetchKeys() {
+      if (this._rm.api_key || this._rm.tomtom_key) return; // config already set one/both
+      if (!this._entryId || !this._hass || !this._hass.connection) return;
+      if (this._fetchedKeys !== null || this._fetchingFor === this._entryId) return;
+      var self0 = this;
+      var entryId = this._entryId;
+      this._fetchingFor = entryId;
+      this._hass.connection.sendMessagePromise({ type: "kia_access/map_keys", entry_id: entryId })
+        .then(function (res) {
+          if (self0._entryId !== entryId) return; // vehicle switched mid-flight
+          self0._fetchedKeys = res || {};
+          // the tile layer is picked once, at first map build (loadLeafletJs()
+          // racing this same websocket call) -- if it lost that race and fell
+          // back to plain OSM tiles, swap in the styled Geoapify layer now
+          // that a key actually arrived, instead of leaving it stuck until a
+          // full page reload.
+          if (self0._map && self0._L && !self0._rm.api_key && self0._fetchedKeys.api_key) {
+            var next = self0._tileLayer(self0._L, self0._fetchedKeys.api_key);
+            next.addTo(self0._map);
+            if (self0._tiles) self0._map.removeLayer(self0._tiles);
+            self0._tiles = next;
+          }
+          self0._draw(false); // upgrade the range shape from the plain circle
+        })
+        .catch(function (e) {
+          if (self0._entryId !== entryId) return;
+          // stop retrying every render -- a permission/network failure here
+          // just means the card falls back to its existing circle behavior
+          console.warn("kia-range-map-card: could not fetch map keys from the integration", e);
+          self0._fetchedKeys = {};
+        });
+    }
+
+    _tileLayer(L, apiKey) {
+      return apiKey
+        ? L.tileLayer(
+            "https://maps.geoapify.com/v1/tile/" +
+              encodeURIComponent(this._rm.style || "osm-bright-grey") +
+              "/{z}/{x}/{y}.png?apiKey=" + encodeURIComponent(apiKey),
+            { maxZoom: 19, attribution: "&copy; Geoapify, &copy; OpenStreetMap contributors" }
+          )
+        : L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap contributors"
+          });
     }
 
     getCardSize() {
@@ -3312,6 +3369,8 @@ g.KiaAccessCommands={
       this._rawId = entId;
       var flat = flatFromAttributes(st.attributes);
       this._entryId = st.attributes.entry_id || null;
+      this._maybeFetchKeys();
+      var fk = this._fetchedKeys || {};
       var lat = Number(flat["vehicle.location_latitude"]);
       var lon = Number(flat["vehicle.location_longitude"]);
       var rk = Number(flat["vehicle.ev_driving_range"]);
@@ -3322,8 +3381,12 @@ g.KiaAccessCommands={
         lat: lat, lon: lon,
         oneWay: RNG.reach(rk, Object.assign({}, o, { roundTrip: false })),
         round: RNG.reach(rk, Object.assign({}, o, { roundTrip: true })),
-        apiKey: this._rm.api_key || null,
-        tomtomKey: this._rm.tomtom_key || null,
+        // explicit card config always wins; otherwise whatever the
+        // integration's own Options had (still null on the very first
+        // render, before _maybeFetchKeys()'s websocket call resolves --
+        // _draw() gets called again once it does)
+        apiKey: this._rm.api_key || fk.api_key || null,
+        tomtomKey: this._rm.tomtom_key || fk.tomtom_key || null,
         mode: this._rm.mode || "drive"
       };
     }
@@ -3373,19 +3436,7 @@ g.KiaAccessCommands={
         if (!el || self0._map) return;
         self0._L = L;
         self0._map = L.map(el, { zoomSnap: 0.5 });
-        var key = inp.apiKey;
-        var tiles = key
-          ? L.tileLayer(
-              "https://maps.geoapify.com/v1/tile/" +
-                encodeURIComponent(self0._rm.style || "osm-bright-grey") +
-                "/{z}/{x}/{y}.png?apiKey=" + encodeURIComponent(key),
-              { maxZoom: 19, attribution: "&copy; Geoapify, &copy; OpenStreetMap contributors" }
-            )
-          : L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-              maxZoom: 19,
-              attribution: "&copy; OpenStreetMap contributors"
-            });
-        tiles.addTo(self0._map);
+        self0._tiles = self0._tileLayer(L, inp.apiKey).addTo(self0._map);
         self0._layers = L.layerGroup().addTo(self0._map);
         self0._draw(true);
         setTimeout(function () { self0._map && self0._map.invalidateSize(); }, 90);
