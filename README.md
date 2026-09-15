@@ -1207,24 +1207,38 @@ to individual retained topics; set `mqtt.publishRaw: true` if you want it. The
 `kia/ev9/state` JSON blob still contains everything (turn it off with
 `publishJson: false`).
 
-**Using `vehicles: [...]` to rotate through multiple cars?** Every topic above
-gets the vehicle's VIN inserted (`kia/ev9/VIN1/ev_battery_percentage`,
-`kia/ev9/VIN2/ev_battery_percentage`, …) instead of all cars sharing one set
-of topics — otherwise the last-processed vehicle would silently overwrite
-every other one's retained state. Each vehicle also publishes its own
-`kia/ev9/<VIN>/status` (`online`, refreshed on every poll — there's no single
-Last-Will-and-Testament that can represent N cars, so this one doesn't flip to
-`offline` on disconnect the way the plain single-vehicle status topic does).
+**Every topic above gets the vehicle's VIN inserted**
+(`kia/ev9/VIN1/ev_battery_percentage`, …) — whether you're using
+`vehicles: [...]` to rotate through several cars in one module block, or
+running one module block per car (each its own `vin:`), or even a single
+car with no `vehicles:` at all. It's always scoped by the vehicle's own
+identity now, not just in rotate mode: two SEPARATE module blocks for two
+different cars can easily end up pointed at the same broker + same
+`topicPrefix`, and without per-vehicle scoping in that case too, the two
+cars silently overwrote each other's retained state — real data corruption
+(car B's telemetry showing up under whatever HA device/dashboard still
+labelled car A), not just an inconvenience.
+**If you're upgrading from before this changed:** a genuinely
+lone single-vehicle setup's topics move from `kia/ev9/...` to
+`kia/ev9/<VIN>/...` — repoint any dashboard/automation/HA MQTT sensor at
+the new path (or subscribe to `kia/ev9/#` if you'd rather not hardcode the
+VIN). If your account is Kia USA, remember the value here is the vehicle's
+own `id`, not its literal VIN — see the VIN-fallback note above.
+Each vehicle also publishes its own `kia/ev9/<VIN>/status` (`online`,
+refreshed on every poll — there's no single Last-Will-and-Testament that
+can represent more than one car, so this one doesn't flip to `offline` on
+disconnect the way the connection-level status topic does).
 Remove a car from `vehicles:` and its own status topic is published
-`offline` (retained) on the next poll, so it stops looking falsely available
-— its individual value topics (`ev_battery_percentage` etc.) are left as-is,
-same as any other retained MQTT value once nothing's updating it. A vehicle
-that stays in `vehicles:` but stops appearing in the account itself (sold,
-removed from the Kia app, …) is retired the same way after a few consecutive
-successful polls that don't see it — one flaky/incomplete account response
-alone won't retire a car that's still really there.
-Not rotating (a single `vin:`, or one module block per car)? Topics are
-unchanged from before this existed.
+`offline` (retained) on the very next poll — even if that poll itself
+fails to fetch anything (this diff only needs your config, not a
+successful account response) — so it stops looking falsely available; its
+individual value topics (`ev_battery_percentage` etc.) are left as-is,
+same as any other retained MQTT value once nothing's updating it. A
+vehicle that stays in `vehicles:` but stops appearing in the account
+itself (sold, removed from the Kia app, …) is retired the same way after
+a few consecutive successful polls that don't see it — one flaky/
+incomplete account response alone won't retire a car that's still really
+there.
 
 ### Home Assistant discovery (mode B only)
 

@@ -1268,16 +1268,28 @@ module.exports = NodeHelper.create({
     const client = this.mqttClient(m);
     if (!client) return;
 
-    // Rotate mode: N vehicles share one mqtt connection/topicPrefix --
-    // without a VIN segment, every car would publish to (and retained-
-    // overwrite) the exact SAME topics, and HA discovery would only ever
-    // register whichever vehicle happened to be processed first. A card/
-    // dashboard/automation built on a pre-rotate single-vehicle setup is
-    // unaffected: vin is only non-empty when config.vehicles is actually
-    // configured, so its topics are unchanged from before this feature
-    // existed.
-    const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
-    const vin = rotating ? vehicleIdentity(payload.vehicle) : "";
+    // Every vehicle gets its own MQTT namespace whenever it has a
+    // resolvable identity (VIN or, for Kia USA, its account-issued id --
+    // see vehicleIdentity()), regardless of whether THIS config is
+    // "rotating" -- a previous version only scoped topics in rotate mode
+    // (config.vehicles set), reasoning that a lone single-vehicle `vin:`
+    // config's topics should stay exactly as they were before rotate mode
+    // existed. That missed a DIFFERENT, equally-documented way to run more
+    // than one vehicle: several separate module blocks, each its own
+    // single-vehicle `vin:` config (README's "add this module more than
+    // once" option) -- none of which is "rotating" individually, but which
+    // can share the exact same mqtt url/username/password/topicPrefix
+    // (mqttClient()'s own connection-sharing key), and so the exact same
+    // connection object. Both silently published to the SAME unscoped
+    // topics, each retained-overwriting the other's state -- genuine
+    // cross-vehicle data corruption (car B's telemetry readable under
+    // what a dashboard/HA-discovery device still labels car A), not just
+    // a missing convenience. Scoping unconditionally on the vehicle's own
+    // identity (not on config shape) closes that -- the one-time cost is
+    // an existing lone-single-vehicle setup's topics gaining a `/<vin>/`
+    // segment they didn't have before; see the README/CHANGELOG for the
+    // migration note.
+    const vin = vehicleIdentity(payload.vehicle);
     const basePrefix = String(m.topicPrefix || "kia").replace(/\/+$/, "");
     const prefix = vin ? basePrefix + "/" + vin : basePrefix;
     const retain = m.retain !== false;
