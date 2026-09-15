@@ -28,6 +28,15 @@
         red: -100
         yellow: -15
         green: -5
+      # rangeAccuracy (this sensor's STATE, not its attributes) only
+      # populates once a trip closes with both a starting Kia-range
+      # reading and a starting % -- until then the state is "unknown" and
+      # the gauge card would otherwise show a bare "Entity is non-numeric"
+      # warning instead of just staying hidden
+      visibility:
+        - condition: state
+          entity: sensor.melodev_observed_range_efficiency
+          state_not: unknown
 
     - type: custom:apexcharts-card
       header:
