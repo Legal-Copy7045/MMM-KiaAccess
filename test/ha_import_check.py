@@ -567,10 +567,114 @@ assert _cb(_bc({"block_automated_climate": True}), "lock", _ctx(None)) is False,
 assert _cb(_bc({"block_automated_climate": True}), "stop_climate", None) is True
 assert co.KiaAccessCoordinator._poi_key(40.712345, -79.754321) == "40.7123,-79.7543"
 
+# async_run_command() must serialize concurrent calls -- a hostile-review
+# finding: without a lock, two nearly-simultaneous commands (e.g. an
+# automation firing stop_charge right as a user taps "Start charge" from a
+# different session) each independently dispatched to Kia concurrently,
+# with no ordering guarantee, and whichever one's handler happened to
+# finish LAST silently clobbered self.last_action regardless of which
+# command actually completed last.
+_cmd_order = []
+
+
+async def _fake_executor_job(fn, *args):
+    # simulate a real in-flight network call -- the FIRST command dispatched
+    # (start_charge) deliberately takes LONGER than the second (stop_charge)
+    # so that, without the lock, the second call's executor job would finish
+    # first and reorder _cmd_order/last_action -- proving this test actually
+    # exercises the race, not just happening to preserve call order because
+    # both delays were equal.
+    job = args[0] if args else {}
+    delay = 0.05 if job.get("command") == "start_charge" else 0.01
+    await asyncio.sleep(delay)
+    return fn(*args)
+
+
+def _fake_run_command(job):
+    _cmd_order.append(job["command"])
+    return {"ok": True}
+
+
+class _CmdSelf:
+    pass
+
+
+_cmd_self = _CmdSelf()
+_cmd_self._command_lock = asyncio.Lock()
+_cmd_self._unconfirmed_commands = {}
+_cmd_self.last_action = {}
+_cmd_self._climate_blocked = lambda command, context: False
+_cmd_self._job = lambda **kw: {"command": kw["command"]}
+_cmd_self.hass = type("H", (), {"async_add_executor_job": staticmethod(_fake_executor_job)})()
+_cmd_self.async_update_listeners = lambda: None
+
+
+async def _fake_request_refresh():
+    pass
+
+
+_cmd_self.async_request_refresh = _fake_request_refresh
+
+_orig_run_command = co.kia_client.run_command
+co.kia_client.run_command = _fake_run_command
+try:
+    async def _run_both():
+        await asyncio.gather(
+            co.KiaAccessCoordinator.async_run_command(_cmd_self, "start_charge"),
+            co.KiaAccessCoordinator.async_run_command(_cmd_self, "stop_charge"),
+        )
+
+    asyncio.run(_run_both())
+finally:
+    co.kia_client.run_command = _orig_run_command
+
+assert _cmd_order == ["start_charge", "stop_charge"], (
+    f"two concurrently-started commands must be serialized (run one at a time, in call order), "
+    f"not dispatched to Kia at the same time: {_cmd_order}"
+)
+assert _cmd_self.last_action["name"] == "stop_charge", (
+    "last_action must reflect whichever command actually ran LAST, not whichever executor job "
+    f"happened to win a race: {_cmd_self.last_action}"
+)
+
 # diagnostics must redact the GPS (incl. the combined "location" string) + keys
 diag = importlib.import_module(f"{pkg}.diagnostics")
 assert {"location", "location_latitude", "location_longitude", "token",
         "password", "pin", "key"} <= diag._REDACT
+
+# entry.options (routing_api_key/geocoding_api_key -- live, usable API
+# keys; static_destinations -- typically home/frequent addresses) must
+# actually be redacted in the diagnostics OUTPUT, not just listed in
+# _REDACT -- a hostile-review finding: entry.options used to be included
+# in the diagnostics payload completely raw (`dict(entry.options)`, never
+# passed through async_redact_data at all), so downloading diagnostics to
+# attach to a bug report -- exactly what HA's own UI invites -- leaked
+# both keys in plain text.
+_diag_entry = type("Entry", (), {
+    "entry_id": "diag",
+    "data": {"username": "d@e.com"},
+    "options": {
+        "routing_api_key": "tomtom-secret-abc123",
+        "geocoding_api_key": "geoapify-secret-xyz789",
+        "static_destinations": "Home | 123 Main St",
+        "scan_interval": 30,
+    },
+})()
+_diag_hass = type("H", (), {
+    "data": {const.DOMAIN: {}},
+})()
+_diag_result = asyncio.run(diag.async_get_config_entry_diagnostics(_diag_hass, _diag_entry))
+_diag_options = _diag_result["entry"]["options"]
+assert _diag_options["routing_api_key"] != "tomtom-secret-abc123", (
+    f"routing_api_key must be redacted in diagnostics output, got: {_diag_options}"
+)
+assert _diag_options["geocoding_api_key"] != "geoapify-secret-xyz789", (
+    f"geocoding_api_key must be redacted in diagnostics output, got: {_diag_options}"
+)
+assert _diag_options["static_destinations"] != "Home | 123 Main St", (
+    f"static_destinations must be redacted in diagnostics output, got: {_diag_options}"
+)
+assert _diag_options["scan_interval"] == 30, "a non-sensitive option must pass through unredacted"
 
 init = importlib.import_module(pkg)
 assert hasattr(init, "_register_frontend")
@@ -1166,6 +1270,45 @@ assert init._account_hash_for(_setup_entry) not in _setup_hass.data.get(init._AC
 assert _setup_entry.entry_id not in _setup_hass.data.get(init.DOMAIN, {}), (
     "a failed setup must not leave a broken coordinator registered in hass.data"
 )
+
+# --- async_setup_entry(): a Store.async_load() failure (a truncated/
+# corrupted .storage file -- not written atomically, unlike
+# kia_client._save_token()) must surface as ConfigEntryNotReady, not a bare
+# exception -- a hostile-review finding: async_load_sessions()/
+# async_load_prefs() had no guard of their own, so this raised whatever
+# Store.async_load() raised, and HA's config-entry framework treats
+# anything that ISN'T ConfigEntryNotReady as a hard SETUP_ERROR it does NOT
+# automatically retry -- the integration stayed broken until the user
+# noticed and manually reloaded, instead of self-healing (an empty/reset
+# store) on HA's own retry schedule the way a first-refresh failure
+# already does. ---
+class _FakeCoordinatorCorruptStore(_FakeCoordinatorForSetup):
+    async def async_load_sessions(self):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")  # a truncated-JSON shape
+
+
+_corrupt_hass = type("H", (), {"data": {}, "config_entries": _FailingConfigEntries()})()
+_corrupt_entry = _fake_entry(
+    "corrupt", "USA:KIA:corrupt@example.com",
+    {"username": "corrupt@example.com", "region": "USA", "brand": "KIA", "vin": ""},
+)
+init.KiaAccessCoordinator = _FakeCoordinatorCorruptStore
+init._register_frontend = _fake_register_frontend
+try:
+    try:
+        asyncio.run(init.async_setup_entry(_corrupt_hass, _corrupt_entry))
+        raise AssertionError("expected the simulated corrupted-store failure to propagate")
+    except init.ConfigEntryNotReady as err:
+        assert "sessions/trips/prefs" in str(err), str(err)
+    except Exception as err:  # noqa: BLE001
+        raise AssertionError(
+            f"a corrupted-store failure must raise ConfigEntryNotReady (so HA retries "
+            f"automatically), not a bare {type(err).__name__} (a hard SETUP_ERROR HA won't "
+            f"retry on its own): {err}"
+        ) from err
+finally:
+    init.KiaAccessCoordinator = _orig_coordinator_cls
+    init._register_frontend = _orig_register_frontend
 
 # --- async_setup(): HA never calls async_setup_entry for a DISABLED entry,
 # so relying on that alone would leave a legacy entry's stale unique_id

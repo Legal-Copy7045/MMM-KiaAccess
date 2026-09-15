@@ -81,6 +81,20 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # refresh / _update_sessions() / _update_trips() / _emit_alerts()'s
         # shared state. Serialize the whole update instead.
         self._update_lock = asyncio.Lock()
+        # async_run_command() had no lock at all -- two nearly-simultaneous
+        # calls (an automation firing stop_charge right as a user taps
+        # "Start charge" from a different session, say) each independently
+        # popped self._unconfirmed_commands and ran their own executor job,
+        # fully concurrently. Whichever one's success/failure handler ran
+        # LAST silently overwrote self.last_action regardless of actual
+        # completion order, and both dispatched to Kia's API with no
+        # ordering guarantee at all -- for a stateful pair like start/stop
+        # charge, that's two contradictory commands in flight at once with
+        # no serialization. Same fix as _update_lock above: run the whole
+        # command body under one lock so a second call waits for the first
+        # to actually finish (and reflects the truthful last-completed
+        # state) instead of racing it.
+        self._command_lock = asyncio.Lock()
         # wall-clock (time.time(), not time.monotonic()) so a HA restart mid-
         # "how long has this been continuously true" window doesn't silently
         # reset the clock on the not-plugged-in-at-home / moved-while-parked
@@ -1512,39 +1526,47 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "('Block automated climate' option). Start it by hand from the "
                 "card, the button, or Developer Tools."
             )
-        job = self._job(command=command, options=options or {})
-        # A new attempt of this command resolves any prior "unconfirmed" flag
-        # for it -- the point is only to warn about the retry itself, not to
-        # track an unresolved ambiguity forever.
-        self._unconfirmed_commands.pop(command, None)
-        self.last_action = {
-            "name": command,
-            "status": "running",
-            "at": dt_util.utcnow().isoformat(),
-        }
-        self.async_update_listeners()
-        try:
-            await self.hass.async_add_executor_job(kia_client.run_command, job)
-            self.last_action = {**self.last_action, "status": "done"}
-        except kia_client.CommandUnconfirmed as err:
-            # The request timed out -- Kia's protocol has no ID-less way to
-            # ask afterward whether the vehicle actually received it, so
-            # this is genuinely unknown, not a clear failure. Flag it so a
-            # caller (the card, before letting a climate/charge start-vs-
-            # stop retry through) can ask the user to confirm rather than
-            # silently sending a second command on top of an unresolved one.
-            self.last_action = {**self.last_action, "status": "unconfirmed"}
-            self._unconfirmed_commands[command] = {
-                "since": dt_util.utcnow().isoformat(),
-                "message": str(err),
+        # Serializes every command through this coordinator -- see the lock's
+        # own comment in __init__ for why: without it, two nearly-
+        # simultaneous calls could dispatch to Kia concurrently with no
+        # ordering guarantee, and whichever one's handler happened to finish
+        # last would silently clobber self.last_action regardless of which
+        # command actually completed last.
+        async with self._command_lock:
+            job = self._job(command=command, options=options or {})
+            # A new attempt of this command resolves any prior "unconfirmed"
+            # flag for it -- the point is only to warn about the retry
+            # itself, not to track an unresolved ambiguity forever.
+            self._unconfirmed_commands.pop(command, None)
+            self.last_action = {
+                "name": command,
+                "status": "running",
+                "at": dt_util.utcnow().isoformat(),
             }
-            raise
-        except Exception:
-            self.last_action = {**self.last_action, "status": "failed"}
-            raise
-        finally:
             self.async_update_listeners()
-            await self.async_request_refresh()
+            try:
+                await self.hass.async_add_executor_job(kia_client.run_command, job)
+                self.last_action = {**self.last_action, "status": "done"}
+            except kia_client.CommandUnconfirmed as err:
+                # The request timed out -- Kia's protocol has no ID-less way
+                # to ask afterward whether the vehicle actually received it,
+                # so this is genuinely unknown, not a clear failure. Flag it
+                # so a caller (the card, before letting a climate/charge
+                # start-vs-stop retry through) can ask the user to confirm
+                # rather than silently sending a second command on top of an
+                # unresolved one.
+                self.last_action = {**self.last_action, "status": "unconfirmed"}
+                self._unconfirmed_commands[command] = {
+                    "since": dt_util.utcnow().isoformat(),
+                    "message": str(err),
+                }
+                raise
+            except Exception:
+                self.last_action = {**self.last_action, "status": "failed"}
+                raise
+            finally:
+                self.async_update_listeners()
+                await self.async_request_refresh()
 
     async def async_force_refresh(self) -> None:
         """Manual 'refresh now' -- wakes the car for one live pull from Kia's

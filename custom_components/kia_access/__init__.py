@@ -15,7 +15,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 
@@ -203,8 +203,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     account_poller.refcount += 1
     coordinator.account_poller = account_poller
     try:
-        await coordinator.async_load_sessions()
-        await coordinator.async_load_prefs()
+        # async_load_sessions()/async_load_prefs() call Store.async_load()
+        # with no guard of their own -- a truncated/corrupted .storage file
+        # (an interrupted write: power loss, OOM-kill; these aren't written
+        # atomically the way kia_client._save_token() deliberately is) makes
+        # that raise. Left as a bare exception, HA's config-entry framework
+        # treats it as a hard SETUP_ERROR, not something it retries on its
+        # own -- the integration stays broken until the user notices and
+        # manually reloads. ConfigEntryNotReady is what tells HA "this is
+        # transient, keep retrying on the normal backoff schedule" (the same
+        # signal async_config_entry_first_refresh() below already raises on
+        # its own failures) -- converting one here means a corrupted store
+        # self-heals into an empty one on HA's own retry rather than staying
+        # stuck.
+        try:
+            await coordinator.async_load_sessions()
+            await coordinator.async_load_prefs()
+        except Exception as err:  # noqa: BLE001
+            raise ConfigEntryNotReady(
+                f"could not load persisted sessions/trips/prefs: {err}"
+            ) from err
         await coordinator.async_config_entry_first_refresh()
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
