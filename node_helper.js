@@ -25,6 +25,7 @@ const haDiscovery = require("./core/ha-discovery.js");
 const haSource = require("./ha_source.js");
 const sessions = require("./core/sessions.js");
 const trips = require("./core/trips.js");
+const analytics = require("./core/analytics.js");
 const drange = require("./core/range.js");
 const isoline = require("./core/isoline.js");
 const webhook = require("./webhook.js");
@@ -669,7 +670,11 @@ module.exports = NodeHelper.create({
       charging: tripState.charging,
       carOn: tripState.carOn,
       locationLat: tripState.locationLat,
-      locationLon: tripState.locationLon
+      locationLon: tripState.locationLon,
+      // fed to core/analytics.js via the closed trip record -- both were
+      // already computed by buildState() above, no new data needed
+      rangeKm: tripState.rangeKm,
+      outsideTempC: tripState.outsideTempC
     }, {
       pricePerKwh: cl.pricePerKwh,
       capacityKwh: cl.capacityKwh || numOrNull(vehicle.ev_battery_capacity),
@@ -688,6 +693,24 @@ module.exports = NodeHelper.create({
         (tr.closed.cost != null ? " / " + tr.closed.cost : ""));
     }
     if (tripChanged) sessChanged = true; // reuse the "persist + re-render" flag
+
+    // ---- observed-performance analytics (core/analytics.js) ----
+    // Recomputed only when a trip or session actually closed/changed --
+    // cheap either way (pure aggregation over the already-in-memory
+    // s.trips/s.sessions arrays), but no reason to redo it every poll when
+    // neither history actually moved. Stored on `s` (not built fresh in
+    // emitData()) so every emitData() caller -- a live poll, serve()'s
+    // stale-cache replay, handleFetch()'s healthy-socket replay -- sees
+    // the same figures without recomputing, matching how s.rangeMap works.
+    if (tripChanged || sessChanged) {
+      const unitsOpt = { units: config.units };
+      s.analytics = {
+        observedEfficiency: analytics.observedEfficiency(s.trips, unitsOpt),
+        rangeAccuracy: analytics.rangeAccuracy(s.trips, unitsOpt),
+        chargingPerformance: analytics.chargingPerformance(s.sessions),
+        drivingPatterns: analytics.drivingPatterns(s.trips, unitsOpt)
+      };
+    }
 
     s.failStreak = 0;
     s.lastGood = payload;
@@ -1050,6 +1073,24 @@ module.exports = NodeHelper.create({
     // round-tripped so the frontend can restore its moved-while-parked
     // anchor after a restart instead of starting blank (see st()'s comment)
     payload.lastParked = s.lastParked || null;
+    // s.analytics is normally kept fresh incrementally in onPayload() (only
+    // recomputed when a trip/session actually changed) -- but right after a
+    // MagicMirror restart, s.trips/s.sessions are restored from disk while
+    // s.analytics itself is NOT (it's a pure derived value, so it isn't
+    // worth persisting), leaving it unset until the next trip/session
+    // change, which could be a long wait for a car that's just sitting
+    // parked. Compute it once here on first access instead of leaving the
+    // "Observed Range & Efficiency" widget empty until then.
+    if (s.analytics === undefined) {
+      const unitsOpt = { units: config.units };
+      s.analytics = {
+        observedEfficiency: analytics.observedEfficiency(s.trips, unitsOpt),
+        rangeAccuracy: analytics.rangeAccuracy(s.trips, unitsOpt),
+        chargingPerformance: analytics.chargingPerformance(s.sessions),
+        drivingPatterns: analytics.drivingPatterns(s.trips, unitsOpt)
+      };
+    }
+    payload.analytics = s.analytics;
     // note: `config` (credentials / token) is deliberately NOT echoed back
     this.sendSocketNotification("KIA_DATA", { identifier: id, payload });
   },

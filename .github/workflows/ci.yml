@@ -22,7 +22,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Syntax check
         run: |
-          for f in MMM-KiaAccess.js node_helper.js webhook.js exporter.js core/flatten.js core/visuals.js core/conditions.js core/state.js core/ha-discovery.js core/sessions.js core/range.js core/routing.js core/isoline.js core/trips.js core/dest-planner.js ha_source.js setup_python.js docs/build-gallery.js scripts/sync-core.js card/kia-access-card.src.js card/kia-range-map-card.src.js custom_components/kia_access/frontend/kia-access-card.js; do
+          for f in MMM-KiaAccess.js node_helper.js webhook.js exporter.js core/flatten.js core/visuals.js core/conditions.js core/state.js core/ha-discovery.js core/sessions.js core/range.js core/routing.js core/isoline.js core/trips.js core/dest-planner.js core/analytics.js ha_source.js setup_python.js docs/build-gallery.js scripts/sync-core.js card/kia-access-card.src.js card/kia-range-map-card.src.js custom_components/kia_access/frontend/kia-access-card.js; do
             echo "node --check $f"
             node --check "$f"
           done
@@ -51,7 +51,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Byte-compile
         run: |
-          python -m py_compile kia_bridge.py enroll.py kia_client.py conditions.py vehicle_state.py sessions.py
+          python -m py_compile kia_bridge.py enroll.py kia_client.py conditions.py vehicle_state.py sessions.py analytics.py
           python -m py_compile custom_components/kia_access/*.py
       - name: Spec sanity
         run: python test/spec_check.py
@@ -70,6 +70,8 @@ jobs:
         run: python test/routing_test.py
       - name: trips parity
         run: python test/trips_test.py
+      - name: analytics parity
+        run: python test/analytics_test.py
 
   hass:
     runs-on: ubuntu-latest
@@ -82,6 +84,8 @@ jobs:
         run: |
           pip install --quiet homeassistant
           python test/ha_import_check.py
+      - name: Coordinator analytics wiring
+        run: python test/coordinator_analytics_test.py
 
   hacs:
     runs-on: ubuntu-latest

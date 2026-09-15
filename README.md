@@ -125,6 +125,11 @@ USA, °C 16–30 elsewhere).
     roads taken, and a live traffic-delay figure.
   - **`Last trip`** / **`Cost per mile`** — from an automatic odometer-anchored
     trip log.
+  - **`Observed range & efficiency`** — real-world mi/% (temperature- and
+    speed-bucketed, plus a monthly trend), how far off Kia's own displayed
+    range has actually run, home charging power by SoC band, and a driving
+    usage profile — all from your own trip/charge history. Never claims
+    "battery health" (the USA API has no true state-of-health).
   - **`Last charge`** / **`Charge session`** — kWh + cost per session, the live
     one climbing while charging.
   - **`Parked`** — where the car last parked, with map deep-links and distance
@@ -150,8 +155,8 @@ car control lives in the Home Assistant integration.
   your own labels, units, formatters and order.
 - **Widgets** (each opt-in) — battery gauge, charge-progress bar with "full at
   HH:MM" and a live running cost, SoC / 12V sparklines, range ring, trip stats,
-  an auto trip log, a "how far can I drive" readout, a location map + a
-  reachable-area image.
+  an auto trip log, an "observed range & efficiency" panel, a "how far can I
+  drive" readout, a location map + a reachable-area image.
 - **Edge-triggered notifications** — the same rules as HA's alerts, popped
   through MagicMirror's `alert` module and broadcast to other modules.
 - **Push-out** — full state over **MQTT** (retained topics, optional HA
@@ -636,6 +641,7 @@ depends on its brand, region and powertrain):
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map`, and a `reach:true` "how far can I drive" readout (`reachFactor` / `reachReservePct` / `reachRoundTrip` / `pois`) — see [Location](#location--map) |
 | `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180). `awayPricePerKwh` (with `location.homeLat/homeLon` set) costs sessions started away from home at a separate rate; `zoneRates` (`[{name,lat,lon,radiusKm,pricePerKwh}]`) gives a per-charger rate checked first; the log marks 🏠 / 📍 and splits the total |
 | `visuals.tripLog` | `{ enabled:false }` | auto-detected drives (odometer delta + SoC drop): distance, **mi/kWh**, and cost per trip + a rolling total (`days` 30, `rows` 4). Uses `chargeCost.pricePerKwh` / `capacityKwh` for the £/kWh maths. HA side: `sensor.<v>_last_trip` + `sensor.<v>_cost_per_mile` |
+| `visuals.analytics` | `{ enabled:false }` | **Observed range & efficiency** — real-world mi/% (or km/%, temperature- and speed-bucketed, plus a monthly trend), how far off Kia's own displayed range has actually run, home charging power by SoC band, and a trips/week usage profile — all derived from your own trip/charge history, never claiming "battery health" (the USA API has no true state-of-health). HA side: `sensor.<v>_observed_range` |
 | `visuals.drivingTimes` | `{ enabled:false }` | standalone **Driving times** panel — destination, live drive time, `via <roads>`, ETA coloured by traffic delay (`delayStops`), calendar time + arrival battery. `source: "homeassistant"` only; reads `sensor.<v>_range_reach`. `max` 8, `order` "grouped", `zones` (panel-only whitelist / `-exclude`), `showVia`, `showConsumption` |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |

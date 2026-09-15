@@ -72,6 +72,9 @@ def _close(open_t, opts, end_at):
     kwh = (used_pct / 100) * cap if (used_pct is not None and used_pct > 0) else None
     mins = max(1, round((end_at - open_t["anchorAt"]) / 60000))
     mi = dist * MI_PER_KM
+    anchor_pct = open_t.get("anchorPct")
+    anchor_range_km = open_t.get("anchorRangeKm")
+    anchor_temp_c = open_t.get("anchorTempC")
     return {
         "startedAt": open_t["anchorAt"],
         "endedAt": end_at,
@@ -79,6 +82,11 @@ def _close(open_t, opts, end_at):
         "distanceKm": _round(dist, 1),
         "distanceMi": _round(mi, 1),
         "usedPct": _round(used_pct, 1) if used_pct is not None else None,
+        # raw start/end % (not just the usedPct delta) -- analytics.py's
+        # range_accuracy() needs the actual starting % to compare against
+        # what Kia displayed AT that %, not just how much was consumed.
+        "startPct": _round(anchor_pct, 1) if anchor_pct is not None else None,
+        "endPct": _round(open_t.get("lastPct"), 1) if open_t.get("lastPct") is not None else None,
         "kwh": _round(kwh, 2),
         "miPerKwh": _round(mi / kwh, 2) if (kwh is not None and kwh > 0) else None,
         "kwhPer100mi": _round(kwh / mi * 100, 1) if (kwh is not None and dist > 0) else None,
@@ -90,6 +98,15 @@ def _close(open_t, opts, end_at):
             haversine_km(open_t.get("anchorLat"), open_t.get("anchorLon"),
                          open_t.get("lastLat"), open_t.get("lastLon")), 1),
         "chargedDuring": bool(open_t.get("chargedSince")),
+        # Kia's own displayed EV range at the trip's START -- see
+        # analytics.py's range_accuracy(). None if the car didn't report a
+        # range reading at that moment.
+        "startRangeKm": _round(anchor_range_km, 1) if anchor_range_km is not None else None,
+        # outside temperature at the trip's start -- see analytics.py's
+        # observed_efficiency() temperature buckets. The START reading, not
+        # an average with the end: that's what the driver actually
+        # experienced deciding whether to trust the range estimate.
+        "outsideTempC": _round(anchor_temp_c, 1) if anchor_temp_c is not None else None,
     }
 
 
@@ -108,6 +125,8 @@ def update(open_t, cur, opts=None):
     pct = _num(cur.get("batteryPct"))
     lat = _num(cur.get("locationLat"))
     lon = _num(cur.get("locationLon"))
+    range_km = _num(cur.get("rangeKm"))
+    temp_c = _num(cur.get("outsideTempC"))
     charging = cur.get("charging") is True
     car_on = cur.get("carOn") is True
     gap_ms = (_num(opts.get("parkGapMin")) or PARK_GAP_MIN) * 60000
@@ -120,8 +139,10 @@ def update(open_t, cur, opts=None):
             "open": {
                 "anchorOdo": odo, "anchorPct": pct, "anchorAt": t,
                 "anchorLat": lat, "anchorLon": lon,
+                "anchorRangeKm": range_km, "anchorTempC": temp_c,
                 "lastOdo": odo, "lastPct": pct, "lastAt": t,
                 "lastLat": lat, "lastLon": lon,
+                "lastRangeKm": range_km, "lastTempC": temp_c,
                 "movedAt": t, "chargedSince": False,
             },
             "closed": None,
@@ -140,16 +161,28 @@ def update(open_t, cur, opts=None):
         if lat is not None:
             open_t["lastLat"] = lat
             open_t["lastLon"] = lon
+        if range_km is not None:
+            open_t["lastRangeKm"] = range_km
+        if temp_c is not None:
+            open_t["lastTempC"] = temp_c
         open_t["lastAt"] = t
         return {"open": open_t, "closed": None}
 
     if pct is not None:
         open_t["lastPct"] = pct
+    if range_km is not None:
+        open_t["lastRangeKm"] = range_km
+    if temp_c is not None:
+        open_t["lastTempC"] = temp_c
     if lat is not None and open_t["lastOdo"] == open_t["anchorOdo"]:
         open_t["anchorLat"] = lat
         open_t["anchorLon"] = lon
         if pct is not None:
             open_t["anchorPct"] = pct
+        if range_km is not None:
+            open_t["anchorRangeKm"] = range_km
+        if temp_c is not None:
+            open_t["anchorTempC"] = temp_c
     open_t["lastAt"] = t
 
     parked = (not car_on and t - open_t["movedAt"] >= gap_ms)
@@ -159,8 +192,10 @@ def update(open_t, cur, opts=None):
             "open": {
                 "anchorOdo": open_t["lastOdo"], "anchorPct": open_t["lastPct"], "anchorAt": t,
                 "anchorLat": open_t["lastLat"], "anchorLon": open_t["lastLon"],
+                "anchorRangeKm": open_t.get("lastRangeKm"), "anchorTempC": open_t.get("lastTempC"),
                 "lastOdo": open_t["lastOdo"], "lastPct": open_t["lastPct"], "lastAt": t,
                 "lastLat": open_t["lastLat"], "lastLon": open_t["lastLon"],
+                "lastRangeKm": open_t.get("lastRangeKm"), "lastTempC": open_t.get("lastTempC"),
                 "movedAt": t, "chargedSince": False,
             },
             "closed": trip,
@@ -171,6 +206,8 @@ def update(open_t, cur, opts=None):
         open_t["anchorAt"] = t
         open_t["anchorLat"] = open_t["lastLat"]
         open_t["anchorLon"] = open_t["lastLon"]
+        open_t["anchorRangeKm"] = open_t.get("lastRangeKm")
+        open_t["anchorTempC"] = open_t.get("lastTempC")
         open_t["chargedSince"] = False
     return {"open": open_t, "closed": None}
 

@@ -219,6 +219,15 @@ Module.register("MMM-KiaAccess", {
         parkGapMin: 8, // odometer stable this long = parked (ends the trip)
         retentionDays: 365 // trips kept on disk
       },
+      // "Observed range & efficiency" -- real-world mi/% and how far off
+      // Kia's own displayed range has run, both derived entirely from this
+      // car's own trip/charge history (see core/analytics.js). Never claims
+      // "battery health": the USA Kia Connect API doesn't report true
+      // state-of-health, only OBSERVED performance from data it actually
+      // provides.
+      analytics: {
+        enabled: false
+      },
       // readouts shown under the battery gauge (and removed from the table).
       // Uses your labels / formatters / hideWhenFalsy just like table rows.
       // charge power (kW) + current (A) show on the diagram under the charger
@@ -374,6 +383,7 @@ Module.register("MMM-KiaAccess", {
     this.openSession = null;
     this.trips = [];
     this.openTrip = null;
+    this.analytics = null; // { observedEfficiency, rangeAccuracy, chargingPerformance, drivingPatterns } from node_helper
     this.stale = false;
     this.staleNote = null;
     this.prevCond = {}; // { <reason>: bool, _charging: bool|null }
@@ -639,6 +649,7 @@ Module.register("MMM-KiaAccess", {
       this.openSession = cached.openSession || null;
       this.trips = cached.trips || [];
       this.openTrip = cached.openTrip || null;
+      this.analytics = cached.analytics || null;
     }
     this.errorMessage = (vin && this.vehicleErrors[vin]) || null;
     this.liveChargeTimer();
@@ -685,6 +696,9 @@ Module.register("MMM-KiaAccess", {
       source: c.source,
       homeassistant: c.homeassistant,
       refresh: c.refresh,
+      // node_helper needs this for core/analytics.js's mi vs. km formatting
+      // (everything else it displays server-side-free is already unit-agnostic)
+      units: c.units,
       geocode: c.geocode || (c.visuals && c.visuals.location && c.visuals.location.enabled),
       pythonBin: c.pythonBin,
       fetchTimeout: c.fetchTimeout,
@@ -782,6 +796,7 @@ Module.register("MMM-KiaAccess", {
       this.openSession = data.payload.openSession || null;
       this.trips = data.payload.trips || [];
       this.openTrip = data.payload.openTrip || null;
+      this.analytics = data.payload.analytics || null;
       // Always replace, never `if (truthy) assign` -- node_helper.js's
       // emitData() already does the "keep the last known value if this
       // particular poll didn't have one" job server-side (per-vehicle, via
@@ -1616,6 +1631,58 @@ Module.register("MMM-KiaAccess", {
     return el;
   },
 
+  // "Observed range & efficiency" — real-world mi/% (or km/%), how far off
+  // Kia's own displayed range has actually run, home charging power, and a
+  // trips/week usage profile. Entirely from this.analytics (computed
+  // server-side by core/analytics.js from trip/charge history already
+  // being collected) -- never claims "battery health", only OBSERVED
+  // performance, since the USA Kia Connect API has no true state-of-health.
+  analyticsEl() {
+    if (!(this.config.visuals || {}).analytics || !(this.config.visuals.analytics.enabled)) return null;
+    const a = this.analytics;
+    if (!a) return null;
+    const eff = a.observedEfficiency;
+    const acc = a.rangeAccuracy;
+    const chg = a.chargingPerformance;
+    const drv = a.drivingPatterns;
+    if (!eff && !acc && !chg && !drv) return null;
+
+    const rows = [];
+    if (eff && eff.overall != null) {
+      rows.push(["Observed efficiency", eff.overall + " " + eff.unit]);
+    }
+    if (acc && acc.accuracyPct != null) {
+      const sign = acc.accuracyPct >= 0 ? "+" : "";
+      rows.push([
+        "Kia's range estimate",
+        sign + acc.accuracyPct + "% (" + acc.kiaEstimate + " vs " + acc.observedEstimate + " " + acc.unit + ")"
+      ]);
+    }
+    if (chg && chg.home && chg.home.avgKw != null) {
+      rows.push(["Home charging", chg.home.avgKw + " kW avg"]);
+    }
+    if (drv && drv.tripsPerWeek != null) {
+      rows.push(["Driving pattern", drv.tripsPerWeek + " trips/wk · " + drv.avgTripDistance + " " + drv.unit + " avg"]);
+    }
+    if (!rows.length) return null;
+
+    const el = document.createElement("div");
+    el.className = "kiaaccess-batt-detail";
+    el.innerHTML =
+      '<div class="kiaaccess-bd-label" style="text-align:center;margin-bottom:2px">Observed range &amp; efficiency</div>' +
+      rows
+        .map(
+          (r) =>
+            '<div><span class="kiaaccess-bd-label">' +
+            this.escape(r[0]) +
+            '</span><span class="kiaaccess-bd-value">' +
+            this.escape(r[1]) +
+            "</span></div>"
+        )
+        .join("");
+    return el;
+  },
+
   // "Driving times" — a standalone destinations panel (drive time + route +
   // traffic-delay colour + arrival battery). Prefers HA's routed data
   // (this.rangeReach from sensor.<v>_range_reach); falls back to a local
@@ -1952,6 +2019,7 @@ Module.register("MMM-KiaAccess", {
         this.chargeLogEl(),
         this.tripLogEl(),
         this.tripStatsEl(),
+        this.analyticsEl(),
         this.drivingTimesEl(),
         this.locationEl()
       ].forEach((el) => el && wrapper.appendChild(el));

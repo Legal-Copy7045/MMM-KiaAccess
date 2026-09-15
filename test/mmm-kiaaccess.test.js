@@ -243,6 +243,59 @@ function freshModule(overrides) {
   clearTimeout(mod._watchdog);
 }
 
+// ---- socketNotificationReceived(): payload.analytics (core/analytics.js's
+// observed-performance data, computed server-side by node_helper.js) must
+// flow into mod.analytics for the active vehicle, and must be cached in
+// vehiclePayloads for a non-active one exactly like trips/sessions/rangeMap
+// already are -- the analyticsEl() widget (untested here, needs a real DOM)
+// reads mod.analytics directly, so if this plumbing silently dropped the
+// field the widget would just stay blank with no error anywhere. ----
+{
+  const mod = freshModule({
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  });
+  assert.strictEqual(mod.analytics, null, "starts unset");
+
+  const fakeAnalytics = {
+    observedEfficiency: { overall: 2.5, unit: "mi/%" },
+    rangeAccuracy: { accuracyPct: -12, kiaEstimate: 250, observedEstimate: 220, unit: "mi" },
+    chargingPerformance: { home: { avgKw: 11.2 } },
+    drivingPatterns: { tripsPerWeek: 5.2, avgTripDistance: 14, unit: "mi" }
+  };
+
+  // a non-active vehicle's analytics must be cached, not applied to mod.analytics
+  const idB = mod._fullIdentifier("VIN_B");
+  mod.socketNotificationReceived("KIA_DATA", {
+    identifier: idB,
+    payload: { vehicle: { VIN: "VIN_B" }, analytics: fakeAnalytics, _meta: {} }
+  });
+  assert.strictEqual(mod.analytics, null, "a non-active vehicle's analytics must not touch the active vehicle's view");
+  assert.deepStrictEqual(mod.vehiclePayloads.VIN_B.analytics, fakeAnalytics, (
+    "the non-active vehicle's analytics must still be cached for when it becomes active"
+  ));
+
+  // the active vehicle's own analytics must land on mod.analytics
+  const idA = mod._fullIdentifier("VIN_A");
+  mod.socketNotificationReceived("KIA_DATA", {
+    identifier: idA,
+    payload: { vehicle: { VIN: "VIN_A" }, analytics: fakeAnalytics, _meta: {} }
+  });
+  assert.deepStrictEqual(mod.analytics, fakeAnalytics);
+
+  // a later poll with no analytics key at all (e.g. before a trip/session
+  // has ever closed) must clear the stale value, not leave the previous
+  // vehicle/poll's figures on screen
+  mod.socketNotificationReceived("KIA_DATA", {
+    identifier: idA,
+    payload: { vehicle: { VIN: "VIN_A", ev_battery_percentage: 1 }, _meta: {} }
+  });
+  assert.strictEqual(mod.analytics, null, "a payload with no analytics must not leave the previous poll's stale figures showing");
+
+  clearTimeout(mod._timer);
+  clearTimeout(mod._watchdog);
+}
+
 // ---- socketNotificationReceived(): KIA_ERROR follows the same
 // active-vs-cached routing as KIA_DATA ----
 {
