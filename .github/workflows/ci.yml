@@ -20,6 +20,15 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
+      # No package-lock.json (this module deliberately ships zero required
+      # deps -- MagicMirror runs `npm install` in the module folder on
+      # install anyway) so `npm ci` isn't available here; `npm install`
+      # still pulls in the optionalDependencies (mqtt) the node_helper.js
+      # mqtt tests need -- without this they fail on every CI run with
+      # "mqtt package is installed in this repo -- connect() must return a
+      # client object", since require("mqtt") has nothing to find.
+      - name: Install dependencies
+        run: npm install
       - name: Syntax check
         run: |
           for f in MMM-KiaAccess.js node_helper.js webhook.js exporter.js core/flatten.js core/visuals.js core/conditions.js core/state.js core/ha-discovery.js core/sessions.js core/range.js core/routing.js core/isoline.js core/trips.js core/dest-planner.js core/analytics.js ha_source.js setup_python.js docs/build-gallery.js scripts/sync-core.js card/kia-access-card.src.js card/kia-range-map-card.src.js custom_components/kia_access/frontend/kia-access-card.js; do
@@ -49,6 +58,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
+      # test/dump_vehicle_test.py imports hyundai_kia_connect_api.exceptions
+      # directly (to exercise CommandUnconfirmed's RequestTimeoutError
+      # handling) -- without it installed here, that import fails before
+      # any assertion even runs.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
       - name: Byte-compile
         run: |
           python -m py_compile kia_bridge.py enroll.py kia_client.py conditions.py vehicle_state.py sessions.py analytics.py
