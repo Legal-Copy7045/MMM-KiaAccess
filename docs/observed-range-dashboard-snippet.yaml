@@ -1,0 +1,247 @@
+# Add this as a THIRD grid column inside the existing "EV9 Range" section
+# (path: ev9-range), alongside the two grids already there. Uses the new
+# sensor.<vehicle>_observed_range entity (core/analytics.js / analytics.py),
+# added in v2.66.0. Written against sensor.my_ev9_observed_range -- adjust
+# the entity_id prefix if your device name differs.
+#
+# No credentials in here -- this only touches the new analytics sensor.
+
+- type: grid
+  cards:
+    - type: heading
+      heading: Observed Range & Efficiency
+      heading_style: title
+      icon: mdi:chart-line
+
+    - type: gauge
+      name: Kia's range estimate vs. reality
+      entity: sensor.my_ev9_observed_range
+      min: -30
+      max: 30
+      needle: true
+      severity:
+        red: -100
+        yellow: -15
+        green: -5
+
+    - type: custom:apexcharts-card
+      header:
+        show: true
+        title: Range estimate accuracy — 90 days
+      graph_span: 90d
+      yaxis:
+        - min: -30
+          max: 30
+          decimals: 0
+      series:
+        - entity: sensor.my_ev9_observed_range
+          name: "% vs Kia's displayed range"
+          type: line
+          stroke_width: 2
+
+    - type: markdown
+      content: >
+        {% set acc = states('sensor.my_ev9_observed_range') %}
+
+        {% set kia = state_attr('sensor.my_ev9_observed_range',
+        'kia_estimated_range') %}
+
+        {% set obs = state_attr('sensor.my_ev9_observed_range',
+        'observed_range') %}
+
+        {% set unit = state_attr('sensor.my_ev9_observed_range', 'range_unit')
+        or 'mi' %}
+
+        {% set prf = state_attr('sensor.my_ev9_observed_range',
+        'personal_range_factor') %}
+
+        {% set n = state_attr('sensor.my_ev9_observed_range',
+        'efficiency_trips_sampled') %}
+
+        {% set bad = ['unknown', 'unavailable', 'none', 'None'] %}
+
+        {% if acc not in bad and n %}
+
+        ### Range accuracy
+
+        Kia's dash says **{{ kia }} {{ unit }}**. Your own last {{ n }} trips
+        have actually delivered closer to **{{ obs }} {{ unit }}** — that's
+        <b>{{ acc }}%</b> {{ 'above' if (acc | float(0)) >= 0 else 'below' }}
+        what it displays.
+
+        {% if prf is not none %}
+
+        Personal range factor: **{{ prf }}** — a real-world multiplier you
+        can use in place of a guessed reach factor for "how far can I
+        drive" estimates.
+
+        {% endif %}
+
+        {% else %}
+
+        _Not enough trip history yet — this fills in after a handful of
+        drives._
+
+        {% endif %}
+
+    - type: markdown
+      content: >
+        {% set unit = state_attr('sensor.my_ev9_observed_range',
+        'efficiency_unit') or '' %}
+
+        {% set overall = state_attr('sensor.my_ev9_observed_range',
+        'efficiency_overall') %}
+
+        {% set temp = state_attr('sensor.my_ev9_observed_range',
+        'efficiency_by_temperature') %}
+
+        {% set speed = state_attr('sensor.my_ev9_observed_range',
+        'efficiency_by_speed') %}
+
+        {% set temp_rows = temp if (temp is iterable and temp is not string)
+        else [] %}
+
+        {% set speed_rows = speed if (speed is iterable and speed is not
+        string) else [] %}
+
+        ### Observed efficiency
+
+        {% if overall is not none %}
+
+        Overall: **{{ overall }} {{ unit }}**
+
+        {% endif %}
+
+        {% if temp_rows | count > 0 %}
+
+        | By temperature | Trips | Efficiency |
+
+        |:--|--:|--:|
+
+        {% for b in temp_rows -%}
+
+        | {{ b.label }} | {{ b.tripCount }} | {{ b.efficiency }} {{ unit }} |
+
+        {% endfor %}
+
+        {% endif %}
+
+        {% if speed_rows | count > 0 %}
+
+        | By speed | Trips | Efficiency |
+
+        |:--|--:|--:|
+
+        {% for b in speed_rows -%}
+
+        | {{ b.label }} | {{ b.tripCount }} | {{ b.efficiency }} {{ unit }} |
+
+        {% endfor %}
+
+        {% endif %}
+
+        {% if (temp_rows | count) == 0 and (speed_rows | count) == 0 %}
+
+        _Not enough trips yet in more than one temperature/speed band._
+
+        {% endif %}
+
+    - type: markdown
+      content: >
+        {% set trend = state_attr('sensor.my_ev9_observed_range',
+        'efficiency_monthly_trend') %}
+
+        {% set unit = state_attr('sensor.my_ev9_observed_range',
+        'efficiency_unit') or '' %}
+
+        {% set rows = trend if (trend is iterable and trend is not string)
+        else [] %}
+
+        ### Monthly trend
+
+        {% if rows | count > 0 %}
+
+        | Month | Trips | Efficiency |
+
+        |:--|--:|--:|
+
+        {% for m in rows -%}
+
+        | {{ m.month }} | {{ m.tripCount }} | {{ m.efficiency }} {{ unit }} |
+
+        {% endfor %}
+
+        {% else %}
+
+        _Needs at least a couple of months of trips to show a trend._
+
+        {% endif %}
+
+    - type: entities
+      title: Driving pattern
+      entities:
+        - type: attribute
+          entity: sensor.my_ev9_observed_range
+          attribute: driving_trips_per_week
+          name: Trips / week
+        - type: attribute
+          entity: sensor.my_ev9_observed_range
+          attribute: driving_avg_trip_distance
+          name: Avg trip distance
+        - type: attribute
+          entity: sensor.my_ev9_observed_range
+          attribute: driving_avg_speed
+          name: Avg speed
+        - type: attribute
+          entity: sensor.my_ev9_observed_range
+          attribute: driving_window_days
+          name: Window (days)
+
+    - type: markdown
+      content: >
+        {% set home = state_attr('sensor.my_ev9_observed_range',
+        'charging_home') %}
+
+        {% set away = state_attr('sensor.my_ev9_observed_range',
+        'charging_away') %}
+
+        {% set bands = state_attr('sensor.my_ev9_observed_range',
+        'charging_by_soc_band') %}
+
+        {% set band_rows = bands if (bands is iterable and bands is not
+        string) else [] %}
+
+        ### Home charging performance
+
+        {% if home %}
+
+        **{{ home.avgKw }} kW** average · {{ home.count }} sessions · {{
+        home.avgKwh }} kWh / {{ home.avgMinutes }} min typical
+
+        {% else %}
+
+        _No home charging sessions logged yet._
+
+        {% endif %}
+
+        {% if band_rows | count > 0 %}
+
+        | SoC band | Sessions | Avg kW |
+
+        |:--|--:|--:|
+
+        {% for b in band_rows -%}
+
+        | {{ b.label }} | {{ b.sessionCount }} | {{ b.avgKw }} |
+
+        {% endfor %}
+
+        {% endif %}
+
+        {% if away %}
+
+        Away/public charging: **{{ away.avgKw }} kW** avg · {{ away.count }}
+        sessions (kept separate — a DC-fast session would otherwise blow out
+        the home average).
+
+        {% endif %}
