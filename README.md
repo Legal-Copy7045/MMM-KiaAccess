@@ -1355,9 +1355,14 @@ current.
   fails the build if you forget). The card bundle
   (`custom_components/kia_access/frontend/kia-access-card.js`) is generated
   the same way, from `card/*.src.js` + `core/*.js` — edit those, not the
-  bundle. Running the tests: `npm test` (JS) / `python test/*_test.py` +
-  `python test/ha_import_check.py` (Python, needs `pip install homeassistant`
-  for the last one).
+  bundle. Running the tests: `npm test` runs the JS suite only — a JS-only
+  edit to `core/sessions.js` etc. that silently drifts from its Python
+  mirror would pass `npm test` cleanly and only get caught by CI's separate
+  Python job. `npm run test:python` runs every `test/*_test.py` parity
+  check locally in one command (mirrors `.github/workflows/ci.yml`'s
+  "python"/"hass" jobs; the "hass" group needs `pip install homeassistant`
+  and is skipped with a warning if that's not installed), or `npm run
+  test:all` for both JS and Python together.
 
 ## Send to car
 

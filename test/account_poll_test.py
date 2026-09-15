@@ -90,6 +90,23 @@ try:
 except kia_client.ClientError as err:
     assert "VIN1" in str(err) and "0 vehicles this poll" in str(err)
 
+# VIN configured, account HAS vehicles this poll, but one has neither a VIN
+# nor an id (a badly degraded API response) -- it must still show up in the
+# "account currently has" list as an unidentified vehicle, not silently
+# vanish and make the diagnostic undercount what was actually returned
+try:
+    select_own_vehicle([_v("VIN2"), {"VIN": None, "id": None}], "VIN1")
+    raise AssertionError("expected a ClientError for a VIN mismatch")
+except kia_client.ClientError as err:
+    msg = str(err)
+    assert "VIN2" in msg, msg
+    assert "unidentified" in msg, (
+        "a vehicle with neither VIN nor id must still be represented, not silently dropped: " + msg
+    )
+    assert "0 vehicles this poll" not in msg, (
+        "the account DID return vehicles this poll -- must not claim otherwise " + msg
+    )
+
 
 # --------------------------------------------------------------------------
 # AccountPoller: dedup window + refcount bookkeeping
@@ -134,6 +151,57 @@ r3 = asyncio.run(poller.async_fetch(job))
 assert _calls["n"] == 2 and r3["meta"]["call"] == 2, (
     "a call outside the dedup window must trigger a real fetch"
 )
+
+# a FAILED fetch must also be deduped within the same window -- a sibling
+# coordinator's call while the account is broken must reuse that failure
+# instead of independently retrying the same broken login, which is what
+# actually accelerates tripping kia_client.py's own auth-failure cooldown
+_fail_calls = {"n": 0}
+
+
+def _fake_fetch_fails(job):
+    _fail_calls["n"] += 1
+    raise kia_client.ClientError(f"simulated auth failure #{_fail_calls['n']}")
+
+
+account_poll.kia_client.fetch = _fake_fetch_fails
+fail_poller = AccountPoller(_FakeHass(), "acct-hash-2")
+
+try:
+    asyncio.run(fail_poller.async_fetch(job))
+    raise AssertionError("expected the simulated failure to propagate")
+except kia_client.ClientError as err:
+    assert "simulated auth failure #1" in str(err)
+assert _fail_calls["n"] == 1
+
+# a second call right away must re-raise the SAME cached failure, not
+# attempt its own independent (also-failing) fetch
+try:
+    asyncio.run(fail_poller.async_fetch(job))
+    raise AssertionError("expected the cached failure to be re-raised")
+except kia_client.ClientError as err:
+    assert "simulated auth failure #1" in str(err), (
+        f"must re-raise the CACHED failure, not a fresh one: {err}"
+    )
+assert _fail_calls["n"] == 1, "a call inside the dedup window must not retry a failing fetch"
+
+# outside the window, a fresh attempt is made (and can itself fail again,
+# or succeed if whatever was broken has since cleared)
+fail_poller._last_error_at -= account_poll.DEDUP_WINDOW_SEC + 1
+try:
+    asyncio.run(fail_poller.async_fetch(job))
+    raise AssertionError("expected a fresh failure outside the dedup window")
+except kia_client.ClientError as err:
+    assert "simulated auth failure #2" in str(err)
+assert _fail_calls["n"] == 2
+
+# and a SUCCESS after a cached failure must clear that cached failure, not
+# leave it lingering to wrongly short-circuit some later call
+account_poll.kia_client.fetch = _fake_fetch
+fail_poller._last_error_at -= account_poll.DEDUP_WINDOW_SEC + 1
+ok_result = asyncio.run(fail_poller.async_fetch(job))
+assert ok_result["ok"] is True
+assert fail_poller._last_error is None, "a success must clear any previously cached failure"
 
 # refcount is plain bookkeeping the caller (see __init__.py's
 # async_setup_entry/async_unload_entry) owns -- exercise the same pattern

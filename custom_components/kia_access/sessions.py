@@ -17,7 +17,11 @@ MIN_KWH = 0.3
 # "capacity unknown" guess for some other model, or that model's own
 # energy/cost analytics would silently be computed off the wrong car's
 # battery size.
-_EV9_RE = re.compile(r"ev\s*9", re.IGNORECASE)
+# (?!\d) -- a trailing digit means this is some OTHER model whose name
+# merely starts with "ev9" (a hypothetical future "EV90"/"EV99"), not an
+# EV9 trim/variant (real examples like "EV9 GT-Line" still match fine,
+# since a space isn't a digit).
+_EV9_RE = re.compile(r"ev\s*9(?!\d)", re.IGNORECASE)
 
 
 def _is_ev9(model) -> bool:

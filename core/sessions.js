@@ -37,7 +37,11 @@
   // capacity genuinely unknown so the kWh/cost fields degrade to null,
   // same as any other missing-data case elsewhere in this module.
   function isEv9(model) {
-    return typeof model === "string" && /ev\s*9/i.test(model);
+    // (?!\d) -- a trailing digit means this is some OTHER model whose name
+    // merely starts with "ev9" (a hypothetical future "EV90"/"EV99"), not
+    // an EV9 trim/variant (real examples like "EV9 GT-Line" still match
+    // fine, since a space isn't a digit).
+    return typeof model === "string" && /ev\s*9(?!\d)/i.test(model);
   }
   function resolveCap(opts) {
     var cap = num(opts.capacityKwh);
@@ -281,6 +285,11 @@
     progress: progress,
     summary: summary,
     applyCost: applyCost,
-    DEFAULT_CAPACITY_KWH: DEFAULT_CAPACITY_KWH
+    DEFAULT_CAPACITY_KWH: DEFAULT_CAPACITY_KWH,
+    // exported so every OTHER place a pack-size fallback is needed (e.g.
+    // MMM-KiaAccess.js's driving-times arrival-kWh estimate) can gate on
+    // the exact same EV9 check instead of each re-implementing (and
+    // potentially drifting from) its own copy of this regex.
+    isEv9: isEv9
   };
 });

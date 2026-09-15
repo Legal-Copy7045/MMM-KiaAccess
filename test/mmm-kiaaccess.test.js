@@ -368,6 +368,52 @@ function freshModule(overrides) {
   }
 }
 
+// ---- drivingTimesEl(): the arrival-kWh hint's pack-size fallback must be
+// gated on the vehicle actually being an EV9 (see core/sessions.js's
+// isEv9()/resolveCap() for why) -- this method has its OWN separate
+// "|| 99.8" fallback for the same reason and had the same bug: blindly
+// assuming a 99.8kWh pack for ANY vehicle with no configured/reported
+// capacity, silently producing a wrong estimate for every other model. ----
+{
+  const prevDocument = global.document;
+  global.document = {
+    createElement: () => ({ className: "", innerHTML: "", style: {} })
+  };
+  try {
+    function buildMod(model) {
+      const mod = freshModule({
+        visuals: { drivingTimes: { enabled: true } }
+      });
+      mod.sessionLib = require("../core/sessions.js");
+      mod.destPlanner = require("../core/dest-planner.js");
+      mod.visualState = () => ({ batteryPct: 70 });
+      mod.rawPayload = { vehicle: { model } };
+      mod.rangeReach = {
+        pois: [{ name: "Home", source: "zone", km: 10, duration_min: 20, arrival_pct: 40 }],
+        driveTimeSource: "estimate"
+      };
+      return mod;
+    }
+
+    const nonEv9 = buildMod("Niro EV");
+    const elNonEv9 = nonEv9.drivingTimesEl();
+    assert.ok(elNonEv9, "must still render for a non-EV9 vehicle");
+    assert.ok(!elNonEv9.innerHTML.includes("kWh"), (
+      "a non-EV9 model with no configured/reported capacity must NOT show a " +
+      "kWh estimate borrowed from the EV9's own pack size: " + elNonEv9.innerHTML
+    ));
+
+    const ev9 = buildMod("EV9");
+    const elEv9 = ev9.drivingTimesEl();
+    assert.ok(elEv9.innerHTML.includes("kWh"), (
+      "an actual EV9 with no configured capacity must still fall back to " +
+      "its own 99.8kWh default: " + elEv9.innerHTML
+    ));
+  } finally {
+    global.document = prevDocument;
+  }
+}
+
 // ---- _modalReason: MagicMirror has exactly ONE mirror-wide alert-module
 // modal slot -- a hostile-audit finding: in rotate mode, two DIFFERENT
 // vehicles' critical conditions must never both believe they independently

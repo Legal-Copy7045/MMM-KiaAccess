@@ -20,7 +20,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
 
 from . import kia_client
-from .account_poll import AccountPoller
+from .account_poll import ACCOUNTS_KEY, AccountPoller, account_hash_for
 from .config_flow import _account_uid
 from .const import (
     COMMANDS,
@@ -39,21 +39,11 @@ _LOGGER = logging.getLogger(__name__)
 # module-level (not in hass.data[DOMAIN], which is the {entry_id: coordinator} map)
 _FRONTEND_REGISTERED = False
 
-# {account_hash: AccountPoller}, one per (region, brand, username) account --
-# shared by every config entry/coordinator for that account, however many
-# vehicles it has. Deliberately its own top-level hass.data key, not nested
-# under hass.data[DOMAIN] (which is {entry_id: coordinator} and unloading the
-# LAST entry clears that dict entirely -- a distinct key means this survives
-# any single entry's own reload independent of that).
-_ACCOUNTS_KEY = f"{DOMAIN}_accounts"
-
-
-def _account_hash_for(entry: ConfigEntry) -> str:
-    return kia_client._account_hash(  # noqa: SLF001
-        entry.data.get(CONF_REGION, "USA"),
-        entry.data.get(CONF_BRAND, "KIA"),
-        entry.data.get("username", ""),
-    )
+# see account_poll.py's ACCOUNTS_KEY/account_hash_for() -- moved there so
+# config_flow.py's Options-flow VIN discovery can share the same lookup
+# without a circular import.
+_ACCOUNTS_KEY = ACCOUNTS_KEY
+_account_hash_for = account_hash_for
 
 
 def _get_account_poller(hass: HomeAssistant, entry: ConfigEntry) -> AccountPoller:
@@ -200,13 +190,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # account (same region+brand+username, any number of vehicles) shares
     # ONE AccountPoller, so an N-vehicle account does roughly the same
     # amount of Kia API traffic a single-vehicle account does, not N times
-    # as much. Bumped here / dropped in async_unload_entry below -- but a
-    # failed first_refresh (ConfigEntryNotReady) never REACHES
-    # async_unload_entry (the entry was never "loaded"), and HA retries
-    # async_setup_entry from scratch on the next attempt; without the
-    # try/except below, every failed retry would bump refcount again with
-    # no matching decrement, permanently over-counting how many entries
-    # are actually using this account's poller.
+    # as much. Bumped here / dropped in async_unload_entry below -- but if
+    # setup fails ANYWHERE below (first refresh, forwarding to platforms,
+    # ...), the entry never reaches "loaded" and async_unload_entry is never
+    # called for it -- HA just retries async_setup_entry from scratch. The
+    # try/except must therefore cover this ENTIRE function body from here
+    # on, not just the first-refresh call: an earlier version only wrapped
+    # that, so a failure in async_forward_entry_setups (a platform module
+    # raising on import/setup, say) still bumped refcount with no matching
+    # decrement on every retry -- a slow, permanent leak in hass.data.
     account_poller = _get_account_poller(hass, entry)
     account_poller.refcount += 1
     coordinator.account_poller = account_poller
@@ -214,14 +206,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_load_sessions()
         await coordinator.async_load_prefs()
         await coordinator.async_config_entry_first_refresh()
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
         account_poller.refcount -= 1
         if account_poller.refcount <= 0:
             hass.data.get(_ACCOUNTS_KEY, {}).pop(account_poller.account_hash, None)
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
         raise
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 

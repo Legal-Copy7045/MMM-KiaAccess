@@ -837,7 +837,11 @@ def _run_options_vin_change(new_vin, other_entries):
     # return exercises the plain-free-text-field fallback path, matching
     # what this test asserted against before the VIN picker existed
     orig_discover = cf_mod._discover_vehicles_for_entry
-    cf_mod._discover_vehicles_for_entry = lambda entry: None
+
+    async def _no_discovery(hass, entry):
+        return None
+
+    cf_mod._discover_vehicles_for_entry = _no_discovery
     try:
         result = asyncio.run(cf_mod.KiaAccessOptionsFlow.async_step_init(flow, user_input))
     finally:
@@ -877,7 +881,11 @@ def _show_options_form(entry_data, discovered):
         "async_add_executor_job": _FakeHass.async_add_executor_job,
     })()
     orig = cf_mod._discover_vehicles_for_entry
-    cf_mod._discover_vehicles_for_entry = lambda e: discovered
+
+    async def _fake_discover(hass, entry):
+        return discovered
+
+    cf_mod._discover_vehicles_for_entry = _fake_discover
     try:
         return asyncio.run(cf_mod.KiaAccessOptionsFlow.async_step_init(flow, None))
     finally:
@@ -931,6 +939,80 @@ _form_offline = _show_options_form(
 )
 _key4, _sel4 = _vin_schema_entry(_form_offline)
 assert _sel4 is str, "discovery failure must fall back to a free-text VIN field"
+
+# --- _discover_vehicles_for_entry() itself (not mocked this time): when the
+# account already has a running AccountPoller, discovery MUST reuse it
+# (sharing its lock/dedup-window/failure-cache) instead of making its own
+# unshared kia_client.fetch() call -- a real security/reliability issue an
+# adversarial review caught: an unshared discovery fetch with broken
+# credentials would still hit kia_client.connect()'s account-wide
+# auth-failure cooldown file, so simply opening Configure could accelerate
+# or trigger a lockout that then blocks every coordinator's regular poll. ---
+_account_poll_mod = importlib.import_module(f"{pkg}.account_poll")
+
+
+class _FakePoller:
+    def __init__(self, result=None, err=None):
+        self.result = result
+        self.err = err
+        self.calls = 0
+
+    async def async_fetch(self, job):
+        self.calls += 1
+        if self.err:
+            raise self.err
+        return self.result
+
+
+_disc_entry = _fake_entry(
+    "disc", "USA:KIA:user@example.com:VIN1",
+    {"username": "user@example.com", "password": "x", "region": "USA", "brand": "KIA"},
+)
+_fake_poller = _FakePoller(result={"vehicles": [{"VIN": "VIN1", "name": "", "model": ""}]})
+
+
+def _unshared_fetch_must_not_run(job):
+    raise AssertionError(
+        "kia_client.fetch() must NOT be called directly while this account "
+        "has a running AccountPoller -- discovery must go through it"
+    )
+
+
+_orig_kia_fetch = cf_mod.kia_client.fetch
+cf_mod.kia_client.fetch = _unshared_fetch_must_not_run
+_disc_hass = type("H", (), {
+    "data": {_account_poll_mod.ACCOUNTS_KEY: {
+        _account_poll_mod.account_hash_for(_disc_entry): _fake_poller
+    }},
+})()
+try:
+    _disc_result = asyncio.run(cf_mod._discover_vehicles_for_entry(_disc_hass, _disc_entry))
+finally:
+    cf_mod.kia_client.fetch = _orig_kia_fetch
+assert _fake_poller.calls == 1, "discovery must call the existing poller's async_fetch()"
+assert _disc_result == [{"vin": "VIN1", "name": "", "model": ""}]
+
+# no poller running yet (entry not currently loaded) -- falls back to an
+# unshared fetch via the executor, since there's nothing to share with
+_disc_hass_no_poller = type("H", (), {
+    "data": {},
+    "async_add_executor_job": _FakeHass.async_add_executor_job,
+})()
+_fetch_calls = {"n": 0}
+
+
+def _fake_unshared_fetch(job):
+    _fetch_calls["n"] += 1
+    return {"vehicles": [{"VIN": "VIN2", "name": "", "model": ""}]}
+
+
+cf_mod.kia_client.fetch = _fake_unshared_fetch
+try:
+    _disc_result2 = asyncio.run(cf_mod._discover_vehicles_for_entry(_disc_hass_no_poller, _disc_entry))
+finally:
+    cf_mod.kia_client.fetch = _orig_kia_fetch
+assert _fetch_calls["n"] == 1, "with no running poller, discovery must fall back to a direct fetch"
+assert _disc_result2 == [{"vin": "VIN2", "name": "", "model": ""}]
 
 # --- __init__._migrate_unique_id(): a pre-v2.54 entry can have a VIN in
 # entry.data but still an account-only (no-VIN) unique_id -- either because
@@ -1013,6 +1095,76 @@ assert init._get_account_poller(_hass_accounts, _entry_other_acct) is not _polle
 )
 assert len(_hass_accounts.data[init._ACCOUNTS_KEY]) == 2, (
     "exactly one poller per distinct account, not per entry"
+)
+
+# --- async_setup_entry(): a failure ANYWHERE in setup (not just the
+# first-refresh call) must give back the refcount it took -- an adversarial-
+# review finding: an earlier version's try/except only wrapped
+# async_load_sessions/async_load_prefs/async_config_entry_first_refresh,
+# so a failure in async_forward_entry_setups (a platform module raising)
+# still bumped refcount with no matching decrement. HA retries
+# async_setup_entry from scratch on every such failure without ever calling
+# async_unload_entry (the entry never reached "loaded"), so this leaked one
+# extra refcount per retry -- a slow, permanent overcount that means the
+# AccountPoller (and its cached last-fetch payload) outlives every real
+# referent and is never cleaned up. ---
+class _FakeCoordinatorForSetup:
+    def __init__(self, hass, entry):
+        self.hass = hass
+        self.entry = entry
+        self.last_options = None
+        self.account_poller = None
+
+    async def async_load_sessions(self):
+        pass
+
+    async def async_load_prefs(self):
+        pass
+
+    async def async_config_entry_first_refresh(self):
+        pass
+
+
+class _FailingConfigEntries:
+    async def async_forward_entry_setups(self, entry, platforms):
+        raise RuntimeError("simulated platform setup failure")
+
+
+async def _fake_register_frontend(hass):
+    pass
+
+
+_setup_hass = type("H", (), {"data": {}, "config_entries": _FailingConfigEntries()})()
+_setup_entry = _fake_entry(
+    "leak", "USA:KIA:leak@example.com",
+    {"username": "leak@example.com", "region": "USA", "brand": "KIA", "vin": ""},
+)
+_poller_before_leak = init._get_account_poller(_setup_hass, _setup_entry)
+assert _poller_before_leak.refcount == 0
+
+_orig_coordinator_cls = init.KiaAccessCoordinator
+_orig_register_frontend = init._register_frontend
+init.KiaAccessCoordinator = _FakeCoordinatorForSetup
+init._register_frontend = _fake_register_frontend
+try:
+    try:
+        asyncio.run(init.async_setup_entry(_setup_hass, _setup_entry))
+        raise AssertionError("expected the simulated forward_entry_setups failure to propagate")
+    except RuntimeError as err:
+        assert "simulated platform setup failure" in str(err)
+finally:
+    init.KiaAccessCoordinator = _orig_coordinator_cls
+    init._register_frontend = _orig_register_frontend
+
+assert _poller_before_leak.refcount == 0, (
+    f"a failure in async_forward_entry_setups must still give back the "
+    f"refcount async_setup_entry took -- got {_poller_before_leak.refcount}"
+)
+assert init._account_hash_for(_setup_entry) not in _setup_hass.data.get(init._ACCOUNTS_KEY, {}), (
+    "the now-unreferenced poller must be removed from hass.data, not linger"
+)
+assert _setup_entry.entry_id not in _setup_hass.data.get(init.DOMAIN, {}), (
+    "a failed setup must not leave a broken coordinator registered in hass.data"
 )
 
 # --- async_setup(): HA never calls async_setup_entry for a DISABLED entry,

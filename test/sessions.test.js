@@ -237,4 +237,14 @@ let r4 = S.update(o4, { t: t0 + 30 * MIN, charging: false, plugged: false, batte
 assert.ok(r4.closed, "an EV9 with no configured capacity must still fall back to its own default");
 assert.strictEqual(r4.closed.kwh, 39.92, "40% of the EV9's 99.8kWh default");
 
+// isEv9()'s (?!\d) guard: a model whose name merely STARTS with "ev9" but
+// is actually some other, differently-numbered model (a hypothetical
+// future "EV90"/"EV99") must not match -- an adversarial-review finding on
+// the unanchored regex this replaced.
+assert.strictEqual(S.isEv9("EV90"), false, "a trailing digit means a different model, not an EV9");
+assert.strictEqual(S.isEv9("EV99"), false);
+assert.strictEqual(S.isEv9("EV9"), true);
+assert.strictEqual(S.isEv9("EV9 GT-Line"), true, "a real EV9 trim name must still match");
+assert.strictEqual(S.isEv9("ev9x"), true, "a non-digit suffix is still presumed an EV9 variant");
+
 console.log("all sessions tests passed");

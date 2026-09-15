@@ -1923,7 +1923,11 @@ g.KiaAccessCommands={
   // energy/cost/efficiency fields would silently be computed off the wrong
   // car's battery size.
   function isEv9(model) {
-    return typeof model === "string" && /ev\s*9/i.test(model);
+    // (?!\d) -- a trailing digit means this is some OTHER model whose name
+    // merely starts with "ev9" (a hypothetical future "EV90"/"EV99"), not
+    // an EV9 trim/variant (real examples like "EV9 GT-Line" still match
+    // fine, since a space isn't a digit).
+    return typeof model === "string" && /ev\s*9(?!\d)/i.test(model);
   }
   function resolveCap(opts) {
     var cap = num(opts.capacityKwh);
