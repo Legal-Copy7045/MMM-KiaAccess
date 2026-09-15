@@ -146,6 +146,45 @@ const near = (a, b, tol) => a != null && b != null && Math.abs(a - b) <= (tol ||
   assert.strictEqual(band5080.sessionCount, 2);
 }
 
+// ---- chargingPerformance(): a session with a scheduled-charging pause
+// (avgKw diluted by the whole session span vs. activeAvgKw, the charger's
+// real rate -- see core/sessions.js) must report BOTH, and socBands must
+// bucket by the active rate, not the diluted one -- otherwise a real
+// 1.4 kW-ish charger reads as ~1 kW just because the car sat plugged in
+// (but not drawing) for part of the session ----
+{
+  const sessions = [
+    // 22.5 kWh over a 1386-min (23.1h) session -> avgKw ~0.97, but only
+    // 964 active minutes -> activeAvgKw ~1.4 (matches an L1/trickle charger)
+    { startPct: 30, endPct: 52, minutes: 1386, kwh: 22.5, avgKw: 1, activeMinutes: 964, activeAvgKw: 1.4, location: "home", cost: 4.16 },
+    { startPct: 30, endPct: 55, minutes: 1200, kwh: 25, avgKw: 1.25, activeMinutes: 1000, activeAvgKw: 1.5, location: "home", cost: 4.6 }
+  ];
+  const cp = A.chargingPerformance(sessions);
+  assert.ok(cp);
+  assert.ok(near(cp.home.avgKw, 1.1), `whole-session average must stay the diluted figure: ${cp.home.avgKw}`);
+  assert.ok(near(cp.home.activeAvgKw, 1.5), `activeAvgKw must average the charger's real rate: ${cp.home.activeAvgKw}`);
+  const band = cp.socBands.find((b) => b.label === "10–50%");
+  assert.ok(band, "both sessions' ~41% midpoint must land in the 10-50% band");
+  assert.ok(near(band.avgKw, 1.5), (
+    `socBands must bucket by activeAvgKw (~1.45), not the diluted avgKw (~1.1): got ${band.avgKw}`
+  ));
+}
+
+// ---- chargingPerformance(): sessions with no activeAvgKw at all (older
+// cache entries from before this field existed) must still work --
+// groupSessions.activeAvgKw stays null rather than crashing or silently
+// mixing in avgKw, and socBands falls back to avgKw for exactly those
+// sessions ----
+{
+  const sessions = [
+    { startPct: 20, endPct: 45, minutes: 100, kwh: 25, avgKw: 15, location: "home", cost: 3.5 },
+    { startPct: 22, endPct: 48, minutes: 95, kwh: 26, avgKw: 16, location: "home", cost: 3.6 }
+  ];
+  const cp = A.chargingPerformance(sessions);
+  assert.strictEqual(cp.home.activeAvgKw, null, "no session here has activeAvgKw -- must stay null, not fall back to avgKw");
+  assert.ok(near(cp.socBands[0].avgKw, 15.5), "socBands must fall back to avgKw for pre-upgrade sessions");
+}
+
 // ---- chargingPerformance(): no usable sessions -> null ----
 {
   assert.strictEqual(A.chargingPerformance([]), null);

@@ -77,7 +77,13 @@
           startPct: pct, lastPct: pct, peakKw: kw || 0,
           atHome: tri(cur.atHome),
           rate: num(cur.rate),
-          rateLabel: cur.rateLabel || null
+          rateLabel: cur.rateLabel || null,
+          // activeMs: sum of the gaps between CONSECUTIVE charging=true
+          // samples only -- see close()'s activeAvgKw comment for why
+          // this exists separately from the plain startedAt->
+          // lastChargingAt span. 0 here, not null: this very first
+          // sample has no prior sample to diff against yet.
+          activeMs: 0, lastSampleAt: t, lastSampleCharging: true
         },
         closed: null
       };
@@ -86,6 +92,11 @@
 
     // running
     if (charging) {
+      if (open.lastSampleCharging === true && open.lastSampleAt != null) {
+        open.activeMs = (open.activeMs || 0) + (t - open.lastSampleAt);
+      }
+      open.lastSampleAt = t;
+      open.lastSampleCharging = true;
       open.lastChargingAt = t;
       if (open.atHome == null && tri(cur.atHome) != null) open.atHome = cur.atHome;
       if (open.rate == null && num(cur.rate) != null) {
@@ -103,6 +114,8 @@
     // not charging this sample — keep open through a short pause
     if (pluggedNotConfirmedUnplugged &&
         t - (open.lastChargingAt || open.startedAt) < gapMs) {
+      open.lastSampleAt = t;
+      open.lastSampleCharging = false;
       if (pct != null) open.lastPct = pct;
       return { open: open, closed: null };
     }
@@ -113,19 +126,35 @@
       ? Math.max(0, endPct - open.startPct) : null;
     var kwh = gained != null ? (gained / 100) * cap : null;
     var mins = Math.max(0, Math.round((open.lastChargingAt - open.startedAt) / 60000));
+    var activeMins = Math.max(0, Math.round((open.activeMs || 0) / 60000));
     var rate = open.rate != null ? open.rate : rateFor(open.atHome, opts);
     var where = open.rateLabel || (open.atHome === false ? "away" : "home");
     var s = {
       startedAt: open.startedAt,
       endedAt: open.lastChargingAt || t,
       minutes: mins,
+      // minutes actually spent mid-charge (consecutive charging=true
+      // samples only) -- excludes scheduled-charging pauses / tapering
+      // gaps that `minutes` above folds into the same session. Will
+      // always be <= minutes; the gap between the two IS the plugged-in-
+      // but-not-drawing time.
+      activeMinutes: activeMins,
       startPct: open.startPct,
       endPct: endPct,
       gainedPct: gained != null ? round(gained, 1) : null,
       kwh: kwh != null ? round(kwh, 2) : null,
       cost: (kwh != null && rate > 0) ? round(kwh * rate, 2) : null,
       peakKw: round(open.peakKw, 1),
+      // kWh delivered over the WHOLE session span, pauses included -- "if
+      // I leave it plugged in for a session shaped like this, what rate
+      // should I plan around". avgKw (NOT activeAvgKw) is what
+      // core/trips.js-style summaries and the analytics/SoC-band
+      // aggregates already read, kept for backwards compatibility.
       avgKw: (kwh != null && mins > 0) ? round(kwh / (mins / 60), 1) : null,
+      // kWh delivered over only the time actually spent charging -- this
+      // is the charger's real rate; the two will differ whenever a
+      // session had a scheduled-charging pause or a long standby/taper.
+      activeAvgKw: (kwh != null && activeMins > 0) ? round(kwh / (activeMins / 60), 1) : null,
       pricePerKwh: rate || null,
       location: where,
       costSource: (kwh != null && rate > 0) ? "rate" : null

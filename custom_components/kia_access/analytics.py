@@ -175,11 +175,21 @@ def _group_sessions(sessions):
         return None
     costs = [s["cost"] for s in sessions if s.get("cost") is not None]
     kws = [s["avgKw"] for s in sessions if s.get("avgKw") is not None]
+    # activeAvgKw is only on sessions closed by sessions.py after it started
+    # tracking active-only minutes -- older cached sessions won't have it,
+    # so this average is over whichever subset does rather than falling
+    # back to avgKw (mixing whole-session and active-only rates into one
+    # number would defeat the point of keeping them separate)
+    active_kws = [s["activeAvgKw"] for s in sessions if s.get("activeAvgKw") is not None]
     return {
         "count": len(sessions),
         "avgKwh": _round(_avg([s.get("kwh") for s in sessions]), 1),
         "avgMinutes": _round(_avg([s.get("minutes") for s in sessions]), 0),
+        # whole-session rate (pauses/tapering diluted in) -- "if I leave it
+        # plugged in for a session like this, what should I plan around"
         "avgKw": _round(_avg(kws), 1) if kws else None,
+        # the charger's real rate while actually drawing current
+        "activeAvgKw": _round(_avg(active_kws), 1) if active_kws else None,
         "avgGainedPct": _round(_avg([
             s["gainedPct"] if s.get("gainedPct") is not None else s["endPct"] - s["startPct"]
             for s in sessions
@@ -191,14 +201,23 @@ def _group_sessions(sessions):
 def _soc_bands_for(sessions):
     by_band = [{"label": label, "lo": lo, "hi": hi, "samples": []} for label, lo, hi in _SOC_BANDS]
     for s in sessions:
+        # a session's own start/end % may span multiple bands -- attribute
+        # its power to whichever band its MIDPOINT % falls in (simple, and
+        # avoids needing sub-session power-curve data the car doesn't
+        # report). Uses the ACTIVE-only rate (falling back to the
+        # whole-session rate for older sessions that predate it) -- a
+        # band's whole point is "what rate does charging run at here",
+        # which a pause/taper folded into the whole-session average would
+        # understate.
+        kw = s["activeAvgKw"] if s.get("activeAvgKw") is not None else s.get("avgKw")
         mid = (s["startPct"] + s["endPct"]) / 2
         band = None
         for b in by_band:
             if b["lo"] <= mid < b["hi"]:
                 band = b
                 break
-        if band and s.get("avgKw") is not None:
-            band["samples"].append(s["avgKw"])
+        if band and kw is not None:
+            band["samples"].append(kw)
     return [
         {"label": b["label"], "sessionCount": len(b["samples"]), "avgKw": _round(_avg(b["samples"]), 1)}
         for b in by_band if len(b["samples"]) >= _MIN_BUCKET_TRIPS

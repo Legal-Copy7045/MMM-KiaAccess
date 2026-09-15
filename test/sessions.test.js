@@ -41,6 +41,21 @@ assert.strictEqual(r.closed.gainedPct, 40);
 assert.strictEqual(r.closed.kwh, 40); // 40% of 100 kWh
 assert.strictEqual(r.closed.cost, 7.4); // 40 * 0.185
 assert.strictEqual(r.closed.peakKw, 7.4);
+// minutes (200) spans start->last-charging-sample INCLUDING the 20-min
+// pause and the two gaps either side of it (60->80 charging->pause,
+// 80->100 pause->resume, 40 min total unaccounted); activeMinutes (160)
+// only sums the two genuinely-consecutive charging=true spans (0->60,
+// 100->200). Same 40 kWh delivered, so activeAvgKw (the charger's real
+// rate) reads meaningfully higher than avgKw (the whole-session rate).
+assert.strictEqual(r.closed.minutes, 200);
+assert.strictEqual(r.closed.activeMinutes, 160);
+assert.strictEqual(r.closed.avgKw, 12); // 40 kWh / (200/60) h
+assert.strictEqual(r.closed.activeAvgKw, 15); // 40 kWh / (160/60) h
+assert.ok(r.closed.activeAvgKw > r.closed.avgKw, (
+  "a session with a mid-charge pause must show a higher active-only rate " +
+  "than its whole-session rate -- otherwise the pause is being silently " +
+  "folded into 'how fast does my charger charge'"
+));
 
 // trickle / noise below MIN_KWH is discarded
 open = S.update(null, { t: t0, charging: true, plugged: true, batteryPct: 79 }, opts).open;

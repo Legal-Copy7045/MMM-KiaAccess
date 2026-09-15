@@ -32,6 +32,20 @@ assert c["gainedPct"] == 40
 assert c["kwh"] == 40
 assert c["cost"] == 7.4
 assert c["peakKw"] == 7.4
+# minutes (200) spans start->last-charging-sample INCLUDING the 20-min
+# pause and the two gaps either side of it (60->80 charging->pause,
+# 80->100 pause->resume, 40 min total unaccounted); activeMinutes (160)
+# only sums the two genuinely-consecutive charging=True spans (0->60,
+# 100->200). Same 40 kWh delivered, so activeAvgKw (the charger's real
+# rate) reads meaningfully higher than avgKw (the whole-session rate).
+assert c["minutes"] == 200
+assert c["activeMinutes"] == 160
+assert c["avgKw"] == 12  # 40 kWh / (200/60) h
+assert c["activeAvgKw"] == 15  # 40 kWh / (160/60) h
+assert c["activeAvgKw"] > c["avgKw"], (
+    "a session with a mid-charge pause must show a higher active-only rate "
+    "than its whole-session rate"
+)
 
 # trickle discarded
 open_s = step(None, t=t0, charging=True, plugged=True, batteryPct=79)["open"]

@@ -219,11 +219,21 @@
     if (!list.length) return null;
     const costs = list.map((s) => s.cost).filter((v) => v != null);
     const kws = list.map((s) => s.avgKw).filter((v) => v != null);
+    // activeAvgKw is only on sessions closed by core/sessions.js after it
+    // started tracking active-only minutes -- older cached sessions won't
+    // have it, so this average is over whichever subset does rather than
+    // falling back to avgKw (mixing whole-session and active-only rates
+    // into one number would defeat the point of keeping them separate)
+    const activeKws = list.map((s) => s.activeAvgKw).filter((v) => v != null);
     return {
       count: list.length,
       avgKwh: round(avg(list.map((s) => s.kwh)), 1),
       avgMinutes: round(avg(list.map((s) => s.minutes)), 0),
+      // whole-session rate (pauses/tapering diluted in) -- "if I leave it
+      // plugged in for a session like this, what should I plan around"
       avgKw: kws.length ? round(avg(kws), 1) : null,
+      // the charger's real rate while actually drawing current
+      activeAvgKw: activeKws.length ? round(avg(activeKws), 1) : null,
       avgGainedPct: round(avg(list.map((s) =>
         s.gainedPct != null ? s.gainedPct : s.endPct - s.startPct)), 0),
       avgCost: costs.length ? round(avg(costs), 2) : null
@@ -234,15 +244,19 @@
     const byBand = SOC_BANDS.map((b) => Object.assign({}, b, { samples: [] }));
     list.forEach((s) => {
       // a session's own start/end % may span multiple bands -- attribute
-      // its average power to whichever band its MIDPOINT % falls in
-      // (simple, and avoids needing sub-session power-curve data the car
-      // doesn't report)
+      // its power to whichever band its MIDPOINT % falls in (simple, and
+      // avoids needing sub-session power-curve data the car doesn't
+      // report). Uses the ACTIVE-only rate (falling back to the
+      // whole-session rate for older sessions that predate it) -- a band's
+      // whole point is "what rate does charging run at here", which a
+      // pause/taper folded into the whole-session average would understate.
+      const kw = s.activeAvgKw != null ? s.activeAvgKw : s.avgKw;
       const mid = (s.startPct + s.endPct) / 2;
       let band = null;
       for (const b of byBand) {
         if (mid >= b.lo && mid < b.hi) { band = b; break; }
       }
-      if (band && s.avgKw != null) band.samples.push(s.avgKw);
+      if (band && kw != null) band.samples.push(kw);
     });
     return byBand
       .filter((b) => b.samples.length >= MIN_BUCKET_TRIPS)
