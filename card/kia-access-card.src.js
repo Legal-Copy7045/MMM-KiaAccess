@@ -534,6 +534,27 @@
       if (!cfg) return null;
       return cfg.tomtom_key || (this._fetchedKeys && this._fetchedKeys.tomtom_key) || null;
     }
+    // A pure EV has no fuel tank at all -- hyundai_kia_connect_api's own
+    // Kia-USA parsing falls back to the vehicle's plain distanceToEmpty
+    // reading for fuel_driving_range whenever there's no real gasModeRange
+    // (true for every BEV), which is the SAME figure total_driving_range/
+    // ev_driving_range already report -- not a second, genuinely distinct
+    // "fuel range" at all. Symmetrically, a pure ICE vehicle has no drive
+    // battery, so ev_driving_range is never real information for it either.
+    // total_driving_range is already the API's own powertrain-agnostic
+    // combined figure (equal to ev_driving_range for a BEV, equal to
+    // fuel_driving_range for pure ICE, genuinely the SUM for a PHEV/HEV)
+    // and always stays shown -- these rows are hidden only where they'd
+    // just be duplicating it under a misleading label; for a PHEV/HEV they
+    // stay visible since there both readings are real, distinct
+    // information alongside the combined total.
+    static _hidePowertrainRow(key, engineType) {
+      if ((key === "fuel_driving_range" || key === "fuel_level" || key === "fuel_level_is_low") &&
+          engineType === "EV") return true;
+      if (key === "ev_driving_range" && engineType === "ICE") return true;
+      return false;
+    }
+
     _rangeInputs(flat) {
       if (!this._config.range_map) return null;
       this._maybeFetchMapKeys();
@@ -993,9 +1014,11 @@
       }
 
       var imperial = this._imperial();
+      var engineType = String(flat["vehicle.engine_type"] || "").toUpperCase();
       var rows = CATALOGUE.map(function (e) {
         var raw = flat["vehicle." + e.key];
         if (raw === undefined) return "";
+        if (KiaAccessCard._hidePowertrainRow(e.key, engineType)) return "";
         return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(e.key, raw, imperial)) + "</td></tr>";
       }).join("");
 
