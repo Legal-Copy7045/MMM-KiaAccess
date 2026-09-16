@@ -91,9 +91,20 @@ template:
         unit_of_measurement: "mi"
         state_class: total_increasing
         icon: mdi:highway
+        # Availability follows the ODOMETER, not a `float(0)` fallback --
+        # without this, a genuinely unavailable odometer (Kia API hiccup,
+        # integration not yet polled since restart, entity renamed) silently
+        # reads as "0 miles on the clock", and this sensor then reports a
+        # large NEGATIVE "miles used" (0 - start_odo) instead of surfacing
+        # that the underlying reading is missing. Every downstream consumer
+        # (margin, projected total, excess cost) inherits this same
+        # unavailable state rather than quietly computing from a wrong 0.
+        availability: >
+          {{ states('sensor.kia_odometer_miles') not in
+             ['unknown', 'unavailable', 'none', 'None', none] }}
         state: >
           {% set start_odo = 10 %}
-          {{ (states('sensor.kia_odometer_miles') | float(0) - start_odo) | round(0) }}
+          {{ (states('sensor.kia_odometer_miles') | float - start_odo) | round(0) }}
 
       - name: "Kia lease miles allowed to date"
         unique_id: kia_lease_miles_allowed
@@ -109,18 +120,48 @@ template:
           {% set days = [((now().timestamp() - start) / 86400) | round(0, 'floor'), 0] | max %}
           {{ (days * (allowance / term_days)) | round(0) }}
 
+      # 1-indexed (delivery day = day 1) so it lines up with "miles allowed
+      # to date" above, which already counts a whole day's allowance as of
+      # delivery day zero elapsed-days -- day 1 is the first day this sensor
+      # and the dashboard narrative card actually display to the user.
+      - name: "Kia lease day"
+        unique_id: kia_lease_day
+        unit_of_measurement: "d"
+        icon: mdi:calendar-clock
+        state: >
+          {% set start = as_timestamp('2025-01-01 00:00:00', 1735707600) %}
+          {{ ([((now().timestamp() - start) / 86400) | round(0, 'floor') + 1, 1] | max) | int }}
+
+      # Exposed as a plain date STRING (device_class: date, not "timestamp")
+      # computed directly from the lease start + term -- never round-tripped
+      # through as_timestamp() parsing a formatted string back into a number,
+      # which is exactly the failure mode that renders an epoch-zero
+      # "31 Dec 1969"/"01 Jan 1970" date if the input ever fails to parse
+      # (as_timestamp()'s own default argument silently substitutes epoch 0
+      # rather than leaving the state genuinely unknown).
+      - name: "Kia lease end date"
+        unique_id: kia_lease_end
+        device_class: date
+        icon: mdi:calendar-end
+        state: >
+          {% set start = as_timestamp('2025-01-01 00:00:00', 1735707600) %}
+          {% set term_days = 1096 %}
+          {{ (start + term_days * 86400) | timestamp_custom('%Y-%m-%d', true) }}
+
       - name: "Kia lease margin"
         unique_id: kia_lease_margin
         unit_of_measurement: "mi"
         icon: mdi:plus-minus-variant
+        availability: "{{ states('sensor.kia_lease_miles_used') not in ['unknown', 'unavailable', 'none', 'None', none] }}"
         state: >
           {{ (states('sensor.kia_lease_miles_allowed') | float(0)
-              - states('sensor.kia_lease_miles_used') | float(0)) | round(0) }}
+              - states('sensor.kia_lease_miles_used') | float) | round(0) }}
 
       - name: "Kia lease projected total"
         unique_id: kia_lease_projected_total
         unit_of_measurement: "mi"
         icon: mdi:trending-up
+        availability: "{{ states('sensor.kia_lease_miles_used') not in ['unknown', 'unavailable', 'none', 'None', none] }}"
         state: >
           {% set start = as_timestamp('2025-01-01 00:00:00', 1735707600) %}
           {% set term_days = 1096 %}
@@ -137,17 +178,18 @@ template:
              from the passage of time, plus whenever new mileage comes in --
              both genuinely meaningful changes, not clock noise. #}
           {% set days = ((now().timestamp() - start) / 86400) | round(0, 'floor') %}
-          {% set used = states('sensor.kia_lease_miles_used') | float(0) %}
+          {% set used = states('sensor.kia_lease_miles_used') | float %}
           {{ ((used / days) * term_days) | round(0) if days >= 1 else used | round(0) }}
 
       - name: "Kia lease excess cost projected"
         unique_id: kia_lease_excess_cost_projected
         unit_of_measurement: "USD"
         icon: mdi:cash-alert
+        availability: "{{ states('sensor.kia_lease_projected_total') not in ['unknown', 'unavailable', 'none', 'None', none] }}"
         state: >
           {% set rate = 0.25 %}
           {% set cap = 30000 %}
-          {% set proj = states('sensor.kia_lease_projected_total') | float(0) %}
+          {% set proj = states('sensor.kia_lease_projected_total') | float %}
           {{ ([proj - cap, 0] | max * rate) | round(0) }}
 
       # ================= MAINTENANCE / RENEWALS =================
@@ -270,3 +312,69 @@ script:
       - service: input_datetime.set_datetime
         target: { entity_id: input_datetime.kia_brake_fluid_last }
         data: { date: "{{ now().strftime('%Y-%m-%d') }}" }
+
+# ===========================================================================
+# OPTIONAL — a Lovelace "markdown" card narrating the lease sensors above in
+# plain English. Not part of the package itself (this file only defines
+# entities) -- paste this into a dashboard's YAML view as its own card.
+#
+# Two defensive habits worth keeping if you customize this:
+#   1. Never default a failed as_timestamp() parse to 0 and format it anyway
+#      -- epoch 0 formats as "01 Jan 1970" (or "31 Dec 1969" west of UTC),
+#      which reads as a real, wildly-wrong date rather than an obvious error.
+#      Default to `none` instead and skip the whole parenthetical when the
+#      parse didn't actually succeed.
+#   2. Let "miles used" ride the odometer sensor's own availability (see
+#      "Kia lease miles used" above) rather than `float(0)`-ing an
+#      unavailable reading into a phantom 0 -- that's what turns into a
+#      large negative "you've driven -N miles" once you subtract the
+#      delivery odometer from it.
+# ===========================================================================
+#  - type: markdown
+#    content: >
+#      {%- macro n(v) -%}
+#      {%- set s = (v | float(0) | round(0) | int) | string -%}
+#      {%- for i in range(s | length) -%}
+#      {%- if i > 0 and (s | length - i) % 3 == 0 -%},{%- endif -%}{{- s[i] -}}
+#      {%- endfor -%}
+#      {%- endmacro -%}
+#      {% set bad = ['unknown', 'unavailable', 'none', 'None'] -%}
+#      {% set cap = 30000 %}
+#      {% set term = 1096 %}
+#      {% set months = (term / 30.4375) | round(0) | int %}
+#      {% set day = states('sensor.kia_lease_day') | int(1) %}
+#      {% set per_day = cap / term %}
+#      {% set used_raw = states('sensor.kia_lease_miles_used') -%}
+#      {% if used_raw in bad %}
+#      Your odometer hasn't reported yet, so lease-mileage tracking isn't
+#      available right now.
+#      {% else %}
+#      {% set used = used_raw | float %}
+#      {% set target = day * (per_day | round(0)) -%}
+#      {% set actual_rate = used / day if day > 0 else 0 -%}
+#      {% set rate_diff = per_day - actual_rate -%}
+#      You're on day <b>{{ day }}</b> of your lease, based on a total of
+#      <b>{{ n(cap) }}</b> miles over <b>{{ months }}</b> months, your per
+#      day allocation is <b>{{ n(per_day) }}</b> miles and you've driven
+#      <b>{{ n(used) }}</b> miles from a cumulative allowance of
+#      <b>{{ n(target) }}</b> miles. You are averaging <b>{{ '%.1f' |
+#      format(rate_diff | abs) }}</b> miles per day <b>{{ 'less' if
+#      rate_diff >= 0 else 'more' }}</b> than your allocation.
+#
+#      {% set proj_raw = states('sensor.kia_lease_projected_total') -%}
+#      {% if proj_raw not in bad %}
+#      {% set proj = proj_raw | float -%}
+#      {% set d = proj - cap -%}
+#      {% set e = states('sensor.kia_lease_end') -%}
+#      {% set ts = as_timestamp(e, none) if e not in bad else none -%}
+#      At this rate you will be at <b>{{ n(proj) }}</b> miles at the return
+#      date{% if ts is not none %} ({{ ts | timestamp_custom('%d %b %Y', true) }}){% endif %},
+#      which is <b>{{ n(d | abs) }}</b> miles <b>{{ 'above' if d > 0 else 'below' }}</b>
+#      your limit.
+#      {% set ex_raw = states('sensor.kia_lease_excess_cost_projected') -%}
+#      {% if ex_raw not in bad and (ex_raw | float(0)) > 0 %}
+#      That's about **${{ n(ex_raw) }}** in excess-mileage charges at $0.25/mi
+#      — start trimming miles now.
+#      {% endif %}
+#      {% endif %}
+#      {% endif %}
