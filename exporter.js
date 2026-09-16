@@ -14,13 +14,26 @@
 const http = require("http");
 const https = require("https");
 
-/** flat "vehicle.ev_battery_percentage" map -> [{ key, value }] of exportable
- *  numbers (bools become 1/0). Keys are sanitised to snake_case metric names. */
+/** flat "ev_battery_percentage" map (node_helper.js's runExporters() builds
+ *  this via flatten(payload.vehicle) -- BARE keys, no "vehicle." prefix; the
+ *  same convention publishMqtt()'s own flatten(payload.vehicle) call and
+ *  topic-path building already use, and the one real caller this function
+ *  has ever had) -> [{ key, value }] of exportable numbers (bools become
+ *  1/0). Keys are sanitised to snake_case metric names.
+ *
+ *  This used to require a "vehicle." prefix that the real caller never
+ *  actually produced -- confirmed by tracing the real runExporters() ->
+ *  flatten() -> numericFields() path end to end, not just this function's
+ *  own unit test, which happened to hand it pre-prefixed fixture data and
+ *  never caught the mismatch. The practical effect: EVERY numeric field
+ *  check below silently matched nothing, so InfluxDB/Prometheus export
+ *  never actually pushed any real vehicle telemetry -- only the separate
+ *  `stale` field (appended by pushInflux()/PromServer.setSnapshot()'s own
+ *  callers, not through this function) ever showed up. */
 function numericFields(flat) {
   const out = [];
   Object.keys(flat || {}).forEach((k) => {
-    if (k.indexOf("vehicle.") !== 0) return;
-    if (k.indexOf("vehicle.data.") === 0) return; // skip the raw API dump
+    if (k.indexOf("data.") === 0) return; // skip the raw API dump
     let v = flat[k];
     if (v === true || v === "true") v = 1;
     else if (v === false || v === "false") v = 0;
@@ -30,7 +43,7 @@ function numericFields(flat) {
       v = n;
     }
     out.push({
-      key: k.slice("vehicle.".length).replace(/[^a-zA-Z0-9_]/g, "_"),
+      key: k.replace(/[^a-zA-Z0-9_]/g, "_"),
       value: v
     });
   });

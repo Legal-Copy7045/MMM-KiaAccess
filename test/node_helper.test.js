@@ -307,6 +307,17 @@ function tmpCacheDir() {
     vehicles: [{ vin: "REALVIN1" }, { vin: "ONLYID2" }]
   };
   const mixedAcctId = helper.identifierFor({ ...mixedConfig, vin: "" });
+  // In real usage handleFetch() always calls _retireRemovedFromConfig()
+  // (unconditionally, before spawning any bridge) so this.rotateVins[id] is
+  // synced to the CURRENT config.vehicles before _handleBridgeClose ever
+  // runs for that call -- _handleBridgeClose itself now prefers
+  // this.rotateVins[id] over its own closed-over `config` param (to stop a
+  // stale in-flight fetch from resurrecting a just-retired vehicle, see
+  // node_helper.js's own comment on that). This test calls
+  // _handleBridgeClose directly, bypassing handleFetch(), so it must do
+  // that same sync step itself or the second call below would still be
+  // filtered against the FIRST config's (now stale) vehicle set.
+  helper._retireRemovedFromConfig(mixedAcctId, mixedConfig);
   const mixedStdout = JSON.stringify({
     ok: true,
     vehicles: [
@@ -390,6 +401,16 @@ function tmpCacheDir() {
   // not a possibly-transient account hiccup)
   const configWithoutB = { ...config, vehicles: [{ vin: "VIN_A" }] };
   const onlyAReturned = JSON.stringify({ ok: true, vehicles: [{ VIN: "VIN_A" }] });
+  // In real usage handleFetch() always calls _retireRemovedFromConfig()
+  // first (unconditionally, before spawning any bridge), which is what
+  // actually does the config-removal retirement and syncs
+  // this.rotateVins[id] to the new config -- _handleBridgeClose's own
+  // internal retirement diff below is an intentional no-op backstop for
+  // when that has already happened (see its "Safe to also still run" and
+  // handleFetch()'s own comment). This test calls _handleBridgeClose
+  // directly, so it must do that sync step itself first, same as the
+  // mixed-VIN dispatch test above.
+  helper._retireRemovedFromConfig(acctId, configWithoutB);
   helper._handleBridgeClose(acctId, configWithoutB, true, 0, onlyAReturned, "", () => {});
   assert.deepStrictEqual(retired, ["VIN_B"], "removing a vehicle from config must retire it on the very next fetch");
 
@@ -397,6 +418,10 @@ function tmpCacheDir() {
   // returning it -- must NOT retire on the first (or second) miss
   retired.length = 0;
   const configWithB = config;
+  // resync rotateVins[id] to VIN_B being configured again -- same reasoning
+  // as above: real usage always runs _retireRemovedFromConfig() before
+  // _handleBridgeClose, this test skips straight to _handleBridgeClose.
+  helper._retireRemovedFromConfig(acctId, configWithB);
   for (let i = 0; i < 2; i++) {
     helper._handleBridgeClose(acctId, configWithB, true, 0, onlyAReturned, "", () => {});
   }

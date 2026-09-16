@@ -357,7 +357,16 @@ class HaLiveClient {
     if (this._stopped) return;
     clearInterval(this._pingTimer);
     this._subId = null;
-    try { if (this._ws) this._ws.close(); } catch (e) { /* ignore */ }
+    // A real (spec-compliant) WebSocket.close() is a no-op once the socket
+    // is already CLOSING/CLOSED, so calling it again from inside the
+    // socket's OWN "close" handler is normally harmless. But relying on
+    // that for correctness is fragile -- guard on readyState explicitly so
+    // this never re-enters _scheduleReconnect via a re-fired close event
+    // (seen with at least one WebSocket shim that re-fires close listeners
+    // on every close() call, however many times it's invoked).
+    if (this._ws && this._ws.readyState !== 2 /* CLOSING */ && this._ws.readyState !== 3 /* CLOSED */) {
+      try { this._ws.close(); } catch (e) { /* ignore */ }
+    }
     this._ws = null;
     if (this._reconnectTimer) return; // already scheduled
     this._status("push dropped (" + (why || "unknown") + ") — retrying in " +
