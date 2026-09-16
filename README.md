@@ -1185,7 +1185,7 @@ mqtt: {
 ```
 
 Topics are scoped by the vehicle's own VIN (for Kia USA, its account-issued
-`id` — see the VIN-fallback note above), always, for every vehicle with a
+`id` — see [Reliability](#reliability)'s VIN-fallback note), always, for every vehicle with a
 resolvable identity — not just in rotate mode: `kia/ev9/<VIN>/ev_battery_percentage`,
 `kia/ev9/<VIN>/is_locked`, `kia/ev9/<VIN>/tire_pressure_front_left`, … plus
 `kia/ev9/<VIN>/state` (JSON), `kia/ev9/<VIN>/_meta/fetched_at`,
@@ -1193,23 +1193,26 @@ resolvable identity — not just in rotate mode: `kia/ev9/<VIN>/ev_battery_perce
 every successful poll — see below for why this one isn't itself LWT-backed).
 Current-state only — derive change triggers downstream, or use the
 `KIA_ACCESS_STATE_CHANGED` notification above.
-**Treat `kia/ev9/status/<your-email>-<8-char-hash>` as the canonical
-connection-level status topic** for anything that actually needs to be
-right (an automation, an alert) — it's backed by that specific connection's
-own Last-Will-and-Testament, so it always correctly flips to `offline` if —
-and only if — that account's connection drops (this doesn't distinguish
-which vehicle on the account is/isn't reporting; use the per-vehicle
+**Treat `kia/ev9/status/<mqtt-username-or-url>-<8-char-hash>` as the
+canonical connection-level status topic** for anything that actually
+needs to be right (an automation, an alert) — it's backed by that
+specific connection's own Last-Will-and-Testament, so it always correctly
+flips to `offline` if — and only if — that MQTT connection drops. The
+readable segment is `mqtt.username` (the example above: `mqttuser`), or
+`mqtt.url` if you're connecting anonymously — the MQTT broker's own
+credentials, not your Kia account's (this doesn't distinguish which
+vehicle on the account is/isn't reporting; use the per-vehicle
 `kia/ev9/<VIN>/status` above for that, refreshed each successful poll and
 flipped to `offline` the moment a vehicle is removed from config, but not
 itself backed by an LWT — mqtt.js only supports one static LWT per
-connection). The hash suffix keeps two different accounts from ever
-landing on the same topic even if their usernames happen to sanitise to
-the same text. The plain `kia/ev9/status` is published `online` for
-backward compatibility only: with a single account it behaves the same as
-before, but once more than one account shares a broker + `topicPrefix` it
-reflects whichever connection last (dis)connected rather than either one
-specifically (a one-time warning is logged when this happens) and should
-not be relied on.
+connection). The hash suffix keeps two different connections from ever
+landing on the same topic even if their usernames/URLs happen to sanitise
+to the same text. The plain `kia/ev9/status` is published `online` for
+backward compatibility only: with a single connection it behaves the same
+as before, but once more than one connection shares a broker + `topicPrefix`
+it reflects whichever connection last (dis)connected rather than either
+one specifically (a one-time warning is logged when this happens) and
+should not be relied on.
 
 The raw API dump (`vehicle.data.*`, which includes GPS) is **not** fanned out
 to individual retained topics; set `mqtt.publishRaw: true` if you want it. The
@@ -1262,7 +1265,7 @@ Publishes retained `homeassistant/…/config` messages so a curated set of entit
 reported; charging / plugged / locked / doors / frunk / liftgate / sunroof / tyre
 warning / defrost / climate binary sensors) appear in Home Assistant
 automatically, grouped under one device. Availability combines the
-connection's own LWT-backed status (`kia/ev9/status/<account>-<hash>`,
+connection's own LWT-backed status (`kia/ev9/status/<mqtt-username-or-url>-<hash>`,
 above) with this vehicle's own per-VIN status (`kia/ev9/<VIN>/status`) via
 HA's `availability_mode: "all"` — the entities show available only when
 BOTH the connection is actually up and this specific vehicle has reported
