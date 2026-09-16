@@ -56,4 +56,25 @@ assert.strictEqual(KiaAccessCard._hidePowertrainRow("ev_driving_range", ""), fal
 assert.strictEqual(KiaAccessCard._hidePowertrainRow("odometer", "EV"), false);
 assert.strictEqual(KiaAccessCard._hidePowertrainRow("odometer", "ICE"), false);
 
+// ---- KiaAccessCard._powertrainFor(): raw vehicle.engine_type -> carDiagram()'s
+// powertrain option, the wiring that picks whether the diagram shows a
+// plain drive battery, a fuel tank, or both side by side ----
+assert.strictEqual(KiaAccessCard._powertrainFor("EV"), "ev");
+assert.strictEqual(KiaAccessCard._powertrainFor("ICE"), "gas");
+assert.strictEqual(KiaAccessCard._powertrainFor("PHEV"), "hybrid");
+assert.strictEqual(KiaAccessCard._powertrainFor("HEV"), "hybrid");
+// case-insensitive -- jsonable()'s Enum.value passthrough (v2.78.0) always
+// gives the exact "EV"/"ICE"/"PHEV"/"HEV" casing, but nothing here should
+// depend on that
+assert.strictEqual(KiaAccessCard._powertrainFor("ev"), "ev");
+assert.strictEqual(KiaAccessCard._powertrainFor("ice"), "gas");
+// unset/unrecognised must default to "ev" -- matches this module's
+// original EV-only diagram, and must never silently hide a real drive
+// battery reading behind a wrong guess for an older API response (or a
+// still-broken engine_type serialization)
+assert.strictEqual(KiaAccessCard._powertrainFor(undefined), "ev");
+assert.strictEqual(KiaAccessCard._powertrainFor(null), "ev");
+assert.strictEqual(KiaAccessCard._powertrainFor(""), "ev");
+assert.strictEqual(KiaAccessCard._powertrainFor("something-unexpected"), "ev");
+
 console.log("all card-powertrain-rows tests passed");

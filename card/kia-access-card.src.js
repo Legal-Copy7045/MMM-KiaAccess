@@ -555,6 +555,19 @@
       return false;
     }
 
+    // Raw vehicle.engine_type -> carDiagram()'s powertrain option
+    // ("ev"|"gas"|"hybrid"). An unset/unrecognised value defaults to "ev",
+    // matching this module's original EV-only diagram -- a genuinely
+    // missing engine_type (an older API response, or before v2.78.0's
+    // Enum-serialization fix) must never silently hide a real drive
+    // battery reading behind a wrong guess.
+    static _powertrainFor(rawEngineType) {
+      var t = String(rawEngineType || "").toUpperCase();
+      if (t === "ICE") return "gas";
+      if (t === "PHEV" || t === "HEV") return "hybrid";
+      return "ev";
+    }
+
     _rangeInputs(flat) {
       if (!this._config.range_map) return null;
       this._maybeFetchMapKeys();
@@ -944,10 +957,20 @@
         } catch (e) { /* ignore */ }
       }
       state.flashing = this._flashing === true;
+      // engine_type picks which centre cell(s) carDiagram() draws -- a
+      // plain drive battery (EV, and the default for an unset/unrecognised
+      // type, matching this module's original EV-only behaviour), a
+      // single fuel tank (ICE), or both side by side (PHEV/HEV).
+      // fuel_level is only meaningful for the non-EV cases;
+      // carDiagram()/verticalFuelTank() already render null as "—".
+      var fuelPctRaw = Number(flat["vehicle.fuel_level"]);
+      state.fuelPct = isFinite(fuelPctRaw) ? fuelPctRaw : null;
       // the API reports temperatures in °C; the diagram and the climate panel
       // share one unit choice (card config, else the HA unit system)
-      var diagram = V.carDiagram(state,
-        { width: 230, battery: true, tempUnit: this._tempUnit() });
+      var diagram = V.carDiagram(state, {
+        width: 230, battery: true, tempUnit: this._tempUnit(),
+        powertrain: KiaAccessCard._powertrainFor(flat["vehicle.engine_type"])
+      });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";
       var updated = st.state && st.state !== "unknown" && st.state !== "unavailable"

@@ -81,6 +81,14 @@ const GROUPS = [
   ["Find the car", [
     ["Lamps flashing amber", { flashing: true }],
   ]],
+  ["Powertrain variants (gas / hybrid)", [
+    ["Gas — full tank", { powertrain: "gas", fuelPct: 88, batteryPct: null }],
+    ["Gas — low fuel", { powertrain: "gas", fuelPct: 12, batteryPct: null }],
+    ["Gas — no fuel data", { powertrain: "gas", fuelPct: null, batteryPct: null }],
+    ["Hybrid — battery + fuel", { powertrain: "hybrid", batteryPct: 64, fuelPct: 71 }],
+    ["Hybrid — charging", { powertrain: "hybrid", batteryPct: 48, fuelPct: 55, charging: true }],
+    ["Hybrid — low on both", { powertrain: "hybrid", batteryPct: 9, fuelPct: 14 }],
+  ]],
   ["Combined example", [
     ["Cold morning, many states", {
       locked: false, batteryPct: 11, charging: true, doorRR: true, hood: true,
@@ -128,7 +136,15 @@ function card(g, name, html){ const c=document.createElement("div"); c.className
 
 for (const [title, cards] of groups) {
   const g = section(title);
-  for (const [name, state] of cards) card(g, name, V.carDiagram(state, { width: 200 }));
+  for (const [name, state] of cards) {
+    // "powertrain" selects the centre cell (drive battery / fuel tank /
+    // both) -- it's an o{} render option, not a vehicle state flag, but
+    // it's simplest to author each card as one flat object above and split
+    // it out here rather than thread a second options object through GROUPS.
+    const opts = { width: 200 };
+    if (state.powertrain) opts.powertrain = state.powertrain;
+    card(g, name, V.carDiagram(state, opts));
+  }
 }
 
 // ---- optional widgets ----

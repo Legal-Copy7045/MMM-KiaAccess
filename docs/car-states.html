@@ -45,6 +45,19 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
     heat: "#ff7043"
   };
 
+  // User-supplied gas-pump glyph (their own reference icon, not a
+  // hand-drawn approximation) -- recoloured to COL.text with the white
+  // background made transparent, downscaled to 64x62 (plenty for the ~15-18
+  // unit topper slot it renders into; the source was 320x312) and embedded
+  // as a data URI so pumpTopper() stays a pure, dependency-free function
+  // like everything else in this file, with no separate asset file to
+  // resolve a path to across the different contexts this module is
+  // inlined into (MagicMirror's own module dir, the HA card's static
+  // frontend hosting, docs/build-gallery.js's standalone HTML).
+  var PUMP_ICON_PNG =
+    "data:image/png;base64," +
+    "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";
+
   // Monotonic counter for namespacing SVG element ids so multiple diagrams on
   // one page don't collide. Not security-sensitive — just needs to be unique
   // within the document (was Math.random, which CodeQL flags).
@@ -128,6 +141,104 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
       bolt +
       "</svg>"
     );
+  }
+
+  // fuel reads amber/gold once known (like a traditional gauge needle
+  // sitting in its normal range) rather than green -- distinguishing it
+  // from the drive battery's green at a glance is the point, not a
+  // charge-style "good/bad" judgement. Still escalates to red when
+  // critically low, same threshold as batteryColor().
+  function fuelColor(pct) {
+    if (pct == null || isNaN(pct)) return COL.dim;
+    if (pct <= 15) return COL.bad;
+    return COL.warn;
+  }
+
+  // simple gas-pump silhouette (body + readout window + nozzle hose),
+  // centred on (cx, cy), filled a single colour like a solid icon-font glyph
+  function fuelPumpGlyph(cx, cy, col) {
+    var x = cx - 8, y = cy - 13;
+    return (
+      '<g fill="' + col + '">' +
+      '<rect x="' + x + '" y="' + (y + 3) + '" width="14" height="21" rx="2.5"/>' +
+      '<rect x="' + (x + 2.6) + '" y="' + (y + 6.5) + '" width="8.8" height="5.5" rx="1" fill="#0b0c0d"/>' +
+      '<rect x="' + (x - 2) + '" y="' + (y + 24.5) + '" width="18" height="2.4" rx="1.2"/>' +
+      '<path d="M ' + (x + 14) + " " + (y + 8) + " C " + (x + 21) + " " + (y + 8) + " " +
+      (x + 21) + " " + (y + 1) + " " + (x + 21) + " " + (y - 3) +
+      '" fill="none" stroke="' + col + '" stroke-width="2.2" stroke-linecap="round"/>' +
+      '<path d="M ' + (x + 17) + " " + (y - 4) + ' l 6.5 -2.6 l 1.6 4 l -6.5 2.6 z"/>' +
+      "</g>"
+    );
+  }
+
+  // battery + bolt silhouette (outline body, terminal nub, filled bolt),
+  // centred on (cx, cy) -- the icon is fixed/always-full; the tile's own
+  // fill bar underneath is what actually encodes the level
+  function batteryBoltGlyph(cx, cy, col) {
+    var w = 17, h = 25, x = cx - w / 2, y = cy - h / 2 + 1;
+    return (
+      '<rect x="' + (cx - 4) + '" y="' + (y - 3.5) + '" width="8" height="3.5" rx="1.4" fill="' + col + '"/>' +
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4" fill="none" stroke="' +
+      col + '" stroke-width="2.2"/>' +
+      '<path d="M ' + (cx + 2) + " " + (y + 4) + ' l -6.5 11 h 5.5 l -2.5 9 l 8 -12.5 h -5.5 z" fill="' + col + '"/>'
+    );
+  }
+
+  /**
+   * Icon-tile power widget: a rounded icon frame (gas pump or a battery +
+   * bolt glyph) with a horizontal level bar underneath and the percentage
+   * in large type beside it -- the standalone alternative to batteryGauge()
+   * for a gas tank or (stacked with a battery tile) a hybrid's two energy
+   * sources, meant to sit as a caption widget under/beside the car diagram
+   * the same way batteryGauge() already does, not inside the diagram's own
+   * small car-body silhouette.
+   * @param {number} pct 0..100 (null -> unknown)
+   * @param {"fuel"|"battery"} kind
+   * @param {object} o { width, charging (battery only, pulses the bolt) }
+   */
+  function powerTile(pct, kind, o) {
+    o = o || {};
+    var isFuel = kind === "fuel";
+    var w = o.width || 210;
+    var box = 74;
+    var barX = 10, barW = box - 20, barH = 15, barY = box - barH - 9;
+    var col = isFuel ? fuelColor(pct) : batteryColor(pct);
+    var frac = Math.max(0, Math.min(1, (Number(pct) || 0) / 100));
+    var fillW = frac * (barW - 4);
+    var label = pct == null || isNaN(pct) ? "—" : Math.round(pct) + "%";
+    var iconCol = col === COL.dim ? COL.outline : COL.text;
+    var icon = isFuel
+      ? fuelPumpGlyph(box / 2, box / 2 - 6, iconCol)
+      : batteryBoltGlyph(box / 2, box / 2 - 6, iconCol);
+    var pulseAnim =
+      !isFuel && o.charging === true
+        ? '<animate attributeName="opacity" values="0.4;1;0.4" dur="1.5s" repeatCount="indefinite"/>'
+        : "";
+    return (
+      '<svg class="kiaaccess-powertile" viewBox="0 0 ' + w + " " + box + '" width="' + w +
+      '" role="img" aria-label="' +
+      (isFuel ? "Fuel " : "Battery ") + esc(label) + '">' +
+      '<rect x="0" y="0" width="' + box + '" height="' + box + '" rx="14" fill="none" stroke="' +
+      COL.outline + '" stroke-width="2"/>' +
+      "<g>" + icon + pulseAnim + "</g>" +
+      '<rect x="' + barX + '" y="' + barY + '" width="' + barW + '" height="' + barH + '" rx="' +
+      (barH / 2) + '" fill="none" stroke="' + COL.outline + '" stroke-width="1.6"/>' +
+      '<rect x="' + (barX + 2) + '" y="' + (barY + 2) + '" width="' + fillW + '" height="' + (barH - 4) +
+      '" rx="' + ((barH - 4) / 2) + '" fill="' + col + '"/>' +
+      '<text x="' + (box + 18) + '" y="' + (box / 2 + 9) + '" font-size="27" font-weight="700" fill="' +
+      COL.text + '">' + esc(label) + "</text>" +
+      "</svg>"
+    );
+  }
+
+  /** Fuel-tank icon tile -- see powerTile(). */
+  function fuelTile(pct, o) {
+    return powerTile(pct, "fuel", o);
+  }
+
+  /** Drive-battery icon tile -- see powerTile(). */
+  function batteryTile(pct, o) {
+    return powerTile(pct, "battery", o);
   }
 
   function pulse(attr, a, b, d) {
@@ -358,11 +469,66 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
     return g;
   }
 
+  // source icon is 64x62 (see PUMP_ICON_PNG's own comment)
+  var PUMP_ICON_ASPECT = 62 / 64;
+  // Fixed icon width for BOTH toppers, regardless of the tank's own size --
+  // a gas-only diagram's single (large) tank and a hybrid's paired (small)
+  // tanks must show the same-size icon, not one scaled up just because its
+  // tank happens to be bigger. `small` is accepted for API symmetry with
+  // verticalBattery()/verticalFuelTank() but no longer affects icon size.
+  var TOPPER_ICON_W = 15;
+
+  /** The user's own gas-pump reference icon (PUMP_ICON_PNG), sized to sit as
+   *  a "topper" directly above a vertical tank/cell, its base flush with
+   *  the cell's own top edge -- the tank+icon-topper pairing hybrid/gas
+   *  diagrams use in place of a battery cell's plain terminal nub. */
+  function pumpTopper(cx, by, small) {
+    var w = TOPPER_ICON_W;
+    var h = w * PUMP_ICON_ASPECT;
+    var x = cx - w / 2, y = by - h - 4;
+    return (
+      '<image x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+      '" href="' + PUMP_ICON_PNG + '" xlink:href="' + PUMP_ICON_PNG +
+      '" preserveAspectRatio="xMidYMid meet"/>'
+    );
+  }
+
+  /** Small battery+bolt icon, same "topper" convention as pumpTopper() --
+   *  used in place of the plain terminal nub for a hybrid's drive-battery
+   *  cell (so it visually pairs with the fuel tank's pump icon next to it),
+   *  never for a pure-EV diagram, which keeps its original plain nub.
+   *  Scaled so its OVERALL height (body + terminal nub, 25+3.5=28.5 units
+   *  in its own local design) matches pumpTopper()'s height exactly, so the
+   *  two toppers read as the same size sitting side by side. */
+  function batteryTopper(cx, by, small) {
+    var pumpH = TOPPER_ICON_W * PUMP_ICON_ASPECT;
+    var k = pumpH / 28.5;
+    var w = 17 * k, h = 25 * k;
+    var x = cx - w / 2, y = by - h - 4;
+    var col = COL.text;
+    return (
+      '<rect x="' + (cx - 4 * k) + '" y="' + (y - 3.5 * k) + '" width="' + (8 * k) +
+      '" height="' + (3.5 * k) + '" rx="' + (1.4 * k) + '" fill="' + col + '"/>' +
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (4 * k) +
+      '" fill="none" stroke="' + col + '" stroke-width="' + (2.2 * k) + '"/>' +
+      '<path d="M ' + (cx + 2 * k) + " " + (y + 4 * k) + " l " + (-6.5 * k) + " " + (11 * k) +
+      " h " + (5.5 * k) + " l " + (-2.5 * k) + " " + (9 * k) + " l " + (8 * k) + " " + (-12.5 * k) +
+      " h " + (-5.5 * k) + ' z" fill="' + col + '"/>'
+    );
+  }
+
   /** Vertical "AA cell" battery, terminal to the front, filling bottom-up,
-   *  sitting toward the rear of the cabin with the % shown underneath. */
-  function verticalBattery(pct, charging) {
-    var cx = 100;
-    var bw = 24, bx = cx - bw / 2, by = 168, bh = 54;
+   *  sitting toward the rear of the cabin with the % shown underneath.
+   *  `cx` (default 100, the diagram's own centre) and `small` (a narrower
+   *  cell, for the hybrid layout which draws this alongside a fuel tank)
+   *  are optional -- every existing EV-only caller gets the exact same
+   *  output as before. `iconTopper` swaps the plain terminal nub for a
+   *  small battery+bolt icon (see batteryTopper()) -- only ever passed for
+   *  the hybrid layout; a pure-EV diagram never sets it, so it keeps its
+   *  original look untouched. */
+  function verticalBattery(pct, charging, cx, small, iconTopper) {
+    cx = cx == null ? 100 : cx;
+    var bw = small ? 19 : 24, bx = cx - bw / 2, by = 168, bh = small ? 50 : 54;
     var ix = bx + 2.5, iw = bw - 5, iy = by + 3, ih = bh - 6;
     var frac = Math.max(0, Math.min(1, (Number(pct) || 0) / 100));
     var fh = frac * ih;
@@ -370,21 +536,68 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
     var label = pct == null || isNaN(pct) ? "—" : Math.round(pct) + "%";
     var bolt =
       charging === true
-        ? '<path d="M 103 180 l -8 13 h 6 l -3 11 l 10 -15 h -6 z" fill="' + COL.text +
-          '" stroke="#000" stroke-width="0.6">' +
+        ? '<path d="M ' + (cx + 3) + " " + (by + 12) + " l -8 13 h 6 l -3 11 l 10 -15 h -6 z" +
+          '" fill="' + COL.text + '" stroke="#000" stroke-width="0.6">' +
           '<animate attributeName="opacity" values="0.35;1;0.35" dur="1.5s" repeatCount="indefinite"/></path>'
         : "";
+    var topper =
+      iconTopper === true
+        ? batteryTopper(cx, by, small)
+        : '<rect x="' + (cx - 5) + '" y="' + (by - 4) + '" width="10" height="5" rx="1.5" fill="' +
+          COL.outline + '"/>';
     return (
-      '<rect x="' + (cx - 5) + '" y="' + (by - 4) + '" width="10" height="5" rx="1.5" fill="' +
-      COL.outline + '"/>' +
+      topper +
       '<rect x="' + bx + '" y="' + by + '" width="' + bw + '" height="' + bh +
       '" rx="5" fill="#111214" stroke="' + COL.outline + '" stroke-width="2"/>' +
       '<rect x="' + ix + '" y="' + (iy + ih - fh) + '" width="' + iw + '" height="' + fh +
       '" rx="2.5" fill="' + col + '"/>' +
       bolt +
-      '<text x="' + cx + '" y="' + (by + bh + 16) + '" text-anchor="middle" font-size="13" ' +
+      '<text x="' + cx + '" y="' + (by + bh + 16) + '" text-anchor="middle" font-size="' + (small ? 11 : 13) + '" ' +
       'font-weight="700" fill="' + COL.text + '">' + esc(label) + "</text>"
     );
+  }
+
+  /** Vertical fuel tank -- same footprint/fill convention as verticalBattery
+   *  (so a hybrid can show both side by side and they read as one family of
+   *  gauge) but topped with the small gas-pump icon (pumpTopper()) instead
+   *  of a terminal nub, and no lightning bolt (there's no "actively
+   *  fuelling" live state to animate). `cx`/`small` match verticalBattery's. */
+  function verticalFuelTank(pct, cx, small) {
+    cx = cx == null ? 100 : cx;
+    var bw = small ? 19 : 24, bx = cx - bw / 2, by = 168, bh = small ? 50 : 54;
+    var ix = bx + 2.5, iw = bw - 5, iy = by + 3, ih = bh - 6;
+    var frac = Math.max(0, Math.min(1, (Number(pct) || 0) / 100));
+    var fh = frac * ih;
+    var col = batteryColor(pct); // same low/mid/high thresholds as charge %
+    var label = pct == null || isNaN(pct) ? "—" : Math.round(pct) + "%";
+    return (
+      pumpTopper(cx, by, small) +
+      '<rect x="' + bx + '" y="' + by + '" width="' + bw + '" height="' + bh +
+      '" rx="5" fill="#111214" stroke="' + COL.outline + '" stroke-width="2"/>' +
+      '<rect x="' + ix + '" y="' + (iy + ih - fh) + '" width="' + iw + '" height="' + fh +
+      '" rx="2.5" fill="' + col + '"/>' +
+      '<text x="' + cx + '" y="' + (by + bh + 16) + '" text-anchor="middle" font-size="' + (small ? 11 : 13) + '" ' +
+      'font-weight="700" fill="' + COL.text + '">' + esc(label) + "</text>"
+    );
+  }
+
+  /** Centre powertrain cell(s): an EV's drive battery (unchanged from the
+   *  original diagram), a gas car's single pump-topped fuel tank, or
+   *  (hybrid) a battery-icon-topped drive-battery cell alongside a
+   *  pump-topped fuel tank -- selected by `o.powertrain` ("ev" (default) |
+   *  "hybrid" | "gas"). Every car also gets its own 12V accessory battery
+   *  regardless of powertrain. */
+  function mainPowerCell(s, o) {
+    if (o.battery === false) return "";
+    var pt = o.powertrain === "hybrid" || o.powertrain === "gas" ? o.powertrain : "ev";
+    var cell =
+      pt === "gas"
+        ? verticalFuelTank(s.fuelPct, 100, false)
+        : pt === "hybrid"
+        ? verticalBattery(s.batteryPct, s.charging, 84, true, true) +
+          verticalFuelTank(s.fuelPct, 117, true)
+        : verticalBattery(s.batteryPct, s.charging);
+    return cell + battery12v(s.car12vPct);
   }
 
   /** Small 12V (lead-acid) battery icon tucked in the nose behind the front-left
@@ -430,8 +643,12 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
    *     and `width` scales to keep the car the same size. `critical:true` still
    *     works as a shorthand for one unlabelled critical alert;
    *   flashing (bool) -> pulses head + tail lights amber (find-the-car / hazards)
-   * @param {object} o { width, battery:false to omit the centre battery,
+   * @param {object} o { width, battery:false to omit the centre cell(s),
+   *   powertrain:"ev" (default) | "hybrid" | "gas" -- selects a drive
+   *   battery, a fuel tank, or a smaller pair of both side by side,
    *   tempUnit:"C"|"F" for the two on-diagram temperatures }
+   *   gas/hybrid vehicles also read `s.fuelPct` (0..100, null -> unknown),
+   *   the same convention as `s.batteryPct`.
    */
   function carDiagram(s, o) {
     s = s || {};
@@ -660,10 +877,9 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
       COL.dim + '" stroke-width="1"/>' +
       portRing +
       '<circle cx="155" cy="274" r="4.2" fill="' + port + '"/>' +
-      // drive battery (centre) + 12V battery (beside it) — lock state is the body colour
-      (o.battery === false
-        ? ""
-        : verticalBattery(s.batteryPct, s.charging) + battery12v(s.car12vPct)) +
+      // drive battery and/or fuel tank (centre) + 12V battery (beside it) --
+      // lock state is the body colour
+      mainPowerCell(s, o) +
       // warning triangle (front-right margin) + reason(s) centred under it
       (alertsIn.length ? alertBadge(alertsIn) : "") +
       // outside temperature — always, in the top-left margin
@@ -834,6 +1050,11 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
     COL: COL,
     batteryGauge: batteryGauge,
     carDiagram: carDiagram,
+    verticalBattery: verticalBattery,
+    verticalFuelTank: verticalFuelTank,
+    powerTile: powerTile,
+    fuelTile: fuelTile,
+    batteryTile: batteryTile,
     alertLabels: alertLabels,
     sparkline: sparkline,
     rangeRing: rangeRing,
@@ -845,7 +1066,7 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
 </script>
 <script>
 const V = KiaAccessVisuals;
-const groups = [["Lock (body outline colour)",[["Locked",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Unlocked",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false}],["Lock unknown",{"locked":null,"batteryPct":78,"carOn":false,"headlights":false}]]],["Battery level (centre cell)",[["High charge",{"locked":true,"batteryPct":82,"carOn":false,"headlights":false}],["Mid charge",{"locked":true,"batteryPct":35,"carOn":false,"headlights":false}],["Low charge",{"locked":true,"batteryPct":8,"carOn":false,"headlights":false}],["No battery data",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false}]]],["Charging / plug (rear-right port)",[["Unplugged",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Plugged, not charging",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"plugged":true}],["Charging (AC)",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"charging":true,"chargeKw":7.4,"chargeAmps":32}],["Charging (DC fast)",{"locked":true,"batteryPct":41,"carOn":false,"headlights":false,"charging":true,"chargeKw":150,"chargeAmps":375}],["Exporting (V2L / V2X)",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"v2l":true}]]],["Doors, frunk, liftgate",[["A door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorFL":true}],["A rear door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorRR":true}],["Frunk open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"hood":true}],["Liftgate open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"trunk":true}]]],["Windows & sunroof",[["A window open (door shut)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"winFL":true}],["Sunroof shut",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Sunroof open",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"sunroof":true}]]],["Lights",[["Headlights off",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Headlights on",{"locked":true,"batteryPct":78,"carOn":false,"headlights":true}],["Car off (taillights outline)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Ignition / accessory on",{"locked":true,"batteryPct":78,"carOn":true,"headlights":false}]]],["Tyres",[["One tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreFL":true}],["All-tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreAny":true}]]],["Warning triangle",[["Critical + warnings",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"alerts":[{"level":"critical","label":"Tyre"},{"level":"warning","label":"12V low"},{"level":"warning","label":"Door"}]}],["Warning only + charging",{"locked":true,"batteryPct":41,"carOn":false,"headlights":false,"alerts":[{"level":"warning","label":"Service"}],"charging":true}]]],["Heaters",[["Defrost (front + rear)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"defrost":true}],["Rear-window heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"rearHeat":true}],["Side-mirror heaters",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"mirrorHeat":true}],["Steering-wheel heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"steerHeat":true}]]],["Air conditioning",[["Heating",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"heat"}],["Cooling",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"cool"}],["On (direction unknown)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"on"}],["Heating + set-point",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"heat","airTempC":21}]]],["Temperatures & 12V battery",[["Outside temp (thermometer)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"outsideTempC":3}],["12V battery — healthy",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"car12vPct":88}],["12V battery — low",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"car12vPct":42}],["12V + outside + set-point",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"car12vPct":71,"outsideTempC":3,"climate":"heat","airTempC":22}]]],["Find the car",[["Lamps flashing amber",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"flashing":true}]]],["Combined example",[["Cold morning, many states",{"locked":false,"batteryPct":11,"carOn":true,"headlights":true,"charging":true,"doorRR":true,"hood":true,"sunroof":true,"tyreFR":true,"climate":"heat","defrost":true,"rearHeat":true,"mirrorHeat":true,"steerHeat":true}]]]];
+const groups = [["Lock (body outline colour)",[["Locked",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Unlocked",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false}],["Lock unknown",{"locked":null,"batteryPct":78,"carOn":false,"headlights":false}]]],["Battery level (centre cell)",[["High charge",{"locked":true,"batteryPct":82,"carOn":false,"headlights":false}],["Mid charge",{"locked":true,"batteryPct":35,"carOn":false,"headlights":false}],["Low charge",{"locked":true,"batteryPct":8,"carOn":false,"headlights":false}],["No battery data",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false}]]],["Charging / plug (rear-right port)",[["Unplugged",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Plugged, not charging",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"plugged":true}],["Charging (AC)",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"charging":true,"chargeKw":7.4,"chargeAmps":32}],["Charging (DC fast)",{"locked":true,"batteryPct":41,"carOn":false,"headlights":false,"charging":true,"chargeKw":150,"chargeAmps":375}],["Exporting (V2L / V2X)",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"v2l":true}]]],["Doors, frunk, liftgate",[["A door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorFL":true}],["A rear door open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"doorRR":true}],["Frunk open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"hood":true}],["Liftgate open",{"locked":false,"batteryPct":78,"carOn":false,"headlights":false,"trunk":true}]]],["Windows & sunroof",[["A window open (door shut)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"winFL":true}],["Sunroof shut",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Sunroof open",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"sunroof":true}]]],["Lights",[["Headlights off",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Headlights on",{"locked":true,"batteryPct":78,"carOn":false,"headlights":true}],["Car off (taillights outline)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false}],["Ignition / accessory on",{"locked":true,"batteryPct":78,"carOn":true,"headlights":false}]]],["Tyres",[["One tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreFL":true}],["All-tyre warning",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"tyreAny":true}]]],["Warning triangle",[["Critical + warnings",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"alerts":[{"level":"critical","label":"Tyre"},{"level":"warning","label":"12V low"},{"level":"warning","label":"Door"}]}],["Warning only + charging",{"locked":true,"batteryPct":41,"carOn":false,"headlights":false,"alerts":[{"level":"warning","label":"Service"}],"charging":true}]]],["Heaters",[["Defrost (front + rear)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"defrost":true}],["Rear-window heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"rearHeat":true}],["Side-mirror heaters",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"mirrorHeat":true}],["Steering-wheel heater",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"steerHeat":true}]]],["Air conditioning",[["Heating",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"heat"}],["Cooling",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"cool"}],["On (direction unknown)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"on"}],["Heating + set-point",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"climate":"heat","airTempC":21}]]],["Temperatures & 12V battery",[["Outside temp (thermometer)",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"outsideTempC":3}],["12V battery — healthy",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"car12vPct":88}],["12V battery — low",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"car12vPct":42}],["12V + outside + set-point",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"car12vPct":71,"outsideTempC":3,"climate":"heat","airTempC":22}]]],["Find the car",[["Lamps flashing amber",{"locked":true,"batteryPct":78,"carOn":false,"headlights":false,"flashing":true}]]],["Powertrain variants (gas / hybrid)",[["Gas — full tank",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false,"powertrain":"gas","fuelPct":88}],["Gas — low fuel",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false,"powertrain":"gas","fuelPct":12}],["Gas — no fuel data",{"locked":true,"batteryPct":null,"carOn":false,"headlights":false,"powertrain":"gas","fuelPct":null}],["Hybrid — battery + fuel",{"locked":true,"batteryPct":64,"carOn":false,"headlights":false,"powertrain":"hybrid","fuelPct":71}],["Hybrid — charging",{"locked":true,"batteryPct":48,"carOn":false,"headlights":false,"powertrain":"hybrid","fuelPct":55,"charging":true}],["Hybrid — low on both",{"locked":true,"batteryPct":9,"carOn":false,"headlights":false,"powertrain":"hybrid","fuelPct":14}]]],["Combined example",[["Cold morning, many states",{"locked":false,"batteryPct":11,"carOn":true,"headlights":true,"charging":true,"doorRR":true,"hood":true,"sunroof":true,"tyreFR":true,"climate":"heat","defrost":true,"rearHeat":true,"mirrorHeat":true,"steerHeat":true}]]]];
 const out = document.getElementById("out");
 function section(title){ const h=document.createElement("h2"); h.textContent=title; out.appendChild(h);
   const g=document.createElement("div"); g.className="grid"; out.appendChild(g); return g; }
@@ -854,7 +1075,15 @@ function card(g, name, html){ const c=document.createElement("div"); c.className
 
 for (const [title, cards] of groups) {
   const g = section(title);
-  for (const [name, state] of cards) card(g, name, V.carDiagram(state, { width: 200 }));
+  for (const [name, state] of cards) {
+    // "powertrain" selects the centre cell (drive battery / fuel tank /
+    // both) -- it's an o{} render option, not a vehicle state flag, but
+    // it's simplest to author each card as one flat object above and split
+    // it out here rather than thread a second options object through GROUPS.
+    const opts = { width: 200 };
+    if (state.powertrain) opts.powertrain = state.powertrain;
+    card(g, name, V.carDiagram(state, opts));
+  }
 }
 
 // ---- optional widgets ----
