@@ -511,7 +511,14 @@ Front of the car is up. Animations play live here; car-states.png is a snapshot.
       '" height="' + (3.5 * k) + '" rx="' + (1.4 * k) + '" fill="' + col + '"/>' +
       '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (4 * k) +
       '" fill="none" stroke="' + col + '" stroke-width="' + (2.2 * k) + '"/>' +
-      '<path d="M ' + (cx + 2 * k) + " " + (y + 4 * k) + " l " + (-6.5 * k) + " " + (11 * k) +
+      // the zigzag bolt shape's own bounding box isn't symmetric around
+      // its start point (it reaches 6.5k right but only 4.5k left of it,
+      // and 20k tall starting 4k from the top but ending only 1k from the
+      // bottom) -- centred by hand here (start point shifted left 1k and
+      // down 1.5k) rather than deriving it from the path's own bbox, so it
+      // sits centred both horizontally and vertically inside the battery
+      // body instead of drifting right and crowding the bottom edge.
+      '<path d="M ' + (cx + 1 * k) + " " + (y + 5.5 * k) + " l " + (-6.5 * k) + " " + (11 * k) +
       " h " + (5.5 * k) + " l " + (-2.5 * k) + " " + (9 * k) + " l " + (8 * k) + " " + (-12.5 * k) +
       " h " + (-5.5 * k) + ' z" fill="' + col + '"/>'
     );
