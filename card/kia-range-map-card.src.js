@@ -417,7 +417,12 @@
 
         var cap = self0._root.querySelector("[data-cap]");
         if (cap) {
-          var head = "Reach <b>" + kmToDisp(dist, metric) + "</b>" +
+          // "Planning reach", not "Range" -- this is the car's raw range
+          // AFTER the reserve %/haircut factor (see range.js's reach()),
+          // a deliberately conservative trip-planning figure, not the same
+          // number as the details table's "Total range" -- worth naming
+          // distinctly so the two don't read as a contradiction.
+          var head = "Planning reach <b>" + kmToDisp(dist, metric) + "</b>" +
             (mode === "round" ? " there &amp; back" : "") +
             (res.kind === "straight" ? " · straight-line" : " · by road");
           var parts = near.slice(0, 3).map(function (x) {
