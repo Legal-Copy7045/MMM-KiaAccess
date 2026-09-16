@@ -2014,7 +2014,8 @@ Module.register("MMM-KiaAccess", {
         c.innerHTML = V.carDiagram(s, {
           width: this.visWidth(),
           battery: vis.battery !== false,
-          tempUnit: this.config.units === "metric" ? "C" : "F"
+          tempUnit: this.config.units === "metric" ? "C" : "F",
+          powertrain: s.powertrain
         });
         panel.appendChild(c);
       }

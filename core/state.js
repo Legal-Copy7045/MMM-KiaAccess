@@ -112,6 +112,18 @@
       }
     });
 
+    // vehicle.engine_type -> carDiagram()'s powertrain option
+    // ("ev"|"gas"|"hybrid"). An unset/unrecognised value defaults to "ev",
+    // matching this module's original EV-only diagram -- a genuinely
+    // missing engine_type must never silently hide a real drive battery
+    // reading behind a wrong guess.
+    var powertrain = (function () {
+      var t = String(f["vehicle.engine_type"] || "").toUpperCase();
+      if (t === "ICE") return "gas";
+      if (t === "PHEV" || t === "HEV") return "hybrid";
+      return "ev";
+    })();
+
     return {
       batteryPct: num("ev_battery_percentage"),
       rangeKm: num("ev_driving_range"),
@@ -156,6 +168,8 @@
       locationLat: num("location_latitude"),
       locationLon: num("location_longitude"),
       faults: faults, // [] = no fault lamps; names of any that are on
+      powertrain: powertrain, // "ev" | "gas" | "hybrid" -- for carDiagram()'s o.powertrain
+      fuelPct: num("fuel_level"),
       history: opts.history || [],
       units: opts.units || "imperial", // "imperial" | "metric" — for messages
       tokenAgeDays: tokenAgeDays,

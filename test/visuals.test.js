@@ -48,6 +48,33 @@ const V = require("../core/visuals.js");
   assert.ok(svg.includes("animate attributeName=\"opacity\" values=\"0.35;1;0.35\""), "hybrid charging must still show the bolt animation");
 }
 
+// ---- hybrid layout's battery topper icon: the lightning bolt must stay
+// fully inside the small battery outline, with roughly equal clearance
+// top and bottom -- it previously overshot the bottom edge (negative
+// margin) because its start point wasn't offset to account for the
+// bolt's own bounding box being taller than the body's own centred fit ----
+{
+  const svg = V.verticalBattery(64, false, 84, true, true);
+  const rects = [...svg.matchAll(/<rect x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)"/g)];
+  const [rx, ry, rw, rh] = rects[1].slice(1, 5).map(Number); // topper's own outline rect
+  const pm = svg.match(/<path d="M ([-\d.]+) ([-\d.]+)((?: [lh] [-\d.]+(?: [-\d.]+)?)+) z" fill="/);
+  let x = +pm[1], y = +pm[2];
+  let minY = y, maxY = y, minX = x, maxX = x;
+  const toks = pm[3].trim().split(/\s+/);
+  for (let i = 0; i < toks.length; ) {
+    const cmd = toks[i++];
+    if (cmd === "l") { x += +toks[i++]; y += +toks[i++]; }
+    else if (cmd === "h") { x += +toks[i++]; }
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+  }
+  const topMargin = minY - ry, bottomMargin = (ry + rh) - maxY;
+  assert.ok(topMargin > 0.5, "bolt must clear the top edge of the battery outline: " + topMargin);
+  assert.ok(bottomMargin > 0.5, "bolt must not touch/overshoot the bottom edge of the battery outline: " + bottomMargin);
+  assert.ok(Math.abs(topMargin - bottomMargin) < 0.1, "bolt must be vertically centred (equal top/bottom margins)");
+  assert.ok(Math.abs((minX + maxX) / 2 - (rx + rw / 2)) < 0.1, "bolt must be horizontally centred");
+}
+
 // ---- verticalFuelTank()/verticalBattery() standalone: unknown level ----
 {
   const tank = V.verticalFuelTank(null, 100, false);

@@ -209,6 +209,18 @@ g.KiaAccessCommands={
       }
     });
 
+    // vehicle.engine_type -> carDiagram()'s powertrain option
+    // ("ev"|"gas"|"hybrid"). An unset/unrecognised value defaults to "ev",
+    // matching this module's original EV-only diagram -- a genuinely
+    // missing engine_type must never silently hide a real drive battery
+    // reading behind a wrong guess.
+    var powertrain = (function () {
+      var t = String(f["vehicle.engine_type"] || "").toUpperCase();
+      if (t === "ICE") return "gas";
+      if (t === "PHEV" || t === "HEV") return "hybrid";
+      return "ev";
+    })();
+
     return {
       batteryPct: num("ev_battery_percentage"),
       rangeKm: num("ev_driving_range"),
@@ -253,6 +265,8 @@ g.KiaAccessCommands={
       locationLat: num("location_latitude"),
       locationLon: num("location_longitude"),
       faults: faults, // [] = no fault lamps; names of any that are on
+      powertrain: powertrain, // "ev" | "gas" | "hybrid" -- for carDiagram()'s o.powertrain
+      fuelPct: num("fuel_level"),
       history: opts.history || [],
       units: opts.units || "imperial", // "imperial" | "metric" — for messages
       tokenAgeDays: tokenAgeDays,
@@ -760,13 +774,11 @@ g.KiaAccessCommands={
       '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (4 * k) +
       '" fill="none" stroke="' + col + '" stroke-width="' + (2.2 * k) + '"/>' +
       // the zigzag bolt shape's own bounding box isn't symmetric around
-      // its start point (it reaches 6.5k right but only 4.5k left of it,
-      // and 20k tall starting 4k from the top but ending only 1k from the
-      // bottom) -- centred by hand here (start point shifted left 1k and
-      // down 1.5k) rather than deriving it from the path's own bbox, so it
-      // sits centred both horizontally and vertically inside the battery
-      // body instead of drifting right and crowding the bottom edge.
-      '<path d="M ' + (cx + 1 * k) + " " + (y + 5.5 * k) + " l " + (-6.5 * k) + " " + (11 * k) +
+      // its start point (11k wide, offset so x+1k centres it; 20k tall out
+      // of the body's 25k height, so a top offset of 2.5k centres it
+      // vertically too -- 5.5k, tried earlier, left only a 0k/negative
+      // bottom margin and visibly touched the body's bottom edge).
+      '<path d="M ' + (cx + 1 * k) + " " + (y + 2.5 * k) + " l " + (-6.5 * k) + " " + (11 * k) +
       " h " + (5.5 * k) + " l " + (-2.5 * k) + " " + (9 * k) + " l " + (8 * k) + " " + (-12.5 * k) +
       " h " + (-5.5 * k) + ' z" fill="' + col + '"/>'
     );

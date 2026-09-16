@@ -78,4 +78,21 @@ assert.strictEqual(buildState({ "vehicle.headlamp_status": "OFF" }, {}).headligh
   );
 });
 
+// powertrain/fuelPct: buildState() must expose these so any consumer (the
+// MagicMirror module, the HA Lovelace card) can drive carDiagram()'s gas/
+// hybrid rendering from the shared state object alone, without each caller
+// re-deriving engine_type mapping itself -- previously only the Lovelace
+// card did this derivation locally, so MM's own diagram never switched out
+// of EV-only rendering when a PHEV/HEV/ICE account was configured, even
+// though the underlying vehicle.engine_type sensor updated correctly.
+assert.strictEqual(buildState({}, {}).powertrain, "ev", "unset engine_type defaults to ev");
+assert.strictEqual(buildState({ "vehicle.engine_type": "EV" }, {}).powertrain, "ev");
+assert.strictEqual(buildState({ "vehicle.engine_type": "ICE" }, {}).powertrain, "gas");
+assert.strictEqual(buildState({ "vehicle.engine_type": "PHEV" }, {}).powertrain, "hybrid");
+assert.strictEqual(buildState({ "vehicle.engine_type": "HEV" }, {}).powertrain, "hybrid");
+assert.strictEqual(buildState({ "vehicle.engine_type": "phev" }, {}).powertrain, "hybrid", "case-insensitive");
+assert.strictEqual(buildState({ "vehicle.engine_type": "bogus" }, {}).powertrain, "ev", "unrecognised value stays ev, never hides a real battery reading");
+assert.strictEqual(buildState({ "vehicle.fuel_level": 42 }, {}).fuelPct, 42);
+assert.strictEqual(buildState({}, {}).fuelPct, null);
+
 console.log("all state tests passed");
