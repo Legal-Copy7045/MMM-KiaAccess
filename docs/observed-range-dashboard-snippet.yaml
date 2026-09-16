@@ -78,10 +78,11 @@
 
         ### Range accuracy
 
-        Kia's dash says **{{ kia }} {{ unit }}**. Your own last {{ n }} trips
-        have actually delivered closer to **{{ obs }} {{ unit }}** — that's
-        <b>{{ acc }}%</b> {{ 'above' if (acc | float(0)) >= 0 else 'below' }}
-        what it displays.
+        Over your last {{ n }} trips, Kia's dash averaged **{{ kia }} {{ unit
+        }}** at the start of each drive — not a live reading, the average of
+        what it showed each time you set off. You've actually delivered
+        closer to **{{ obs }} {{ unit }}**, <b>{{ acc }}%</b> {{ 'above' if
+        (acc | float(0)) >= 0 else 'below' }} what it predicted.
 
         {% if prf is not none %}
 
