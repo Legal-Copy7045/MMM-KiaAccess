@@ -2673,6 +2673,27 @@ g.KiaAccessCommands={
       if (!cfg) return null;
       return cfg.tomtom_key || (this._fetchedKeys && this._fetchedKeys.tomtom_key) || null;
     }
+    // A pure EV has no fuel tank at all -- hyundai_kia_connect_api's own
+    // Kia-USA parsing falls back to the vehicle's plain distanceToEmpty
+    // reading for fuel_driving_range whenever there's no real gasModeRange
+    // (true for every BEV), which is the SAME figure total_driving_range/
+    // ev_driving_range already report -- not a second, genuinely distinct
+    // "fuel range" at all. Symmetrically, a pure ICE vehicle has no drive
+    // battery, so ev_driving_range is never real information for it either.
+    // total_driving_range is already the API's own powertrain-agnostic
+    // combined figure (equal to ev_driving_range for a BEV, equal to
+    // fuel_driving_range for pure ICE, genuinely the SUM for a PHEV/HEV)
+    // and always stays shown -- these rows are hidden only where they'd
+    // just be duplicating it under a misleading label; for a PHEV/HEV they
+    // stay visible since there both readings are real, distinct
+    // information alongside the combined total.
+    static _hidePowertrainRow(key, engineType) {
+      if ((key === "fuel_driving_range" || key === "fuel_level" || key === "fuel_level_is_low") &&
+          engineType === "EV") return true;
+      if (key === "ev_driving_range" && engineType === "ICE") return true;
+      return false;
+    }
+
     _rangeInputs(flat) {
       if (!this._config.range_map) return null;
       this._maybeFetchMapKeys();
@@ -3132,9 +3153,11 @@ g.KiaAccessCommands={
       }
 
       var imperial = this._imperial();
+      var engineType = String(flat["vehicle.engine_type"] || "").toUpperCase();
       var rows = CATALOGUE.map(function (e) {
         var raw = flat["vehicle." + e.key];
         if (raw === undefined) return "";
+        if (KiaAccessCard._hidePowertrainRow(e.key, engineType)) return "";
         return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(e.key, raw, imperial)) + "</td></tr>";
       }).join("");
 
@@ -3503,7 +3526,20 @@ g.KiaAccessCommands={
         if (!el || self0._map) return;
         self0._L = L;
         self0._map = L.map(el, { zoomSnap: 0.5 });
-        self0._tiles = self0._tileLayer(L, inp.apiKey).addTo(self0._map);
+        // `inp` was captured back at the TOP of this render, before
+        // loadLeafletJs() (a CDN script fetch) resolved -- the map-keys
+        // websocket call kicked off in that same _inputs() call is a local
+        // round-trip to hass's own backend, and in practice almost always
+        // resolves FIRST. When it does, self0._fetchedKeys is already
+        // populated by the time we get here, but inp.apiKey is a stale
+        // snapshot from before that happened (still null/undefined) -- the
+        // map would permanently build on plain OSM tiles, and the "upgrade
+        // to styled tiles" swap below never gets a chance to fire because
+        // self0._map didn't exist yet when the websocket's own .then() ran.
+        // Re-derive the freshest known key right here instead of trusting
+        // the closed-over `inp`.
+        var apiKey = self0._rm.api_key || (self0._fetchedKeys && self0._fetchedKeys.api_key) || inp.apiKey;
+        self0._tiles = self0._tileLayer(L, apiKey).addTo(self0._map);
         self0._layers = L.layerGroup().addTo(self0._map);
         self0._draw(true);
         setTimeout(function () { self0._map && self0._map.invalidateSize(); }, 90);

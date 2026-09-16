@@ -301,7 +301,20 @@
         if (!el || self0._map) return;
         self0._L = L;
         self0._map = L.map(el, { zoomSnap: 0.5 });
-        self0._tiles = self0._tileLayer(L, inp.apiKey).addTo(self0._map);
+        // `inp` was captured back at the TOP of this render, before
+        // loadLeafletJs() (a CDN script fetch) resolved -- the map-keys
+        // websocket call kicked off in that same _inputs() call is a local
+        // round-trip to hass's own backend, and in practice almost always
+        // resolves FIRST. When it does, self0._fetchedKeys is already
+        // populated by the time we get here, but inp.apiKey is a stale
+        // snapshot from before that happened (still null/undefined) -- the
+        // map would permanently build on plain OSM tiles, and the "upgrade
+        // to styled tiles" swap below never gets a chance to fire because
+        // self0._map didn't exist yet when the websocket's own .then() ran.
+        // Re-derive the freshest known key right here instead of trusting
+        // the closed-over `inp`.
+        var apiKey = self0._rm.api_key || (self0._fetchedKeys && self0._fetchedKeys.api_key) || inp.apiKey;
+        self0._tiles = self0._tileLayer(L, apiKey).addTo(self0._map);
         self0._layers = L.layerGroup().addTo(self0._map);
         self0._draw(true);
         setTimeout(function () { self0._map && self0._map.invalidateSize(); }, 90);
