@@ -2,6 +2,7 @@
 
 Run: python test/dump_vehicle_test.py
 """
+import enum
 import os
 import sys
 
@@ -479,5 +480,33 @@ assert sane["odometer"] == 45231.7
 missing = kia_client.dump_vehicle(_Veh())
 assert missing.get("ev_battery_percentage") is None
 assert missing.get("odometer") is None
+
+# --- engine_type: hyundai_kia_connect_api sets this (and a few other
+# Vehicle fields) to a plain Enum MEMBER, not the plain string its own type
+# annotation claims -- and a plain Enum's str() renders as "ClassName.MEMBER"
+# ("ENGINE_TYPES.EV"), not the member's own value ("EV"). A naive fallback
+# to str(value) would silently ship that mangled form to every consumer
+# (the card's powertrain picker, most notably), which would then never
+# match "ICE"/"EV"/"PHEV"/"HEV" against anything and silently fall back to
+# its default. Mirrors the shape of the real
+# hyundai_kia_connect_api.const.ENGINE_TYPES (a plain Enum, not str+Enum)
+# without depending on that package being installed. ---
+class _ENGINE_TYPES(enum.Enum):
+    ICE = "ICE"
+    EV = "EV"
+    PHEV = "PHEV"
+    HEV = "HEV"
+
+
+for member in _ENGINE_TYPES:
+    got = kia_client.dump_vehicle(_Veh(engine_type=member))["engine_type"]
+    assert got == member.value, (
+        f"engine_type={member!r} must serialize as {member.value!r}, not a mangled "
+        f"str(Enum) like 'ENGINE_TYPES.{member.name}' -- got {got!r}"
+    )
+
+# a vehicle with no engine_type at all (an older/degraded API response) must
+# stay a clean None, not "None" or crash
+assert kia_client.dump_vehicle(_Veh(engine_type=None))["engine_type"] is None
 
 print("dump_vehicle tests passed")

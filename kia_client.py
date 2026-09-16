@@ -14,6 +14,7 @@ the Lovelace card and this module all agree on names and arguments.
 """
 
 import datetime
+import enum
 import hashlib
 import json
 import logging
@@ -210,6 +211,17 @@ def jsonable(value):
         return {str(k): jsonable(v) for k, v in value.items()}
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
+    # hyundai_kia_connect_api sets several Vehicle fields (engine_type, most
+    # notably) to a plain `Enum` member, not the `.value` string the field's
+    # own type annotation claims -- Python's plain Enum.__str__ renders as
+    # "ENGINE_TYPES.EV", not "EV", so falling through to the generic
+    # str(value) below would silently serialize engine_type as the literal,
+    # useless string "ENGINE_TYPES.EV" instead of "EV". Every consumer
+    # matching on this field (e.g. a car-diagram powertrain picker mapping
+    # "ICE"/"PHEV"/"HEV"/"EV" to gas/hybrid/ev) would then just never match
+    # anything and silently fall back to its default.
+    if isinstance(value, enum.Enum):
+        return jsonable(value.value)
     return str(value)
 
 
