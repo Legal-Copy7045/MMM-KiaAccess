@@ -555,6 +555,18 @@
       return false;
     }
 
+    // Whether the details table shows a given row: `rowFilter` (from the
+    // card's own `rows:` config, or null when unset) is an explicit
+    // allow-list checked first, then the powertrain-based hide rule above
+    // -- either one can hide a row, neither one can force a row that's
+    // genuinely absent from the vehicle's own data (that's handled by the
+    // caller's own `raw === undefined` check before this is ever asked).
+    static _rowVisible(key, rowFilter, engineType) {
+      if (rowFilter && rowFilter.indexOf(key) === -1) return false;
+      if (KiaAccessCard._hidePowertrainRow(key, engineType)) return false;
+      return true;
+    }
+
     // Raw vehicle.engine_type -> carDiagram()'s powertrain option
     // ("ev"|"gas"|"hybrid"). An unset/unrecognised value defaults to "ev",
     // matching this module's original EV-only diagram -- a genuinely
@@ -1038,10 +1050,16 @@
 
       var imperial = this._imperial();
       var engineType = String(flat["vehicle.engine_type"] || "").toUpperCase();
+      // `rows:` in the card config is an explicit allow-list of entity
+      // `key` values (see core/entities.json) -- unset (the default)
+      // shows every populated field, exactly as before this option
+      // existed. An empty array is a deliberate "hide the whole table",
+      // not the same as unset -- checked with Array.isArray, not truthiness.
+      var rowFilter = Array.isArray(this._config.rows) ? this._config.rows : null;
       var rows = CATALOGUE.map(function (e) {
         var raw = flat["vehicle." + e.key];
         if (raw === undefined) return "";
-        if (KiaAccessCard._hidePowertrainRow(e.key, engineType)) return "";
+        if (!KiaAccessCard._rowVisible(e.key, rowFilter, engineType)) return "";
         return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(e.key, raw, imperial)) + "</td></tr>";
       }).join("");
 

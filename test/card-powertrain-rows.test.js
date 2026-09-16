@@ -77,4 +77,30 @@ assert.strictEqual(KiaAccessCard._powertrainFor(null), "ev");
 assert.strictEqual(KiaAccessCard._powertrainFor(""), "ev");
 assert.strictEqual(KiaAccessCard._powertrainFor("something-unexpected"), "ev");
 
+// ---- KiaAccessCard._rowVisible(): the `rows:` config allow-list, layered
+// on top of the powertrain hide rule ----
+{
+  // unset (null) filter -- unchanged from before this option existed,
+  // only the powertrain rule can hide a row
+  assert.strictEqual(KiaAccessCard._rowVisible("odometer", null, "EV"), true);
+  assert.strictEqual(KiaAccessCard._rowVisible("fuel_level", null, "EV"), false, "powertrain rule still applies");
+
+  // an explicit allow-list hides anything not named in it
+  const only = ["ev_battery_percentage", "odometer"];
+  assert.strictEqual(KiaAccessCard._rowVisible("ev_battery_percentage", only, "EV"), true);
+  assert.strictEqual(KiaAccessCard._rowVisible("odometer", only, "EV"), true);
+  assert.strictEqual(KiaAccessCard._rowVisible("is_locked", only, "EV"), false, "not in the allow-list");
+
+  // the allow-list and the powertrain rule both apply -- a key present in
+  // the allow-list can still be hidden by the powertrain rule (listing
+  // "fuel_level" for a pure EV doesn't force it to show meaningless data)
+  assert.strictEqual(KiaAccessCard._rowVisible("fuel_level", ["fuel_level"], "EV"), false);
+  // ...but the same key shows fine for a powertrain where it's real
+  assert.strictEqual(KiaAccessCard._rowVisible("fuel_level", ["fuel_level"], "PHEV"), true);
+
+  // an empty array is a deliberate "hide everything", not the same as
+  // unset -- every row fails the allow-list check
+  assert.strictEqual(KiaAccessCard._rowVisible("odometer", [], "EV"), false);
+}
+
 console.log("all card-powertrain-rows tests passed");

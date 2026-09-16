@@ -230,6 +230,11 @@ API, not from Kia. So:
    type: custom:kia-access-card
    # entity: sensor.<vehicle>_status   # optional; auto-detected otherwise
    # temperature_unit: F               # optional; "C" / "F" — otherwise follows HA
+   # rows:                             # optional; picks which details-table rows
+   #   - ev_battery_percentage         # show (an explicit allow-list, by `key` --
+   #   - odometer                      # see core/entities.json for every key);
+   #   - next_service_distance         # unset (the default) shows every populated
+   #                                   # field, exactly as before this option existed
    ```
    The same bundle also provides **`custom:kia-range-map-card`** — an interactive
    map of how far you can drive (see [Location](#location--map)).
