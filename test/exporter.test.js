@@ -2,16 +2,51 @@
 const assert = require("assert");
 const http = require("http");
 const E = require("../exporter.js");
+const { flatten } = require("../core/flatten.js");
 
+// ---- end-to-end: the REAL data shape node_helper.js's runExporters()
+// produces (flatten(payload.vehicle), not flatten({vehicle: payload.vehicle}))
+// must actually survive numericFields() -- this is the exact chain that was
+// silently broken (numericFields() required a "vehicle." prefix the real
+// caller never produced), caught only by tracing the real pipeline
+// end-to-end rather than trusting this file's own (previously
+// disconnected-from-reality) fixture. ----
+{
+  const realVehiclePayload = {
+    ev_battery_percentage: 55, ev_charging_power: 11, is_locked: true,
+    model: "EV9", data: { raw_dump_field: 123 }
+  };
+  const realFlat = flatten(realVehiclePayload);
+  const realNf = E.numericFields(realFlat);
+  assert.ok(realNf.some((x) => x.key === "ev_battery_percentage" && x.value === 55), (
+    "flatten(payload.vehicle) -> numericFields() must actually surface real vehicle fields -- " +
+    "got: " + JSON.stringify(realNf)
+  ));
+  assert.ok(!realNf.some((x) => x.key.indexOf("data_") === 0 || x.key.indexOf("data.") === 0), (
+    "the raw API dump (data.*) must still be excluded with the real (bare-key) data shape"
+  ));
+}
+
+// Bare keys, no "vehicle." prefix -- this MUST match what node_helper.js's
+// runExporters() actually hands numericFields()/pushInflux()/setSnapshot():
+// flatten(payload.vehicle), never flatten({vehicle: payload.vehicle}). A
+// prior version of this fixture used a "vehicle."-prefixed shape that
+// doesn't exist anywhere in the real call path -- numericFields() required
+// that same (wrong) prefix, so this test passed while the real
+// runExporters() -> flatten() -> numericFields() pipeline silently matched
+// nothing and never exported a single real vehicle metric, ever. Caught by
+// tracing the real end-to-end path in test/stress-node-helper.test.js, not
+// by this file's own (self-consistent but disconnected from reality) unit
+// coverage.
 const flat = {
-  "vehicle.ev_battery_percentage": 63,
-  "vehicle.ev_charging_power": 7.4,
-  "vehicle.is_locked": "true",
-  "vehicle.ev_battery_is_charging": false,
-  "vehicle.model": "EV9",                 // string -> skipped
-  "vehicle.outside_temperature": "",      // empty -> skipped
-  "vehicle.data.raw_blob": 99,            // raw dump -> skipped
-  "_meta.fetchedAt": "x"                  // not vehicle.* -> skipped
+  "ev_battery_percentage": 63,
+  "ev_charging_power": 7.4,
+  "is_locked": "true",
+  "ev_battery_is_charging": false,
+  "model": "EV9",                 // string -> skipped
+  "outside_temperature": "",      // empty -> skipped
+  "data.raw_blob": 99,            // raw dump -> skipped
+  "_meta.fetchedAt": "x"          // a string value -> skipped same as any other non-numeric field
 };
 
 // ---- numericFields ----
@@ -41,7 +76,7 @@ assert.ok(pt.includes('kia_stale{vin="ABC"} 1'));
 // ENTIRE /metrics response, not just this one series) -- sanitized instead
 // of passed through as-is
 const ptBadLabel = E.promText(
-  { "vehicle.ev_battery_percentage": 50 }, null, "kia",
+  { "ev_battery_percentage": 50 }, null, "kia",
   { "vehicle-name": "EV9", "2fast": "yes" }
 );
 assert.ok(ptBadLabel.includes('vehicle_name="EV9"'), ptBadLabel);
@@ -72,8 +107,8 @@ assert.ok(!ptBadLabel.includes("vehicle-name"), ptBadLabel);
   // under whichever vehicle's vin happened to create the server first). ----
   const srv2 = new E.PromServer({ port: 9273, prefix: "kia", labels: {} });
   srv2.start();
-  const flatA = { "vehicle.ev_battery_percentage": 40 };
-  const flatB = { "vehicle.ev_battery_percentage": 90 };
+  const flatA = { "ev_battery_percentage": 40 };
+  const flatB = { "ev_battery_percentage": 90 };
   srv2.setSnapshot(flatA, { stale: false }, "VIN1");
   srv2.setSnapshot(flatB, { stale: true }, "VIN2");
   await new Promise((r) => setTimeout(r, 150));
@@ -96,7 +131,7 @@ assert.ok(!ptBadLabel.includes("vehicle-name"), ptBadLabel);
   );
 
   // updating one vehicle's snapshot again must not disturb the other's
-  srv2.setSnapshot({ "vehicle.ev_battery_percentage": 41 }, { stale: false }, "VIN1");
+  srv2.setSnapshot({ "ev_battery_percentage": 41 }, { stale: false }, "VIN1");
   const text3 = srv2._text;
   assert.ok(text3.includes('kia_ev_battery_percentage{vin="VIN1"} 41'), text3);
   assert.ok(text3.includes('kia_ev_battery_percentage{vin="VIN2"} 90'), text3);

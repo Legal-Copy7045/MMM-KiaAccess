@@ -314,17 +314,6 @@ module.exports = NodeHelper.create({
   handleFetch(config) {
     const id = this.identifierFor(config);
     const s = this.st(id);
-    if (this.inFlight[id]) {
-      Log.info("[MMM-KiaAccess] fetch already in progress, skipping");
-      return;
-    }
-
-    // "rotate within one module": config.vehicles is a list of {vin, header}
-    // to cycle through on-screen. Computed up front (not just before the
-    // bridge spawn below) because request-cap/error paths ahead of that
-    // point need it too -- see _reportFailure()'s comment for why an
-    // account-level failure can't just use `id` here in rotate mode.
-    const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
 
     // A vehicle removed from config.vehicles must be retired (MQTT
     // "offline", Prometheus snapshot dropped) unconditionally, on the very
@@ -339,7 +328,28 @@ module.exports = NodeHelper.create({
     // Kia's API is reachable at all. Safe to also still run (as a no-op)
     // inside a later successful fetch's own diff -- see _retireVehicle()'s
     // idempotency.
+    //
+    // Deliberately BEFORE the inFlight guard below: an earlier version had
+    // this after it, so retirement was ALSO skipped for as long as an
+    // already-running fetch for this same id hadn't resolved yet (a slow
+    // live wake-up, say) -- exactly the "still blocked on the account being
+    // reachable" behaviour this diff exists to NOT have, just via a
+    // different guard than the one originally being fixed. This diff needs
+    // nothing this function is about to check below, so nothing below
+    // should be able to delay it.
     this._retireRemovedFromConfig(id, config);
+
+    if (this.inFlight[id]) {
+      Log.info("[MMM-KiaAccess] fetch already in progress, skipping");
+      return;
+    }
+
+    // "rotate within one module": config.vehicles is a list of {vin, header}
+    // to cycle through on-screen. Computed up front (not just before the
+    // bridge spawn below) because request-cap/error paths ahead of that
+    // point need it too -- see _reportFailure()'s comment for why an
+    // account-level failure can't just use `id` here in rotate mode.
+    const rotating = Array.isArray(config.vehicles) && config.vehicles.length > 0;
 
     // ---- alternative source: pull from a Home Assistant instance ----
     // (local read — not subject to the Kia request/hour cap)
@@ -533,7 +543,23 @@ module.exports = NodeHelper.create({
       // through: they'd get cache/history/session/trip files created,
       // publish to MQTT/Influx/Prometheus, and trigger range-map fetches
       // for a vehicle nothing asked this module to track.
-      const configuredVins = new Set(
+      //
+      // Prefer this.rotateVins[id] (kept current by handleFetch()'s own
+      // unconditional _retireRemovedFromConfig() call, on EVERY call, not
+      // just ones that spawn a fetch) over re-deriving from `config` --
+      // `config` here is whatever handleFetch() closed over at the moment
+      // IT spawned this particular bridge process, which can be stale by
+      // the time this callback actually runs: a vehicle removed from
+      // config WHILE an older fetch for this same account is still
+      // in-flight gets retired immediately by the newer handleFetch() call
+      // (see its own comment), but that older fetch's eventual result --
+      // still carrying the removed vehicle, per ITS OWN closed-over config
+      // -- would otherwise pass the config-derived filter here and
+      // resurrect (re-cache, re-publish "online") a vehicle that was JUST
+      // retired. Falls back to `config.vehicles` when rotateVins[id] isn't
+      // populated yet (this function is also called directly in tests,
+      // without going through handleFetch() first).
+      const configuredVins = this.rotateVins[id] || new Set(
         config.vehicles.map((v) => String(v.vin || "").toUpperCase())
       );
       const seenVins = new Set();
@@ -1255,7 +1281,21 @@ module.exports = NodeHelper.create({
       // ungraceful disconnect when more than one connection shares this
       // topicPrefix (see the warning above).
       client.publish(prefix + "/status", "online", { retain: true });
-      client._kiaDiscovered = false; // re-send discovery after a reconnect
+      // Re-send discovery after a reconnect -- both bookkeeping forms.
+      // _kiaDiscoveredVins (the per-vehicle map, used by publishMqtt()
+      // whenever a vehicle has a resolvable identity -- the normal case for
+      // every real vehicle since VIN scoping stopped being rotate-mode-only)
+      // used to be left untouched here, so a mqtt.js reconnect (broker
+      // restart, network blip) never re-published HA discovery for any
+      // vehicle even though the comment right here already documented the
+      // INTENT to do exactly that -- harmless if the broker kept its
+      // retained discovery messages across the reconnect, but silent and
+      // permanent if it didn't (a broker restart with no persistent
+      // storage, a broker migration, …): nothing would ever get
+      // re-discovered, because this map would keep insisting it already
+      // had been.
+      client._kiaDiscovered = false;
+      client._kiaDiscoveredVins = {};
     });
     client.on("error", (err) => Log.error("[MMM-KiaAccess] mqtt: " + err.message));
     this.mqttClients[key] = client;
