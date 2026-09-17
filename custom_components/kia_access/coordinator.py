@@ -1421,14 +1421,21 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return rate, label
         return None, None
 
-    async def _emit_alerts(self) -> None:
-        """Fire kia_access_alert events on edge-triggered condition changes,
-        using the exact same rules as the MagicMirror module (conditions.py)."""
+    def _build_alert_state(self, cfg: dict) -> dict:
+        """Flatten self.vehicle into a buildState()-style dict, then fold in
+        the timer-derived context (home/unplugged duration, distance to
+        home, moved-while-parked) that conditions.py's checks need but
+        build_state() itself has no way to compute -- it needs no `self`,
+        build_state() does. Mutates self._home_unplugged_since/
+        self._moved_since/self._last_parked as a side effect of computing
+        those timers; caller is responsible for persisting them (see
+        _emit_alerts()) -- kept a plain side effect rather than returning
+        the new timer values separately, since every one of these timers
+        already lives on `self` everywhere else in this class."""
         flat = {f"vehicle.{k}": v for k, v in self.vehicle.items()
                 if not isinstance(v, (dict, list))}
         if self.meta.get("tokenEnrolledAt"):
             flat["_meta.tokenEnrolledAt"] = self.meta["tokenEnrolledAt"]
-        cfg = self.entry.options.get("notifications", {}) or {}
         units = "metric" if self.hass.config.units is METRIC_SYSTEM else "imperial"
         state = build_state(flat, {"units": units})
 
@@ -1437,7 +1444,6 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # continuously true", which must survive a HA restart (routine:
         # updates, crashes) without silently resetting the clock and
         # delaying the alert by another full graceMin/sustainedMin.
-        timers_before = (self._home_unplugged_since, self._moved_since, self._last_parked)
         state["atHome"] = self._at_home(state)
         home_unplugged = state["atHome"] is True and state.get("plugged") is not True
         if home_unplugged and self._home_unplugged_since is None:
@@ -1480,14 +1486,24 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             state["movedWhileParkedKm"] = 0 if self._last_parked else None
             state["movedWhileParkedMin"] = 0
 
-        # "where did I park" — snapshot on the drive->park transition (and once
-        # on startup if the car is already parked with a fix). If the car
-        # turns off with no GPS fix yet (weak signal, e.g. entering an
-        # underground/covered garage — exactly where this matters most),
-        # `just_parked` would only be true for that one cycle and then be
-        # lost forever once `_was_on` flips to False; `_awaiting_park_fix`
-        # keeps the transition "pending" until a fix actually arrives.
-        car_on = state.get("carOn") is True
+        return state
+
+    def _track_parking(self, car_on: bool, lat, lon) -> None:
+        """"Where did I park" snapshot -- self._parked feeds the `Parked`
+        sensor (map deep-links, distance from home), a feature entirely
+        unrelated to alert conditions; it just happens to run on the same
+        poll cycle as _emit_alerts() because it needs the same car_on/lat/
+        lon that were already computed there. Split out (not folded into
+        _build_alert_state(), which is genuinely about the conditions.py
+        state dict) so this can be reasoned about and tested on its own.
+
+        Snapshots on the drive->park transition (and once on startup if the
+        car is already parked with a fix). If the car turns off with no GPS
+        fix yet (weak signal, e.g. entering an underground/covered garage —
+        exactly where this matters most), `just_parked` would only be true
+        for that one cycle and then be lost forever once _was_on flips to
+        False; _awaiting_park_fix keeps the transition "pending" until a
+        fix actually arrives."""
         just_parked = self._was_on is True and not car_on
         if just_parked and lat is None:
             self._awaiting_park_fix = True
@@ -1505,6 +1521,16 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             self._awaiting_park_fix = False
         self._was_on = car_on
 
+    def _fire_condition_edges(self, state: dict, cfg: dict) -> None:
+        """Evaluate conditions.py against `state` and fire kia_access_alert
+        for every edge-triggered change, using the exact same rules as the
+        MagicMirror module. A condition-evaluation failure is caught HERE
+        (logged, nothing fired) rather than left to propagate out of
+        _emit_alerts() -- it must never skip persisting this cycle's timer
+        state (see _emit_alerts()): those timers are a genuinely
+        independent piece of state from whether alert firing itself
+        succeeded, and skipping their persistence on every condition-
+        evaluation failure was a real, if narrow, bug."""
         try:
             res = evaluate_conditions(state, cfg, self._prev_cond)
         except Exception:  # noqa: BLE001
@@ -1564,6 +1590,26 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 self._prev_cond[c["reason"]] = c["active"]
         self._prev_cond["_charging"] = res["meta"]["charging"]
         self._first_alert_run = False
+
+    async def _emit_alerts(self) -> None:
+        """Fire kia_access_alert events on edge-triggered condition changes
+        -- see _build_alert_state()/_track_parking()/_fire_condition_edges()
+        for the four separable things this used to do as one 150-line
+        method: build the conditions.py-facing state, track the unrelated
+        "where did I park" snapshot, evaluate+fire, then persist whichever
+        timers actually changed. The persist step now ALWAYS runs, even
+        when _fire_condition_edges() hit its own (caught) evaluation
+        failure -- see that method's docstring for why the old
+        all-or-nothing early-return was a real bug, not just a style
+        choice."""
+        cfg = self.entry.options.get("notifications", {}) or {}
+        timers_before = (self._home_unplugged_since, self._moved_since, self._last_parked)
+
+        state = self._build_alert_state(cfg)
+        self._track_parking(
+            state.get("carOn") is True, state.get("locationLat"), state.get("locationLon")
+        )
+        self._fire_condition_edges(state, cfg)
 
         timers_after = (self._home_unplugged_since, self._moved_since, self._last_parked)
         if timers_after != timers_before:
