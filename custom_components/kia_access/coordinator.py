@@ -38,7 +38,12 @@ from .const import (
     EVENT_KIA_ACCESS_ALERT,
 )
 
-_FAHRENHEIT_REGIONS = {"USA", "CA"}
+# USA only, NOT Canada -- see kia_client.py's matching comment (root, and
+# its synced custom_components copy) on `fahrenheit`: KiaUvoApiCA.
+# start_climate takes set_temp in Celsius and raises an unhandled ValueError
+# on any Fahrenheit-range value, so classifying CA as Fahrenheit here broke
+# remote climate start for every Canadian account.
+_FAHRENHEIT_REGIONS = {"USA"}
 from .vehicle_state import build_state
 
 _LOGGER = logging.getLogger(__name__)
