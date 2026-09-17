@@ -362,6 +362,8 @@ class _FakeCoordinator:
     def __init__(self, vehicle, brand="KIA"):
         self.entry = _FakeCoordEntry(brand)
         self.vehicle = vehicle
+        self.region = "USA"
+        self.meta = {}
 
 
 class _FakeEntity(ent_mod.KiaAccessEntity):
@@ -392,6 +394,16 @@ _hyundai_coord = _FakeCoordinator({}, brand="HYUNDAI")
 _hyundai_ent = _FakeEntity(_hyundai_coord)
 assert _hyundai_ent.device_info["name"] == "Hyundai", _hyundai_ent.device_info
 assert _hyundai_ent.device_info["manufacturer"] == "Hyundai"
+
+# sensor.py's KiaAccessSummarySensor had its OWN separate hardcoded "Kia"
+# fallback for vehicle_name -- the device_info fix above only touched
+# entity.py, so a Hyundai/Genesis install's summary sensor still said
+# "Kia" here until both were unified onto _brand_name().
+_summary_sensor = _sen.KiaAccessSummarySensor(_hyundai_coord)
+assert _summary_sensor.extra_state_attributes["vehicle_name"] == "Hyundai", (
+    f"no vehicle name/model reported yet -> brand-derived fallback, not a hardcoded 'Kia': "
+    f"{_summary_sensor.extra_state_attributes}"
+)
 
 # lock.py: a FAILED lock/unlock command must not leave is_locked stuck at
 # the optimistic value forever -- is_locked checks _optimistic before the
@@ -1118,6 +1130,68 @@ assert res2["type"] == "form" and res2.get("errors", {}).get("vin") == "vin_in_u
 )
 assert entry_a2.data.get("vin") != "VIN2", "the collision must not have been applied"
 assert not ce2.updates, "no update should have been attempted once a collision was detected"
+
+# A submission missing an ENTIRE section's nested dict (whatever the cause --
+# this test doesn't need to know why) must NOT silently wipe that section's
+# previously saved fields down to schema defaults. Every field belonging to
+# a section that genuinely WAS submitted must still update normally.
+_prev_options = {
+    "scan_interval": 15,
+    "price_per_kwh": 0.22, "currency": "GBP", "capacity_kwh": 77.4,
+    "notifications": {"title": "My EV6", "quietWhileDriving": False},
+}
+_entry_partial = _fake_entry(
+    "p", "USA:KIA:user@example.com:VIN1",
+    {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+)
+_entry_partial.options = dict(_prev_options)
+_flow_partial = object.__new__(cf_mod.KiaAccessOptionsFlow)
+_flow_partial._entry = _entry_partial
+_flow_partial.flow_id = "test"
+_flow_partial.handler = "kia_access"
+_flow_partial.hass = type("H", (), {
+    "config_entries": _FakeConfigEntries([_entry_partial]),
+    "async_add_executor_job": _FakeHass.async_add_executor_job,
+})()
+# only "polling_advanced" is submitted -- "battery_and_cost" and "alerts"
+# are entirely absent, as would happen if a section never made it into
+# this particular payload
+_partial_input = {
+    "vin": "VIN1", "scan_interval": 45,
+    "polling_advanced": {
+        "stale_after_minutes": 20, "poll_car_directly": True,
+        "force_refresh_timeout": 60, "block_automated_climate": True,
+    },
+}
+_orig_discover2 = cf_mod._discover_vehicles_for_entry
+
+
+async def _no_discovery2(hass, entry):
+    return None
+
+
+cf_mod._discover_vehicles_for_entry = _no_discovery2
+try:
+    _partial_res = asyncio.run(
+        cf_mod.KiaAccessOptionsFlow.async_step_init(_flow_partial, _partial_input)
+    )
+finally:
+    cf_mod._discover_vehicles_for_entry = _orig_discover2
+
+assert _partial_res["type"] == "create_entry"
+_saved = _partial_res["data"]
+assert _saved["price_per_kwh"] == 0.22, (
+    f"a section missing from the submission must keep its previously saved "
+    f"fields, not revert to schema defaults: {_saved}"
+)
+assert _saved["currency"] == "GBP" and _saved["capacity_kwh"] == 77.4
+assert _saved["notifications"] == {"title": "My EV6", "quietWhileDriving": False}, (
+    f"a missing 'alerts' section must not reset the saved title/quiet-hours: {_saved['notifications']!r}"
+)
+assert _saved["scan_interval"] == 45, "a field that WAS submitted must still update normally"
+assert _saved["stale_after_minutes"] == 20 and _saved["poll_car_directly"] is True, (
+    "a section that WAS submitted must still save its new values normally"
+)
 
 # Options flow VIN field: prefer the account's own auto-discovered vehicle
 # list over a free-typed VIN (the exact thing a user can mistype), same as

@@ -8,6 +8,7 @@ the vehicle's own lock entity.
 
 Run: pip install homeassistant && python test/service_authorization_test.py
 """
+import asyncio
 import os
 import sys
 
@@ -33,7 +34,16 @@ class _FakeAuth:
     def __init__(self, users):
         self._users = users
 
-    def async_get_user(self, user_id):
+    # a real ASYNC method, not a plain one -- real HA's AuthManager.
+    # async_get_user() IS a coroutine function (confirmed against the
+    # installed homeassistant package), and _check_command_authorized()
+    # originally called it with no `await` at all. A plain-`def` fake here
+    # let that ship: `user` became an unawaited coroutine object, `user is
+    # None` was False, and `user.is_admin` raised AttributeError for every
+    # single signed-in caller (including admins) -- every real command
+    # would have failed with this fake never noticing, since it can't tell
+    # the difference between a value and a coroutine that needs awaiting.
+    async def async_get_user(self, user_id):
         return self._users.get(user_id)
 
 
@@ -82,7 +92,7 @@ _REGISTRY_MAP = {("lock", kia_access.DOMAIN, f"{ENTRY_ID}_lock"): LOCK_ENTITY_ID
 
 
 def _check(hass, call, coordinator):
-    kia_access._check_command_authorized(hass, call, coordinator)
+    asyncio.run(kia_access._check_command_authorized(hass, call, coordinator))
 
 
 coordinator = _FakeCoordinator(ENTRY_ID)

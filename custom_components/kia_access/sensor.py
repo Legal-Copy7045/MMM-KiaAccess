@@ -311,7 +311,7 @@ class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         out: dict = {"kia_access_raw": True, "entry_id": self.coordinator.entry.entry_id}
         v = self.coordinator.vehicle
-        out["vehicle_name"] = str(v.get("name") or v.get("model") or "Kia")
+        out["vehicle_name"] = str(v.get("name") or v.get("model") or self._brand_name())
         # Lets the Lovelace card's vehicle-switcher group entities by ACCOUNT
         # (region:brand:username, same derivation as config_flow._account_uid()
         # minus the VIN) rather than merging every Kia Access vehicle on the

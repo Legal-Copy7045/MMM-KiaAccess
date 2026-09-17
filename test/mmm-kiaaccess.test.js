@@ -471,6 +471,42 @@ function freshModule(overrides) {
   assert.strictEqual(hides.length, 1, "car A's own modal clearing must dismiss it");
 }
 
+// ---- processConditions(): the KIA_WEBHOOK notification's region/brand/
+// username identity fields (added so node_helper can pin webhook config
+// per account) were read off `cfg` -- this.config.notifications, a sub-
+// config a few lines above -- instead of this.config itself, so they were
+// ALWAYS undefined. In a multi-account setup this collapses node_helper's
+// acctKeyFor() to the same "undefined|undefined|undefined" key for every
+// account, letting one account's pinned webhook silently apply to
+// another's. Must match what serialisableConfig() already sends for
+// KIA_FETCH (this.config.region/.brand/.username), not the notifications
+// sub-object. ----
+{
+  const mod = freshModule({
+    region: "USA", brand: "HYUNDAI", username: "driver@example.com",
+    notifications: {
+      enabled: true, notifyOnStartup: true,
+      webhook: { enabled: true, url: "http://example.invalid/hook" }
+    }
+  });
+  const sent = [];
+  mod.sendSocketNotification = (n, payload) => sent.push({ n, payload });
+  mod.sendNotification = () => {};
+  mod.flatMap = {};
+  mod.conditions = {
+    evaluate: () => ({
+      conditions: [{ reason: "battery_critical", level: "critical", active: true, oneShot: false, title: "t", message: "m" }],
+      meta: { charging: null }
+    })
+  };
+  mod.processConditions();
+  const hooks = sent.filter((s) => s.n === "KIA_WEBHOOK");
+  assert.strictEqual(hooks.length, 1, "a critical condition with webhook.enabled must fire KIA_WEBHOOK");
+  assert.strictEqual(hooks[0].payload.region, "USA", "region must come from this.config, not this.config.notifications");
+  assert.strictEqual(hooks[0].payload.brand, "HYUNDAI");
+  assert.strictEqual(hooks[0].payload.username, "driver@example.com");
+}
+
 // ---- tripLogEl(): a metric-region install (config.units: "metric") must
 // see km/kWh and cost/km, not mi/kWh and cost/mi -- dist() and the summary
 // distance already branched on `imperial`, but the efficiency and cost

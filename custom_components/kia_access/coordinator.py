@@ -1421,7 +1421,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return rate, label
         return None, None
 
-    def _build_alert_state(self, cfg: dict) -> dict:
+    def _build_alert_state(self) -> dict:
         """Flatten self.vehicle into a buildState()-style dict, then fold in
         the timer-derived context (home/unplugged duration, distance to
         home, moved-while-parked) that conditions.py's checks need but
@@ -1605,7 +1605,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         cfg = self.entry.options.get("notifications", {}) or {}
         timers_before = (self._home_unplugged_since, self._moved_since, self._last_parked)
 
-        state = self._build_alert_state(cfg)
+        state = self._build_alert_state()
         self._track_parking(
             state.get("carOn") is True, state.get("locationLat"), state.get("locationLon")
         )

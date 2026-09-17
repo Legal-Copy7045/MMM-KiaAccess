@@ -39,12 +39,7 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
         # currently has, same as every other property here.
         v = self.coordinator.vehicle
         vin = v.get("VIN")
-        # "KIA"/"HYUNDAI"/"GENESIS" (config_flow.py's BRANDS) -> "Kia"/
-        # "Hyundai"/"Genesis" -- this integration validates all three
-        # brands at setup, so a bare "Kia" fallback here mislabeled every
-        # Hyundai/Genesis vehicle's HA device until the cloud sent back its
-        # own manufacturer/name field.
-        brand_name = str(self.coordinator.entry.data.get(CONF_BRAND) or "KIA").title()
+        brand_name = self._brand_name()
         return DeviceInfo(
             identifiers={(DOMAIN, self._ident)},
             manufacturer=str(v.get("manufacturer") or brand_name),
@@ -52,6 +47,17 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
             name=str(v.get("name") or v.get("model") or brand_name),
             serial_number=str(vin) if vin else None,
         )
+
+    def _brand_name(self) -> str:
+        # "KIA"/"HYUNDAI"/"GENESIS" (config_flow.py's BRANDS) -> "Kia"/
+        # "Hyundai"/"Genesis" -- this integration validates all three
+        # brands at setup, so a bare "Kia" fallback mislabeled every
+        # Hyundai/Genesis vehicle wherever the cloud hadn't reported its
+        # own manufacturer/name field yet. ONE canonical brand-display
+        # resolver, used by device_info here AND by sensor.py's
+        # vehicle_name attribute -- the earlier fix only touched
+        # device_info, leaving the same hardcoded "Kia" in sensor.py.
+        return str(self.coordinator.entry.data.get(CONF_BRAND) or "KIA").title()
 
     def _currency(self) -> str:
         # ISO 4217-ish display code for the cost sensors -- purely a label,

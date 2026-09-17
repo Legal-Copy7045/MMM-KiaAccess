@@ -93,8 +93,7 @@ def test_build_alert_state_flags_moved_while_parked():
         },
         last_parked={"lat": 10.0, "lon": 10.0, "odo": 100.0},
     )
-    cfg = {}
-    state = coord._build_alert_state(cfg)
+    state = coord._build_alert_state()
     assert coord._moved_since is not None, "moved-while-parked must start the timer"
     assert state["movedWhileParkedKm"] > 0.3, state
     assert state["movedWhileParkedMin"] is not None
@@ -112,7 +111,7 @@ def test_build_alert_state_no_move_when_parked_still():
         },
         last_parked={"lat": 10.0, "lon": 10.0, "odo": 100.0},
     )
-    state = coord._build_alert_state({})
+    state = coord._build_alert_state()
     assert coord._moved_since is None
     assert state["movedWhileParkedKm"] == 0
     print("-- _build_alert_state: parked and stationary stays quiet")

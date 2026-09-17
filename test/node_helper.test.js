@@ -1026,6 +1026,25 @@ async function testRangeMapRace() {
     helper._pinAccountValue(store2, "acct1", hookAttacker, "webhook"), hookA,
     "an attacker-chosen webhook URL must never win over the first-seen one"
   );
+
+  // the actual first-seen value is undefined -- the common case, since
+  // config.pythonBin is optional and most installs never set it. A bare
+  // `current === undefined` check can't tell "never pinned" apart from
+  // "pinned to undefined", so this used to mean the pin never actually
+  // latched: every call re-took the "first assignment" branch and adopted
+  // whatever value arrived that time, completely defeating the pin for
+  // every account that leaves pythonBin unset.
+  const store3 = {};
+  assert.strictEqual(helper._pinAccountValue(store3, "acct1", undefined, "pythonBin"), undefined);
+  assert.strictEqual(
+    helper._pinAccountValue(store3, "acct1", "/malicious/python", "pythonBin"),
+    undefined,
+    "once undefined is pinned, a later spoofed non-undefined value must still be rejected"
+  );
+  assert.strictEqual(
+    Object.prototype.hasOwnProperty.call(store3, "acct1"), true,
+    "the pin must be recorded even when the pinned value itself is undefined"
+  );
 }
 
 // ---- handleWebhook() now requires an account identity (region/brand/
