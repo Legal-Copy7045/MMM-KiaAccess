@@ -113,11 +113,13 @@ class _FakeCostEntry:
 
 
 class _FakeCostCoordinator:
-    def __init__(self, options, charge_log=None):
+    def __init__(self, options, charge_log=None, trip_log=None):
         self.entry = _FakeCostEntry(options)
         self.vehicle = {}
         self.charge_log = charge_log or {"last": None}
-        self.trip_log = {"last": None, "last_30_days": {}}
+        self.trip_log = trip_log or {
+            "last": None, "last_30_days": {}, "last_90_days": {}, "lifetime": {},
+        }
 
 
 _default_charge = _sen.KiaAccessLastChargeSensor(
@@ -143,6 +145,41 @@ _gbp_cpm = _sen.KiaAccessCostPerMileSensor(
 )
 assert _gbp_cpm.native_unit_of_measurement == "GBP/mi", _gbp_cpm.native_unit_of_measurement
 print("cost sensors: native_unit_of_measurement reflects the configured currency")
+
+# trips.py/core/trips.js's kmPerKwh/kwhPer100km/costPerKm fields (added
+# alongside the existing mi-based ones -- this integration previously had
+# no metric efficiency/cost figures anywhere) must actually surface through
+# these two sensors' attributes, not just exist unused in the trip log.
+_trip_last_30d = {
+    "distanceMi": 62.1, "distanceKm": 100.0, "kwh": 20.0, "cost": 3.0,
+    "miPerKwh": 3.1, "kmPerKwh": 5.0, "costPerMi": 0.0483, "costPerKm": 0.03,
+}
+_trip_coord = _FakeCostCoordinator(
+    {"price_per_kwh": 0.15},
+    trip_log={
+        "last": {
+            "distanceMi": 10.0, "kwh": 3.0, "miPerKwh": 3.3, "kwhPer100mi": 30.0,
+            "kmPerKwh": 5.3, "kwhPer100km": 18.6, "cost": 0.45, "chargedDuring": False,
+        },
+        "last_30_days": _trip_last_30d,
+        "last_90_days": {**_trip_last_30d, "costPerKm": 0.031},
+        "lifetime": {**_trip_last_30d, "costPerKm": 0.029, "kmPerKwh": 5.1},
+        "recent": [],
+    },
+)
+_trip_sensor = _sen.KiaAccessLastTripSensor(_trip_coord)
+_trip_attrs = _trip_sensor.extra_state_attributes
+assert _trip_attrs["km_per_kwh"] == 5.3, _trip_attrs
+assert _trip_attrs["kwh_per_100km"] == 18.6, _trip_attrs
+assert _trip_attrs["km_per_kwh_30d"] == 5.0, _trip_attrs
+
+_cpm_sensor = _sen.KiaAccessCostPerMileSensor(_trip_coord)
+_cpm_attrs = _cpm_sensor.extra_state_attributes
+assert _cpm_attrs["cost_per_km_30d"] == 0.03, _cpm_attrs
+assert _cpm_attrs["cost_per_km_90d"] == 0.031, _cpm_attrs
+assert _cpm_attrs["cost_per_km_lifetime"] == 0.029, _cpm_attrs
+assert _cpm_attrs["km_per_kwh_lifetime"] == 5.1, _cpm_attrs
+print("trip sensors: km/kWh, kWh/100km, and cost/km attributes are exposed")
 
 rng = importlib.import_module(f"{pkg}.range")
 assert rng.reach(300, {"reservePct": 10, "factor": 0.92}) is not None

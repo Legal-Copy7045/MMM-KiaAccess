@@ -116,6 +116,12 @@ def _close(open_t, opts, end_at):
         "kwh": _round(kwh, 2),
         "miPerKwh": _round(mi / kwh, 2) if (kwh is not None and kwh > 0) else None,
         "kwhPer100mi": _round(kwh / mi * 100, 1) if (kwh is not None and dist > 0) else None,
+        # metric siblings of the two fields above -- distanceKm is already
+        # computed regardless of region, so these are free (no separate
+        # unit-preference option needed, unlike miPerKwh/kwhPer100mi which
+        # this module has always returned unconditionally too)
+        "kmPerKwh": _round(dist / kwh, 2) if (kwh is not None and kwh > 0) else None,
+        "kwhPer100km": _round(kwh / dist * 100, 1) if (kwh is not None and dist > 0) else None,
         "cost": _round(kwh * price, 2) if (kwh is not None and price > 0) else None,
         "pricePerKwh": price or None,
         "fromLat": open_t.get("anchorLat"), "fromLon": open_t.get("anchorLon"),
@@ -264,4 +270,6 @@ def summary(trips, days=30):
         "cost": _round(cost, 2) if have_cost else None,
         "miPerKwh": _round(mi / kwh, 2) if (have_kwh and kwh > 0) else None,
         "costPerMi": _round(cost / mi, 3) if (have_cost and mi > 0) else None,
+        "kmPerKwh": _round(km / kwh, 2) if (have_kwh and kwh > 0) else None,
+        "costPerKm": _round(cost / km, 3) if (have_cost and km > 0) else None,
     }

@@ -528,6 +528,8 @@ class KiaAccessLastTripSensor(KiaAccessEntity, SensorEntity):
             "kwh": last.get("kwh"),
             "mi_per_kwh": last.get("miPerKwh"),
             "kwh_per_100mi": last.get("kwhPer100mi"),
+            "km_per_kwh": last.get("kmPerKwh"),
+            "kwh_per_100km": last.get("kwhPer100km"),
             "cost": last.get("cost"),
             "charged_during": last.get("chargedDuring"),
             "from_lat": last.get("fromLat"),
@@ -536,9 +538,11 @@ class KiaAccessLastTripSensor(KiaAccessEntity, SensorEntity):
             "to_lon": last.get("toLon"),
             "trips_30d": m30.get("count"),
             "miles_30d": m30.get("distanceMi"),
+            "km_30d": m30.get("distanceKm"),
             "kwh_30d": m30.get("kwh"),
             "cost_30d": m30.get("cost"),
             "mi_per_kwh_30d": m30.get("miPerKwh"),
+            "km_per_kwh_30d": m30.get("kmPerKwh"),
             "trips": log.get("recent"),
         }
 
@@ -582,6 +586,17 @@ class KiaAccessCostPerMileSensor(KiaAccessEntity, SensorEntity):
             "mi_per_kwh_lifetime": log["lifetime"].get("miPerKwh"),
             "miles_30d": log["last_30_days"].get("distanceMi"),
             "cost_30d": log["last_30_days"].get("cost"),
+            # metric siblings -- this entity's own state/unit stay mile-based
+            # (renaming its key would break every existing automation/
+            # dashboard reference to sensor.<vehicle>_cost_per_mile), but a
+            # metric-region install had no way at all to get a cost-per-km
+            # or km/kWh figure out of this integration before these existed
+            "cost_per_km_30d": log["last_30_days"].get("costPerKm"),
+            "cost_per_km_90d": log["last_90_days"].get("costPerKm"),
+            "cost_per_km_lifetime": log["lifetime"].get("costPerKm"),
+            "km_per_kwh_30d": log["last_30_days"].get("kmPerKwh"),
+            "km_per_kwh_lifetime": log["lifetime"].get("kmPerKwh"),
+            "km_30d": log["last_30_days"].get("distanceKm"),
         }
 
 
