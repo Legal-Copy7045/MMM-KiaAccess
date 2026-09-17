@@ -24,30 +24,9 @@ sys.modules.setdefault("hyundai_kia_connect_api", type(sys)("hyundai_kia_connect
 
 from custom_components.kia_access import coordinator as coordinator_mod  # noqa: E402
 from custom_components.kia_access.coordinator import KiaAccessCoordinator  # noqa: E402
-
-
-class _FakeStore:
-    def __init__(self, initial=None):
-        self._data = initial
-
-    async def async_load(self):
-        return self._data
-
-    async def async_save(self, data):
-        self._data = data
-
-
-class _FakeConfig:
-    from homeassistant.util.unit_system import IMPERIAL_SYSTEM
-    units = IMPERIAL_SYSTEM
-
-
-class _FakeStates:
-    def get(self, entity_id):
-        return None  # no zone.home configured -- keeps _at_home() a clean None
-
-    def async_all(self, domain):
-        return []
+from fake_ha import FakeConfig as _FakeConfig  # noqa: E402
+from fake_ha import FakeStates as _FakeStates  # noqa: E402
+from fake_ha import FakeStore as _FakeStore  # noqa: E402
 
 
 class _FakeHass:

@@ -310,15 +310,7 @@ import asyncio  # noqa: E402  (used below and re-imported, harmlessly, near line
 # the car is parked" to wherever it happens to be on the first post-restart
 # poll, so a vehicle towed/moved WHILE HA was down is never detected as
 # having moved at all.
-class _FakeStore:
-    def __init__(self, data=None):
-        self._data = data
-
-    async def async_load(self):
-        return self._data
-
-    async def async_save(self, data):
-        self._data = data
+from fake_ha import FakeStore as _FakeStore  # noqa: E402
 
 
 class _FakePrefsCoord:
