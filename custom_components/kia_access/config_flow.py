@@ -567,6 +567,13 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         default=float(opts.get("away_price_per_kwh") or 0),
                     ): _number(0, 10, 0.001),
                     vol.Optional(
+                        "currency",
+                        default=opts.get("currency", "USD"),
+                        description={
+                            "suggested_value": opts.get("currency", "USD")
+                        },
+                    ): str,
+                    vol.Optional(
                         "home_charge_zone",
                         description={
                             "suggested_value": opts.get("home_charge_zone", "")
