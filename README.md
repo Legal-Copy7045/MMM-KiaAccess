@@ -134,6 +134,14 @@ USA, °C 16–30 elsewhere).
     one climbing while charging.
   - **`Parked`** — where the car last parked, with map deep-links and distance
     from home.
+  - **`binary_sensor.<v>_data_stale`** — a poll to Kia's cloud can succeed
+    while just echoing back the car's own last-reported reading unchanged
+    (asleep, poor signal); this turns on once that reading is older than
+    `stale_after_minutes` (an option, default 60), with
+    `last_reported` / `last_successful_update` / `data_age_minutes`
+    attributes — so an automation can tell "current" apart from "old but
+    technically successful," separately from the car's entities simply
+    going unavailable when a poll actually *fails*.
 - **`kia_access_alert` events** on the bus for every edge-triggered condition
   (battery low, unlocked, door open, charge complete / interrupted, 12V drain,
   tow / theft, can't-get-home, …) — for your automations.

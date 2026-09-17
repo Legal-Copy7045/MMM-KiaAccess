@@ -62,6 +62,7 @@ from .const import (
     CONF_VIN,
     DEFAULT_FORCE_REFRESH_TIMEOUT,
     DEFAULT_SCAN_INTERVAL_MINUTES,
+    DEFAULT_STALE_AFTER_MINUTES,
     DOMAIN,
 )
 
@@ -513,6 +514,12 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         "scan_interval",
                         default=opts.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES),
                     ): _number(5, 1440, 1),
+                    vol.Optional(
+                        "stale_after_minutes",
+                        # how old the CAR's own last-reported reading can get
+                        # before binary_sensor.<vehicle>_data_stale turns on
+                        default=opts.get("stale_after_minutes", DEFAULT_STALE_AFTER_MINUTES),
+                    ): _number(5, 1440, 5),
                     vol.Optional(
                         "poll_car_directly",
                         # infer from the old seconds-based option the first time this

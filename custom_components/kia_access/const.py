@@ -54,6 +54,15 @@ CONF_GEOCODE = "geocode"
 
 DEFAULT_SCAN_INTERVAL_MINUTES = 30
 DEFAULT_FORCE_REFRESH_TIMEOUT = 45
+# how old the CAR's own last-reported reading (vehicle.last_updated_at) can
+# get before binary_sensor.<vehicle>_data_stale turns on -- a poll to Kia's
+# cloud can succeed (200 OK) while just echoing back a value the car itself
+# hasn't refreshed in a while (asleep, poor signal, etc); that's a distinct
+# condition from a failed poll, which HA already reflects as the entities
+# going unavailable (CoordinatorEntity.available / last_update_success).
+# Default is 2x the default scan interval, not a fixed number, since a
+# reading that's merely one scan_interval old is expected, not stale.
+DEFAULT_STALE_AFTER_MINUTES = DEFAULT_SCAN_INTERVAL_MINUTES * 2
 
 # Named to avoid colliding with homeassistant.const.EVENT_STATE_CHANGED
 # ("state_changed") -- this is our own custom bus event, unrelated to HA's.
