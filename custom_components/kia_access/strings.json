@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Kia Access",
-        "description": "Sign in with your Kia Access / Kia Connect account.",
+        "description": "Sign in with your Kia Connect, Hyundai Bluelink, or Genesis Connected Services account.",
         "data": {
           "username": "Email",
           "password": "Password",
@@ -15,7 +15,7 @@
       },
       "otp": {
         "title": "One-time code",
-        "description": "Enter the one-time code Kia just sent to {dest}.",
+        "description": "Enter the one-time code just sent to {dest}.",
         "data": {
           "code": "Code"
         }
@@ -41,8 +41,8 @@
       "otp": "That code was not accepted. Try again."
     },
     "abort": {
-      "already_configured": "This Kia account is already set up.",
-      "reauth_successful": "Kia Access is signed in again."
+      "already_configured": "This account is already set up.",
+      "reauth_successful": "Signed in again."
     }
   },
   "options": {
