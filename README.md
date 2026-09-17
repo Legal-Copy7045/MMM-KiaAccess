@@ -88,11 +88,14 @@ time-boxed and falls back to the cache.
 - **Brands** — Kia (Connect / UVO), Hyundai (Bluelink), Genesis
 - **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil
 - **Powertrains** — EV, PHEV, HEV, ICE. A gas-only vehicle doesn't get EV-only
-  diagram parts, alerts ("EV battery low", "home and not plugged in"),
-  charging buttons, or charge-limit sliders — they're gated off, not just
-  left showing meaningless data. A hybrid's trip log tracks distance but
-  skips SOC-based efficiency/cost for any trip that may have run partly on
-  gas (there's no way to attribute the split from the data the car reports).
+  diagram parts or the "EV battery low" alert. Anything that means "has a
+  plug" — the "home and not plugged in" alert, charging buttons,
+  charge-limit sliders — is off for gas **and** for a conventional (non-plug)
+  hybrid: Kia and Hyundai both sell an HEV alongside a PHEV version of the
+  same car (Sportage/Sorento/Niro/Tucson/Santa Fe, etc.), and only the PHEV
+  has a plug. A hybrid's trip log tracks distance but skips SOC-based
+  efficiency/cost for any trip that may have run partly on gas (there's no
+  way to attribute the split from the data the car reports).
 
 Tested on a **Kia EV9 (Kia USA)** — other combinations use the same library but
 are less battle-tested; [open an issue](https://github.com/Legal-Copy7045/MMM-KiaAccess/issues)

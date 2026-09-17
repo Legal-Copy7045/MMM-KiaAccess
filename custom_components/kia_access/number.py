@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import KiaAccessEntity
-from .vehicle_state import powertrain_for
+from .vehicle_state import can_plug_in_for
 
 
 def _num(x):
@@ -23,13 +23,13 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    # a pure gas vehicle has no charge limits to set -- see button.py's
-    # identical comment on why reading coordinator.vehicle at setup time is
-    # safe here.
-    powertrain = powertrain_for(coordinator.vehicle.get("engine_type"))
+    # no plug (gas, or a non-plug hybrid/HEV) -> no charge limits to set --
+    # see button.py's identical comments (can_plug_in_for()'s docstring, and
+    # why reading coordinator.vehicle at setup time is safe here).
+    can_plug_in = can_plug_in_for(coordinator.vehicle.get("engine_type"))
     charge_limits = (
         [KiaAccessChargeLimit(coordinator, "ac"), KiaAccessChargeLimit(coordinator, "dc")]
-        if powertrain != "gas" else []
+        if can_plug_in else []
     )
     async_add_entities(charge_limits + [KiaAccessClimateDuration(coordinator)])
 

@@ -95,4 +95,28 @@ assert.strictEqual(buildState({ "vehicle.engine_type": "bogus" }, {}).powertrain
 assert.strictEqual(buildState({ "vehicle.fuel_level": 42 }, {}).fuelPct, 42);
 assert.strictEqual(buildState({}, {}).fuelPct, null);
 
+// canPlugIn: distinguishes a plug-in hybrid (PHEV) from a conventional,
+// non-plug hybrid (HEV -- e.g. a Kia Sportage Hybrid or Hyundai Tucson
+// Hybrid, sold alongside a PHEV version of the same car). Both map to the
+// same powertrain:"hybrid" bucket, which isn't fine enough for anything
+// that means "has a plug" (conditions.js's notPluggedInHome, the card's
+// charging button group).
+assert.strictEqual(buildState({}, {}).canPlugIn, true, "unset engine_type defaults to true (safe default)");
+assert.strictEqual(buildState({ "vehicle.engine_type": "EV" }, {}).canPlugIn, true);
+assert.strictEqual(buildState({ "vehicle.engine_type": "PHEV" }, {}).canPlugIn, true);
+assert.strictEqual(buildState({ "vehicle.engine_type": "HEV" }, {}).canPlugIn, false, "a conventional hybrid has no plug");
+assert.strictEqual(buildState({ "vehicle.engine_type": "ICE" }, {}).canPlugIn, false);
+assert.strictEqual(buildState({ "vehicle.engine_type": "hev" }, {}).canPlugIn, false, "case-insensitive");
+
+// rangeKm: falls back to total_driving_range when ev_driving_range is
+// absent (an ICE/PHEV-on-gas vehicle never sets it) -- must not silently
+// go null when a perfectly usable range figure exists under a different key
+assert.strictEqual(buildState({ "vehicle.ev_driving_range": 300 }, {}).rangeKm, 300, "ev_driving_range preferred when present");
+assert.strictEqual(buildState({ "vehicle.total_driving_range": 450 }, {}).rangeKm, 450, "falls back to total_driving_range");
+assert.strictEqual(
+  buildState({ "vehicle.ev_driving_range": 0, "vehicle.total_driving_range": 450 }, {}).rangeKm, 450,
+  "a zero ev_driving_range (not just missing) still falls back"
+);
+assert.strictEqual(buildState({}, {}).rangeKm, null, "no range data at all -> null, not a crash");
+
 console.log("all state tests passed");

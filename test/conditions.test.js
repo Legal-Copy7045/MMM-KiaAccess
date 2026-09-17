@@ -216,4 +216,30 @@ r = C.evaluate(
 );
 assert.strictEqual(find(r, "not_plugged_home").active, true, "hybrid can still plug in");
 
+// --- canPlugIn: a conventional (non-plug) hybrid -- HEV, e.g. a Kia
+// Sportage Hybrid or Hyundai Tucson Hybrid, sold alongside a PHEV version
+// of the same car -- shares powertrain:"hybrid" with a PHEV but has no
+// plug at all. not_plugged_home must be suppressed for it exactly like
+// gas, even though powertrain alone says "hybrid" (has a battery) ---
+r = C.evaluate(
+  { powertrain: "hybrid", canPlugIn: false, atHome: true, homeUnpluggedMin: 999, plugged: null },
+  {}, {}
+);
+assert.strictEqual(find(r, "not_plugged_home"), undefined, "HEV (hybrid, canPlugIn:false): no plug, not evaluated");
+// ev_battery_low is unaffected by canPlugIn -- an HEV still has a drive
+// battery to monitor, it just can't be charged externally
+assert.strictEqual(
+  C.evaluate({ powertrain: "hybrid", canPlugIn: false, batteryPct: 5 }, {}, {}).conditions
+    .find((c) => c.reason === "ev_battery_low").active,
+  true,
+  "HEV still has a drive battery worth monitoring"
+);
+
+// a PHEV (powertrain:"hybrid", canPlugIn:true explicitly) still gets the alert
+r = C.evaluate(
+  { powertrain: "hybrid", canPlugIn: true, atHome: true, homeUnpluggedMin: 999, plugged: false },
+  {}, {}
+);
+assert.strictEqual(find(r, "not_plugged_home").active, true, "PHEV (hybrid, canPlugIn:true): has a plug");
+
 console.log("all conditions tests passed");

@@ -214,12 +214,23 @@ g.KiaAccessCommands={
     // matching this module's original EV-only diagram -- a genuinely
     // missing engine_type must never silently hide a real drive battery
     // reading behind a wrong guess.
+    var engineTypeRaw = String(f["vehicle.engine_type"] || "").toUpperCase();
     var powertrain = (function () {
-      var t = String(f["vehicle.engine_type"] || "").toUpperCase();
-      if (t === "ICE") return "gas";
-      if (t === "PHEV" || t === "HEV") return "hybrid";
+      if (engineTypeRaw === "ICE") return "gas";
+      if (engineTypeRaw === "PHEV" || engineTypeRaw === "HEV") return "hybrid";
       return "ev";
     })();
+    // "hybrid" (powertrain, above) covers BOTH plug-in hybrids (PHEV) and
+    // conventional hybrids (HEV, e.g. a Kia Sportage Hybrid or Hyundai
+    // Tucson Hybrid, both real models Kia/Hyundai sell alongside their PHEV
+    // versions of the SAME car) -- an HEV has no plug at all, same as a gas
+    // car, so anything that means "can this vehicle be plugged in" (the
+    // notPluggedInHome alert, charging buttons/charge-limit sliders) needs
+    // this finer distinction than powertrain alone provides. Unset/
+    // unrecognised defaults to true, same fail-safe reasoning as powertrain
+    // above -- a missing reading must never silently hide a real EV/PHEV's
+    // plug-related alert or controls.
+    var canPlugIn = engineTypeRaw !== "ICE" && engineTypeRaw !== "HEV";
 
     // ev_driving_range is EV-only -- an ICE/PHEV-on-gas vehicle never sets
     // it, and total_driving_range (Kia's "however you'd currently drive"
@@ -276,6 +287,7 @@ g.KiaAccessCommands={
       locationLon: num("location_longitude"),
       faults: faults, // [] = no fault lamps; names of any that are on
       powertrain: powertrain, // "ev" | "gas" | "hybrid" -- for carDiagram()'s o.powertrain
+      canPlugIn: canPlugIn, // false for gas AND non-plug hybrid (HEV) -- see comment above
       fuelPct: num("fuel_level"),
       history: opts.history || [],
       units: opts.units || "imperial", // "imperial" | "metric" — for messages
@@ -1444,17 +1456,24 @@ g.KiaAccessCommands={
     prev = prev || {};
     var title = cfg.title || DEFAULTS.title;
     var driving = cfg.quietWhileDriving !== false && s.carOn === true;
-    // a pure gas vehicle has no drive battery to read or plug in -- treating
-    // it like one produced two permanently-wrong conditions: "EV battery
-    // level unknown" forever (threshold() below emits active:null when
-    // cur == null, which is every tick for a car with no ev_battery_percentage
-    // at all) and a "home and not plugged in" alert that fires the moment
-    // it's parked and never clears (s.plugged also stays null forever for a
-    // gas car -- `s.plugged === true` can never become true to clear it).
-    // s.powertrain is missing (not "gas") for any caller that hasn't been
-    // updated to pass it, so this defaults to the old always-evaluate
-    // behaviour rather than silently suppressing a real EV's alert.
+    // a pure gas vehicle has no drive battery to read -- treating it like
+    // one produced a permanently-wrong "EV battery level unknown" (threshold()
+    // below emits active:null when cur == null, which is every tick for a
+    // car with no ev_battery_percentage at all). s.powertrain is missing
+    // (not "gas") for any caller that hasn't been updated to pass it, so
+    // this defaults to the old always-evaluate behaviour rather than
+    // silently suppressing a real EV's alert.
     var hasBattery = s.powertrain !== "gas";
+    // separately: a conventional (non-plug) hybrid -- an HEV, e.g. a Kia
+    // Sportage Hybrid or Hyundai Tucson Hybrid, sold alongside a PHEV
+    // version of the same car -- has no plug at all, same as gas. Without
+    // this, "home and not plugged in" fired on every HEV, permanently: its
+    // s.plugged stays null forever, so the condition that would clear the
+    // alert (`plugged === true`) can never become true. s.canPlugIn is the
+    // finer signal (buildState() sets it); a caller that only ever set
+    // s.powertrain (predating canPlugIn) still gets the gas case right via
+    // that fallback -- it just can't tell HEV from PHEV, same as before.
+    var canPlugIn = s.canPlugIn != null ? s.canPlugIn !== false : s.powertrain !== "gas";
     var out = [];
 
     function emit(reason, level, active, message, value, oneShot) {
@@ -1674,7 +1693,7 @@ g.KiaAccessCommands={
     // needs s.atHome (bool) + s.homeUnpluggedMin (minutes home+unplugged) from
     // the caller; inert when s.atHome isn't provided.
     var cHP = checkCfg(cfg, "notPluggedInHome");
-    if (cHP.enabled && hasBattery) {
+    if (cHP.enabled && canPlugIn) {
       var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
       var homeMin = num(s.homeUnpluggedMin);
       var hr = new Date().getHours();
@@ -2636,12 +2655,15 @@ g.KiaAccessCommands={
   }
 
   // button groups only (no wrapper) — the climate panel is rendered alongside.
-  // powertrain "gas" hides the "charge" category entirely (open/close charge
-  // port, start/stop charging) -- a pure gas vehicle has no charge port and
-  // no drive battery to charge, so these controls would otherwise sit there
-  // unconditionally, dispatching commands the car has no way to honour.
-  function actionsGroupsHtml(powertrain) {
-    var visible = powertrain === "gas"
+  // canPlugIn === false hides the "charge" category entirely (open/close
+  // charge port, start/stop charging) -- a vehicle with no plug (gas, or a
+  // conventional non-plug hybrid -- see KiaAccessCard._canPlugInFor) has no
+  // charge port and nothing to charge externally, so these controls would
+  // otherwise sit there unconditionally, dispatching commands the car has
+  // no way to honour. Any other value (including omitted) defaults to
+  // showing them -- same fail-safe reasoning as _canPlugInFor itself.
+  function actionsGroupsHtml(canPlugIn) {
+    var visible = canPlugIn === false
       ? BUTTON_COMMANDS.filter(function (c) { return c.category !== "charge"; })
       : BUTTON_COMMANDS;
     var seen = {};
@@ -2996,6 +3018,18 @@ g.KiaAccessCommands={
       if (t === "ICE") return "gas";
       if (t === "PHEV" || t === "HEV") return "hybrid";
       return "ev";
+    }
+
+    // "hybrid" (_powertrainFor, above) covers BOTH plug-in hybrids (PHEV)
+    // and conventional hybrids (HEV -- e.g. a Kia Sportage Hybrid or
+    // Hyundai Tucson Hybrid, sold alongside a PHEV version of the same
+    // car), which has no plug at all, same as gas. actionsGroupsHtml()'s
+    // "charge" button group needs this finer distinction than powertrain
+    // alone. Unset/unrecognised defaults to true, same fail-safe reasoning
+    // as _powertrainFor.
+    static _canPlugInFor(rawEngineType) {
+      var t = String(rawEngineType || "").toUpperCase();
+      return t !== "ICE" && t !== "HEV";
     }
 
     _rangeInputs(flat) {
@@ -3502,7 +3536,7 @@ g.KiaAccessCommands={
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml(KiaAccessCard._powertrainFor(engineType)) +
+        actionsGroupsHtml(KiaAccessCard._canPlugInFor(engineType)) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";

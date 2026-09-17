@@ -54,6 +54,28 @@ for path in files:
         assert got is want, f"{label} - {reason}.active: got {got!r} want {want!r}"
         checks += 1
 
+# ---- build_state(): powertrain/canPlugIn/rangeKm -- mirrors
+# test/state.test.js's identical direct assertions ----
+assert build_state({}, {})["powertrain"] == "ev", "unset engine_type defaults to ev"
+assert build_state({"vehicle.engine_type": "ICE"}, {})["powertrain"] == "gas"
+assert build_state({"vehicle.engine_type": "PHEV"}, {})["powertrain"] == "hybrid"
+assert build_state({"vehicle.engine_type": "HEV"}, {})["powertrain"] == "hybrid"
+
+assert build_state({}, {})["canPlugIn"] is True, "unset engine_type defaults to true (safe default)"
+assert build_state({"vehicle.engine_type": "EV"}, {})["canPlugIn"] is True
+assert build_state({"vehicle.engine_type": "PHEV"}, {})["canPlugIn"] is True
+assert build_state({"vehicle.engine_type": "HEV"}, {})["canPlugIn"] is False, "a conventional hybrid has no plug"
+assert build_state({"vehicle.engine_type": "ICE"}, {})["canPlugIn"] is False
+assert build_state({"vehicle.engine_type": "hev"}, {})["canPlugIn"] is False, "case-insensitive"
+
+assert build_state({"vehicle.ev_driving_range": 300}, {})["rangeKm"] == 300, "ev_driving_range preferred when present"
+assert build_state({"vehicle.total_driving_range": 450}, {})["rangeKm"] == 450, "falls back to total_driving_range"
+assert build_state(
+    {"vehicle.ev_driving_range": 0, "vehicle.total_driving_range": 450}, {}
+)["rangeKm"] == 450, "a zero ev_driving_range (not just missing) still falls back"
+assert build_state({}, {})["rangeKm"] is None, "no range data at all -> None, not a crash"
+checks += 15
+
 # ---- powertrain gating: a pure gas vehicle has no drive battery to read
 # or plug into -- mirrors test/conditions.test.js's identical direct
 # assertions (not fixture-driven, since the fixture corpus above only
@@ -82,5 +104,27 @@ by_reason = {c["reason"]: c for c in evaluate(
 )["conditions"]}
 assert by_reason["not_plugged_home"]["active"] is True, "hybrid can still plug in"
 checks += 6
+
+# ---- canPlugIn: a non-plug hybrid (HEV, e.g. a Kia Sportage Hybrid or
+# Hyundai Tucson Hybrid, sold alongside a PHEV version of the same car)
+# shares powertrain:"hybrid" with a PHEV but has no plug -- mirrors
+# test/conditions.test.js's identical direct assertions ----
+by_reason = {c["reason"]: c for c in evaluate(
+    {"powertrain": "hybrid", "canPlugIn": False, "atHome": True, "homeUnpluggedMin": 999, "plugged": None},
+    {}, {},
+)["conditions"]}
+assert "not_plugged_home" not in by_reason, "HEV (hybrid, canPlugIn=False): no plug, not evaluated"
+
+by_reason = {c["reason"]: c for c in evaluate(
+    {"powertrain": "hybrid", "canPlugIn": False, "batteryPct": 5}, {}, {}
+)["conditions"]}
+assert by_reason["ev_battery_low"]["active"] is True, "HEV still has a drive battery worth monitoring"
+
+by_reason = {c["reason"]: c for c in evaluate(
+    {"powertrain": "hybrid", "canPlugIn": True, "atHome": True, "homeUnpluggedMin": 999, "plugged": False},
+    {}, {},
+)["conditions"]}
+assert by_reason["not_plugged_home"]["active"] is True, "PHEV (hybrid, canPlugIn=True): has a plug"
+checks += 3
 
 print(f"all contract tests passed ({len(files)} fixtures, {checks} assertions)")

@@ -117,12 +117,23 @@
     // matching this module's original EV-only diagram -- a genuinely
     // missing engine_type must never silently hide a real drive battery
     // reading behind a wrong guess.
+    var engineTypeRaw = String(f["vehicle.engine_type"] || "").toUpperCase();
     var powertrain = (function () {
-      var t = String(f["vehicle.engine_type"] || "").toUpperCase();
-      if (t === "ICE") return "gas";
-      if (t === "PHEV" || t === "HEV") return "hybrid";
+      if (engineTypeRaw === "ICE") return "gas";
+      if (engineTypeRaw === "PHEV" || engineTypeRaw === "HEV") return "hybrid";
       return "ev";
     })();
+    // "hybrid" (powertrain, above) covers BOTH plug-in hybrids (PHEV) and
+    // conventional hybrids (HEV, e.g. a Kia Sportage Hybrid or Hyundai
+    // Tucson Hybrid, both real models Kia/Hyundai sell alongside their PHEV
+    // versions of the SAME car) -- an HEV has no plug at all, same as a gas
+    // car, so anything that means "can this vehicle be plugged in" (the
+    // notPluggedInHome alert, charging buttons/charge-limit sliders) needs
+    // this finer distinction than powertrain alone provides. Unset/
+    // unrecognised defaults to true, same fail-safe reasoning as powertrain
+    // above -- a missing reading must never silently hide a real EV/PHEV's
+    // plug-related alert or controls.
+    var canPlugIn = engineTypeRaw !== "ICE" && engineTypeRaw !== "HEV";
 
     // ev_driving_range is EV-only -- an ICE/PHEV-on-gas vehicle never sets
     // it, and total_driving_range (Kia's "however you'd currently drive"
@@ -179,6 +190,7 @@
       locationLon: num("location_longitude"),
       faults: faults, // [] = no fault lamps; names of any that are on
       powertrain: powertrain, // "ev" | "gas" | "hybrid" -- for carDiagram()'s o.powertrain
+      canPlugIn: canPlugIn, // false for gas AND non-plug hybrid (HEV) -- see comment above
       fuelPct: num("fuel_level"),
       history: opts.history || [],
       units: opts.units || "imperial", // "imperial" | "metric" — for messages

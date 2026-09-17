@@ -225,12 +225,15 @@
   }
 
   // button groups only (no wrapper) — the climate panel is rendered alongside.
-  // powertrain "gas" hides the "charge" category entirely (open/close charge
-  // port, start/stop charging) -- a pure gas vehicle has no charge port and
-  // no drive battery to charge, so these controls would otherwise sit there
-  // unconditionally, dispatching commands the car has no way to honour.
-  function actionsGroupsHtml(powertrain) {
-    var visible = powertrain === "gas"
+  // canPlugIn === false hides the "charge" category entirely (open/close
+  // charge port, start/stop charging) -- a vehicle with no plug (gas, or a
+  // conventional non-plug hybrid -- see KiaAccessCard._canPlugInFor) has no
+  // charge port and nothing to charge externally, so these controls would
+  // otherwise sit there unconditionally, dispatching commands the car has
+  // no way to honour. Any other value (including omitted) defaults to
+  // showing them -- same fail-safe reasoning as _canPlugInFor itself.
+  function actionsGroupsHtml(canPlugIn) {
+    var visible = canPlugIn === false
       ? BUTTON_COMMANDS.filter(function (c) { return c.category !== "charge"; })
       : BUTTON_COMMANDS;
     var seen = {};
@@ -585,6 +588,18 @@
       if (t === "ICE") return "gas";
       if (t === "PHEV" || t === "HEV") return "hybrid";
       return "ev";
+    }
+
+    // "hybrid" (_powertrainFor, above) covers BOTH plug-in hybrids (PHEV)
+    // and conventional hybrids (HEV -- e.g. a Kia Sportage Hybrid or
+    // Hyundai Tucson Hybrid, sold alongside a PHEV version of the same
+    // car), which has no plug at all, same as gas. actionsGroupsHtml()'s
+    // "charge" button group needs this finer distinction than powertrain
+    // alone. Unset/unrecognised defaults to true, same fail-safe reasoning
+    // as _powertrainFor.
+    static _canPlugInFor(rawEngineType) {
+      var t = String(rawEngineType || "").toUpperCase();
+      return t !== "ICE" && t !== "HEV";
     }
 
     _rangeInputs(flat) {
@@ -1091,7 +1106,7 @@
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml(KiaAccessCard._powertrainFor(engineType)) +
+        actionsGroupsHtml(KiaAccessCard._canPlugInFor(engineType)) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";

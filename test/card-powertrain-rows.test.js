@@ -103,29 +103,47 @@ assert.strictEqual(KiaAccessCard._powertrainFor("something-unexpected"), "ev");
   assert.strictEqual(KiaAccessCard._rowVisible("odometer", [], "EV"), false);
 }
 
+// ---- _canPlugInFor(): distinguishes a plug-in hybrid (PHEV) from a
+// conventional, non-plug hybrid (HEV -- e.g. a Kia Sportage Hybrid or
+// Hyundai Tucson Hybrid, sold alongside a PHEV version of the same car).
+// Both map to the same _powertrainFor() "hybrid" bucket, which isn't fine
+// enough for anything that means "has a plug". ----
+assert.strictEqual(KiaAccessCard._canPlugInFor("EV"), true);
+assert.strictEqual(KiaAccessCard._canPlugInFor("PHEV"), true);
+assert.strictEqual(KiaAccessCard._canPlugInFor("HEV"), false, "a conventional hybrid has no plug");
+assert.strictEqual(KiaAccessCard._canPlugInFor("ICE"), false);
+assert.strictEqual(KiaAccessCard._canPlugInFor(""), true, "unset defaults to true (safe default)");
+assert.strictEqual(KiaAccessCard._canPlugInFor(undefined), true);
+
 // ---- actionsGroupsHtml(): the "charge" category button group (open/close
-// charge port, start/stop charging) must not render at all for a pure gas
-// vehicle -- it has no charge port and no drive battery to charge. Other
+// charge port, start/stop charging) must not render at all for a vehicle
+// with no plug -- gas, or a conventional (non-plug) hybrid. Other
 // categories (security, find, climate, ...) are unaffected. ----
 {
-  const gas = KiaAccessCard._actionsGroupsHtml("gas");
-  assert.ok(!gas.includes("data-cmd='start_charge'"), "gas: no start_charge button");
-  assert.ok(!gas.includes("data-cmd='stop_charge'"), "gas: no stop_charge button");
-  assert.ok(!gas.includes("data-cmd='open_charge_port'"), "gas: no open_charge_port button");
-  assert.ok(!gas.includes("data-cmd='close_charge_port'"), "gas: no close_charge_port button");
-  assert.ok(gas.includes("data-cmd='lock'"), "gas: non-charge commands unaffected");
-  assert.ok(gas.includes("data-cmd='flash_lights'"), "gas: non-charge commands unaffected");
+  const gas = KiaAccessCard._actionsGroupsHtml(false);
+  assert.ok(!gas.includes("data-cmd='start_charge'"), "no plug: no start_charge button");
+  assert.ok(!gas.includes("data-cmd='stop_charge'"), "no plug: no stop_charge button");
+  assert.ok(!gas.includes("data-cmd='open_charge_port'"), "no plug: no open_charge_port button");
+  assert.ok(!gas.includes("data-cmd='close_charge_port'"), "no plug: no close_charge_port button");
+  assert.ok(gas.includes("data-cmd='lock'"), "no plug: non-charge commands unaffected");
+  assert.ok(gas.includes("data-cmd='flash_lights'"), "no plug: non-charge commands unaffected");
 
-  const ev = KiaAccessCard._actionsGroupsHtml("ev");
-  assert.ok(ev.includes("data-cmd='start_charge'"), "ev: charging commands present");
+  const ev = KiaAccessCard._actionsGroupsHtml(true);
+  assert.ok(ev.includes("data-cmd='start_charge'"), "can plug in: charging commands present");
 
-  const hybrid = KiaAccessCard._actionsGroupsHtml("hybrid");
-  assert.ok(hybrid.includes("data-cmd='start_charge'"), "hybrid: charging commands present");
-
-  // no powertrain argument at all -> same as ev/hybrid (safe default, never
-  // hides a real vehicle's controls just because the caller omitted it)
+  // no argument at all -> same as true (safe default, never hides a real
+  // vehicle's controls just because the caller omitted it)
   const unset = KiaAccessCard._actionsGroupsHtml();
-  assert.ok(unset.includes("data-cmd='start_charge'"), "no powertrain arg -> defaults to showing");
+  assert.ok(unset.includes("data-cmd='start_charge'"), "no argument -> defaults to showing");
+
+  // exercised end-to-end through the real static helpers, matching how the
+  // render path actually calls this (actionsGroupsHtml(KiaAccessCard.
+  // _canPlugInFor(engineType))) -- a PHEV shows charging controls, an HEV
+  // does not, even though both share the same _powertrainFor() bucket
+  const phev = KiaAccessCard._actionsGroupsHtml(KiaAccessCard._canPlugInFor("PHEV"));
+  assert.ok(phev.includes("data-cmd='start_charge'"), "PHEV: charging commands present");
+  const hev = KiaAccessCard._actionsGroupsHtml(KiaAccessCard._canPlugInFor("HEV"));
+  assert.ok(!hev.includes("data-cmd='start_charge'"), "HEV: no charging commands (no plug)");
 }
 
 console.log("all card-powertrain-rows tests passed");
