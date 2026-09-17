@@ -15,24 +15,9 @@
  */
 const assert = require("assert");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
-const loadNodeHelper = require("./require-node-helper.js");
 const exporter = require("../exporter.js");
-
-function freshHelper(cacheDir) {
-  const helper = loadNodeHelper();
-  helper.sendSocketNotification = () => {}; // overridden per-test where the calls matter
-  helper.start();
-  if (cacheDir) helper.cacheDir = cacheDir;
-  return helper;
-}
-
-function tmpCacheDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kia-node-helper-test-"));
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
+const { freshHelper, tmpCacheDir } = require("./fresh-node-helper.js");
 
 // ---- identifierFor ----
 {

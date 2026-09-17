@@ -26,24 +26,12 @@
  */
 const assert = require("assert");
 const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const loadNodeHelper = require("./require-node-helper.js");
 const exporter = require("../exporter.js");
 const { HaLiveClient } = require("../ha_source.js");
+const { freshHelper, tmpCacheDir: tmpCacheDirWithPrefix } = require("./fresh-node-helper.js");
 
 function tmpCacheDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kia-stress-test-"));
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function freshHelper(cacheDir) {
-  const helper = loadNodeHelper();
-  helper.sendSocketNotification = () => {};
-  helper.start();
-  if (cacheDir) helper.cacheDir = cacheDir;
-  return helper;
+  return tmpCacheDirWithPrefix("kia-stress-test-");
 }
 
 // Fake mqtt.js client: a minimal EventEmitter-ish stand-in that records every

@@ -29,31 +29,9 @@ from custom_components.kia_access import account_poll  # noqa: E402
 from custom_components.kia_access import kia_client  # noqa: E402
 from custom_components.kia_access.const import DEFAULT_CLIMATE_PREFS  # noqa: E402
 from custom_components.kia_access.coordinator import KiaAccessCoordinator  # noqa: E402
-
-
-class _FakeStore:
-    """In-memory stand-in for homeassistant.helpers.storage.Store."""
-    def __init__(self, initial=None):
-        self._data = initial
-
-    async def async_load(self):
-        return self._data
-
-    async def async_save(self, data):
-        self._data = data
-
-
-class _FakeConfig:
-    from homeassistant.util.unit_system import IMPERIAL_SYSTEM
-    units = IMPERIAL_SYSTEM
-
-
-class _FakeStates:
-    def get(self, entity_id):
-        return None  # no zone.home etc configured -- keeps _emit_alerts() simple
-
-    def async_all(self, domain):
-        return []
+from fake_ha import FakeConfig as _FakeConfig  # noqa: E402
+from fake_ha import FakeStates as _FakeStates  # noqa: E402
+from fake_ha import FakeStore as _FakeStore  # noqa: E402
 
 
 class _FakeBus:
