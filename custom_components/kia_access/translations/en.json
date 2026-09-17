@@ -53,6 +53,7 @@
         "data": {
           "vin": "VIN",
           "scan_interval": "Poll interval (minutes)",
+          "stale_after_minutes": "Stale-data threshold (minutes)",
           "poll_car_directly": "Poll the car directly (wakes the vehicle — drains the 12V battery)",
           "force_refresh_timeout": "Live wake-up wait (seconds) — only used when polling directly",
           "price_per_kwh": "Price per kWh (your all-in marginal rate, 0 = no cost tracking)",
@@ -72,13 +73,22 @@
           "home_charge_zone": "Home-charging zone",
           "charge_rates": "Per-zone charging rates (optional)",
           "away_cost_entity": "Away charge-cost sensor (optional)",
-          "away_cost_grace_min": "Away cost grace (minutes)"
+          "away_cost_grace_min": "Away cost grace (minutes)",
+          "alert_title": "Alert title (blank = the vehicle's own default)",
+          "quiet_while_driving": "Suppress non-critical alerts while driving"
         },
         "data_description": {
           "vin": "Which vehicle this entry tracks. Required once the account has more than one vehicle (each needs its own config entry) — blank is fine for a single-vehicle account. Changing this moves the entry to a different vehicle; it's rejected if another Kia Access entry already uses that VIN.",
+          "scan_interval": "How often Home Assistant asks Kia's servers for a fresh reading.",
+          "stale_after_minutes": "How old the CAR'S OWN last-reported reading can get before the data-stale sensor turns on — independent of the poll interval above, since a poll can succeed while the car itself hasn't reported in a while (parked, asleep, out of signal).",
           "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
           "force_refresh_timeout": "How long to wait for the car to answer before falling back to the cached copy for that poll.",
+          "price_per_kwh": "Used to turn charge sessions into a running cost log. 0 disables cost tracking entirely (sessions are still logged in kWh).",
+          "capacity_kwh": "Overrides the usable battery capacity used for range/cost-per-% calculations. 0 auto-detects from the vehicle's own reported values where available.",
+          "range_factor": "Applied to the car's own range estimate before showing reachable destinations, to account for terrain/weather/driving-style optimism in the car's number.",
+          "range_reserve_pct": "How much charge to still have left on arrival at a destination, before it's shown as reachable.",
           "calendar_entities": "Events with a location on these calendars are geocoded and added to the reachable-destinations list / range-map pins. Destinations more than ~500 km from zone.home are skipped as implausible.",
+          "calendar_lookahead_hours": "How far ahead to look for upcoming calendar events when building the reachable-destinations list.",
           "drive_time_provider": "Estimate (default) uses straight-line distance. Geoapify or TomTom return real road distance and live-traffic drive time via one matrix call per poll (free tiers are plenty; needs the matching API key).",
           "routing_api_key": "Used for live drive times AND for geocoding calendar event locations. A Geoapify key works for both even if the drive-time provider is left on “estimate” (Nominatim increasingly blocks Home Assistant).",
           "drive_time_routes": "TomTom only: one routing call per destination each refresh so the reachable list can show “via <roads>” and colour the ETA by traffic delay. Turn off for one cheap matrix call (time + distance only).",
@@ -90,7 +100,9 @@
           "home_charge_zone": "The zone that counts as “home” for charging costs — e.g. zone.home, or a dedicated zone around your charger. Leave blank to cost every session at the home rate.",
           "charge_rates": "Different $/kWh per charging location, one per line as \"zone.work = 0.19\" (or \"Work = 0.19\"). When the car charges inside one of these zones that rate is used and the session is filed under that zone name; the first matching line wins. Zones not listed fall back to the away, then the home rate. A line for your home zone (labelled “home”) keeps that session in the home bucket.",
           "away_cost_entity": "A sensor whose value is the cost of your latest public charge — e.g. from the ChargePoint or a Tesla HA integration. When an away session ends and this sensor reported a figure within its window, that becomes the session cost (the rate estimate is kept as estimated_cost). Otherwise the away $/kWh rate is used.",
-          "away_cost_grace_min": "How long after unplugging the away cost sensor may still update — public networks often bill a few minutes to an hour later."
+          "away_cost_grace_min": "How long after unplugging the away cost sensor may still update — public networks often bill a few minutes to an hour later.",
+          "alert_title": "Shown as the notification title for kia_access_alert events. Blank uses a generic default — set this if you'd like it to name your specific vehicle or brand.",
+          "quiet_while_driving": "Hold back warning/info alerts (door open, low 12V, etc.) while the car is moving, and deliver them once it's parked. Critical alerts always fire immediately."
         }
       }
     },

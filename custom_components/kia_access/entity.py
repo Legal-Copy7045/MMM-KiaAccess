@@ -4,7 +4,7 @@ from __future__ import annotations
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_BRAND, DOMAIN
 from .coordinator import KiaAccessCoordinator
 
 
@@ -39,11 +39,17 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
         # currently has, same as every other property here.
         v = self.coordinator.vehicle
         vin = v.get("VIN")
+        # "KIA"/"HYUNDAI"/"GENESIS" (config_flow.py's BRANDS) -> "Kia"/
+        # "Hyundai"/"Genesis" -- this integration validates all three
+        # brands at setup, so a bare "Kia" fallback here mislabeled every
+        # Hyundai/Genesis vehicle's HA device until the cloud sent back its
+        # own manufacturer/name field.
+        brand_name = str(self.coordinator.entry.data.get(CONF_BRAND) or "KIA").title()
         return DeviceInfo(
             identifiers={(DOMAIN, self._ident)},
-            manufacturer=str(v.get("manufacturer") or "Kia"),
+            manufacturer=str(v.get("manufacturer") or brand_name),
             model=str(v.get("model") or ""),
-            name=str(v.get("name") or v.get("model") or "Kia"),
+            name=str(v.get("name") or v.get("model") or brand_name),
             serial_number=str(vin) if vin else None,
         )
 
