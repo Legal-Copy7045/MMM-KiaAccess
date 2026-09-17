@@ -328,7 +328,13 @@ Module.register("MMM-KiaAccess", {
         enabled: false, // true = serve /metrics
         port: 9110,
         path: "/metrics",
-        prefix: "kia"
+        prefix: "kia",
+        // loopback-only by default -- /metrics has no auth of its own, and
+        // serving it on every interface exposes live battery %, location
+        // and (in rotate mode) the VIN as a label to anything on the LAN.
+        // Set to "0.0.0.0" (all interfaces) if you actually want to scrape
+        // this from another machine, e.g. a separate Prometheus server.
+        host: "127.0.0.1"
       }
     }
   },

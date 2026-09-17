@@ -215,6 +215,13 @@ class PromServer {
   constructor(opts) {
     opts = opts || {};
     this.port = Number(opts.port) || 9110;
+    // loopback-only unless explicitly widened -- /metrics has no auth of
+    // its own (see start()'s handler: any request to `this.path` gets the
+    // full snapshot, no check at all), so binding every interface by
+    // default would hand live battery %, location and (in rotate mode) the
+    // VIN to anything on the LAN. An explicit opts.host (e.g. "0.0.0.0")
+    // is honoured as-is for a user who actually wants LAN-wide scraping.
+    this.host = opts.host || "127.0.0.1";
     this.path = opts.path || "/metrics";
     this.prefix = opts.prefix || "kia";
     this.labels = opts.labels || {};
@@ -263,7 +270,7 @@ class PromServer {
       }
     });
     this._server.on("error", (err) => { if (this._onError) this._onError(err); });
-    this._server.listen(this.port);
+    this._server.listen(this.port, this.host);
   }
 
   stop() {
