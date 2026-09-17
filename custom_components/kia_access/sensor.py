@@ -371,7 +371,7 @@ class KiaAccessLastChargeSensor(KiaAccessEntity, SensorEntity):
 
     @property
     def native_unit_of_measurement(self):
-        return "USD" if self._priced() else "kWh"
+        return self._currency() if self._priced() else "kWh"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -474,7 +474,7 @@ class KiaAccessChargeSessionSensor(KiaAccessEntity, SensorEntity):
 
     @property
     def native_unit_of_measurement(self):
-        return "USD" if self._priced() else "kWh"
+        return self._currency() if self._priced() else "kWh"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -548,7 +548,6 @@ class KiaAccessCostPerMileSensor(KiaAccessEntity, SensorEntity):
     90-day and lifetime in the attributes. Needs a price per kWh set."""
 
     _attr_icon = "mdi:cash-multiple"
-    _attr_native_unit_of_measurement = "USD/mi"
     _attr_suggested_display_precision = 3
 
     def __init__(self, coordinator) -> None:
@@ -557,6 +556,10 @@ class KiaAccessCostPerMileSensor(KiaAccessEntity, SensorEntity):
 
     def _log(self) -> dict:
         return self.coordinator.trip_log
+
+    @property
+    def native_unit_of_measurement(self):
+        return f"{self._currency()}/mi"
 
     @property
     def available(self) -> bool:

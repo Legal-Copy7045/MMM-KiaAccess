@@ -53,6 +53,14 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
             serial_number=str(vin) if vin else None,
         )
 
+    def _currency(self) -> str:
+        # ISO 4217-ish display code for the cost sensors -- purely a label,
+        # no conversion happens anywhere; price_per_kwh/away_price_per_kwh
+        # are already in whatever currency the user's own rate is in. "USD"
+        # was hardcoded here for every non-US install until this option
+        # existed.
+        return str(self.coordinator.entry.options.get("currency") or "USD").upper()
+
     @property
     def available(self) -> bool:
         return super().available and bool(self.coordinator.vehicle)

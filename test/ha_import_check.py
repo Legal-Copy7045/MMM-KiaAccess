@@ -101,6 +101,49 @@ _sen = importlib.import_module(f"{pkg}.sensor")
 assert hasattr(_sen, "KiaAccessLastTripSensor") and hasattr(_sen, "KiaAccessCostPerMileSensor")
 assert hasattr(_sen, "KiaAccessParkedSensor")
 
+
+# Cost sensors' native_unit_of_measurement was hardcoded "USD" -- every
+# non-US install's cost sensors showed the wrong currency label with no way
+# to fix it. Must now reflect the "currency" option, and default to "USD"
+# when it's unset (existing installs with no currency configured yet).
+class _FakeCostEntry:
+    def __init__(self, options):
+        self.entry_id = "entry_cost"
+        self.options = options
+
+
+class _FakeCostCoordinator:
+    def __init__(self, options, charge_log=None):
+        self.entry = _FakeCostEntry(options)
+        self.vehicle = {}
+        self.charge_log = charge_log or {"last": None}
+        self.trip_log = {"last": None, "last_30_days": {}}
+
+
+_default_charge = _sen.KiaAccessLastChargeSensor(
+    _FakeCostCoordinator({"price_per_kwh": 0.15})
+)
+assert _default_charge.native_unit_of_measurement == "USD", (
+    "no currency configured -- must default to USD, not raise or go blank"
+)
+_eur_charge = _sen.KiaAccessLastChargeSensor(
+    _FakeCostCoordinator({"price_per_kwh": 0.30, "currency": "eur"})
+)
+assert _eur_charge.native_unit_of_measurement == "EUR", (
+    f"configured currency must be used (upper-cased) -- got {_eur_charge.native_unit_of_measurement!r}"
+)
+_unpriced_charge = _sen.KiaAccessLastChargeSensor(
+    _FakeCostCoordinator({"currency": "EUR"})
+)
+assert _unpriced_charge.native_unit_of_measurement == "kWh", (
+    "no price configured at all -- falls back to kWh regardless of currency"
+)
+_gbp_cpm = _sen.KiaAccessCostPerMileSensor(
+    _FakeCostCoordinator({"price_per_kwh": 0.20, "currency": "GBP"})
+)
+assert _gbp_cpm.native_unit_of_measurement == "GBP/mi", _gbp_cpm.native_unit_of_measurement
+print("cost sensors: native_unit_of_measurement reflects the configured currency")
+
 rng = importlib.import_module(f"{pkg}.range")
 assert rng.reach(300, {"reservePct": 10, "factor": 0.92}) is not None
 _ps = rng.poi_status(40.7, -79.7, [{"name": "H", "lat": 40.8, "lon": -79.7}], 500,
