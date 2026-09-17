@@ -471,4 +471,77 @@ function freshModule(overrides) {
   assert.strictEqual(hides.length, 1, "car A's own modal clearing must dismiss it");
 }
 
+// ---- tripLogEl(): a metric-region install (config.units: "metric") must
+// see km/kWh and cost/km, not mi/kWh and cost/mi -- dist() and the summary
+// distance already branched on `imperial`, but the efficiency and cost
+// figures (both per-trip and in the rolling total) hardcoded " mi/kWh"/
+// "/mi" unconditionally, so a metric dashboard showed correct km distances
+// mixed with mile-based efficiency/cost on the same line. ----
+{
+  const prevDocument = global.document;
+  global.document = {
+    createElement: () => ({ className: "", innerHTML: "", style: {} })
+  };
+  try {
+    const mod = freshModule({
+      units: "metric",
+      visuals: { tripLog: { enabled: true, rows: 4, days: 30 }, chargeCost: { currency: "$" } }
+    });
+    mod.tripLib = require("../core/trips.js");
+    const endedAt = Date.now() - 60000;
+    mod.trips = [{
+      endedAt,
+      distanceKm: 30, distanceMi: 18.6,
+      miPerKwh: 3.1, kmPerKwh: 5.0,
+      cost: 1.5, costPerMi: undefined,
+    }];
+    const el = mod.tripLogEl();
+    assert.ok(el, "tripLogEl() must return an element for this setup");
+    assert.ok(el.innerHTML.includes("30 km"), el.innerHTML);
+    assert.ok(el.innerHTML.includes("5 km/kWh"), (
+      "metric-region per-trip line must show km/kWh, not mi/kWh: " + el.innerHTML
+    ));
+    assert.ok(!el.innerHTML.includes("mi/kWh"), (
+      "metric-region trip log must not show any mile-based efficiency text: " + el.innerHTML
+    ));
+    assert.ok(el.innerHTML.includes("/km"), (
+      "metric-region rolling total must show cost per km: " + el.innerHTML
+    ));
+    assert.ok(!el.innerHTML.includes("/mi"), (
+      "metric-region trip log must not show any mile-based cost text: " + el.innerHTML
+    ));
+  } finally {
+    global.document = prevDocument;
+  }
+}
+
+// ---- tripLogEl(): the default imperial config must keep showing mi/kWh
+// and cost/mi (this is the pre-existing, still-correct behaviour -- guards
+// against the metric fix above accidentally flipping the default too) ----
+{
+  const prevDocument = global.document;
+  global.document = {
+    createElement: () => ({ className: "", innerHTML: "", style: {} })
+  };
+  try {
+    const mod = freshModule({
+      visuals: { tripLog: { enabled: true, rows: 4, days: 30 }, chargeCost: { currency: "$" } }
+    });
+    mod.tripLib = require("../core/trips.js");
+    mod.trips = [{
+      endedAt: Date.now() - 60000,
+      distanceKm: 30, distanceMi: 18.6,
+      miPerKwh: 3.1, kmPerKwh: 5.0,
+      cost: 1.5,
+    }];
+    const el = mod.tripLogEl();
+    assert.ok(el.innerHTML.includes("mi/kWh"), (
+      "default (imperial) trip log must still show mi/kWh: " + el.innerHTML
+    ));
+    assert.ok(!el.innerHTML.includes("km/kWh"), el.innerHTML);
+  } finally {
+    global.document = prevDocument;
+  }
+}
+
 console.log("all mmm-kiaaccess tests passed");
