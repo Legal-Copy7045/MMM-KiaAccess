@@ -1,5 +1,12 @@
-# Newest release supporting the Cloudflare-bypass needs Python >= 3.12.
-# On older Python, pip will pick the newest compatible release automatically
-# (>= 3.10 -> 4.23.x). If pip finds nothing, your Python is too old — see the
-# "Python version" section of the README (use a venv with python3.12+).
-hyundai_kia_connect_api
+# Pinned to the exact version this project is developed and tested
+# against, so a fresh `npm install`/`pip install -r requirements.txt`
+# can't silently pick up an upstream release that changes behaviour
+# underneath this project. Bump deliberately: check the library's
+# CHANGELOG, update this pin, re-run `npm run test:all`, and update
+# manifest.json's matching `requirements` entry in the same commit.
+#
+# hyundai_kia_connect_api >= 4.31.0 requires Python >= 3.12; on an older
+# Python this pin will fail to resolve rather than silently installing an
+# older, untested release — see the "Python version" section of the
+# README (use a venv with python3.12+, or let `npm install` provision one).
+hyundai_kia_connect_api==4.31.0

@@ -20,6 +20,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const https = require("https");
+const crypto = require("crypto");
 
 const ROOT = __dirname;
 const VENV = path.join(ROOT, "venv");
@@ -107,6 +108,52 @@ function download(url, dest) {
   });
 }
 
+// same redirect-following GET as download(), but buffers the response
+// instead of writing to disk -- used for the small SHA256SUMS text file.
+function fetchBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const get = (u, depth) => {
+      if (depth > 6) return reject(new Error("too many redirects"));
+      https
+        .get(u, { headers: { "User-Agent": "MMM-KiaAccess-setup" } }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume();
+            return get(res.headers.location, depth + 1);
+          }
+          if (res.statusCode !== 200) {
+            res.resume();
+            return reject(new Error(`HTTP ${res.statusCode} for ${u}`));
+          }
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => resolve(Buffer.concat(chunks)));
+        })
+        .on("error", reject);
+    };
+    get(url, 0);
+  });
+}
+
+function sha256File(filePath) {
+  const hash = crypto.createHash("sha256");
+  hash.update(fs.readFileSync(filePath));
+  return hash.digest("hex");
+}
+
+// pure text parsing, kept separate from the network/fs calls above so it
+// can be unit-tested without hitting the network -- `sums` is the raw
+// contents of a `sha256sum`-style SHA256SUMS file ("<hex>  <filename>" per
+// line); returns the lowercase hex digest for `filename`, or null if that
+// filename isn't listed.
+function parseSha256Sums(sums, filename) {
+  const lines = String(sums || "").split(/\r?\n/);
+  for (const line of lines) {
+    const m = line.trim().match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+    if (m && m[2] === filename) return m[1].toLowerCase();
+  }
+  return null;
+}
+
 function standaloneTriple() {
   const arch = os.arch(); // 'arm', 'arm64', 'x64', ...
   let libc = "gnu";
@@ -130,6 +177,7 @@ async function fetchStandalone() {
 
   const asset = `cpython-${PBS_PY}+${PBS_RELEASE}-${triple}-install_only_stripped.tar.gz`;
   const url = `https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${asset}`;
+  const sumsUrl = `https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/SHA256SUMS`;
   const tmp = path.join(os.tmpdir(), asset);
 
   console.log(`[MMM-KiaAccess] Downloading standalone CPython ${PBS_PY} (${triple}) ...`);
@@ -140,6 +188,35 @@ async function fetchStandalone() {
     console.log(`[MMM-KiaAccess] Download failed: ${e.message}`);
     return null;
   }
+
+  // verify against the release's own SHA256SUMS before extracting anything
+  // from the archive -- this is a compiled Python runtime that ends up on
+  // PATH, so a corrupted or tampered download must never be trusted just
+  // because the HTTPS transfer itself succeeded.
+  let expectedHash;
+  try {
+    const sums = (await fetchBuffer(sumsUrl)).toString("utf8");
+    expectedHash = parseSha256Sums(sums, asset);
+  } catch (e) {
+    console.log(`[MMM-KiaAccess] Could not fetch SHA256SUMS for verification: ${e.message}`);
+    fs.rmSync(tmp, { force: true });
+    return null;
+  }
+  if (!expectedHash) {
+    console.log(`[MMM-KiaAccess] ${asset} is not listed in the release's SHA256SUMS — refusing to install.`);
+    fs.rmSync(tmp, { force: true });
+    return null;
+  }
+  const actualHash = sha256File(tmp);
+  if (actualHash !== expectedHash) {
+    console.log(
+      `[MMM-KiaAccess] Checksum mismatch for ${asset} — expected ${expectedHash}, got ${actualHash}. ` +
+        "Discarding the download; it will be retried on the next `npm install`."
+    );
+    fs.rmSync(tmp, { force: true });
+    return null;
+  }
+  console.log(`[MMM-KiaAccess] SHA-256 verified: ${actualHash}`);
 
   fs.rmSync(STANDALONE, { recursive: true, force: true });
   fs.mkdirSync(STANDALONE, { recursive: true });
@@ -156,7 +233,7 @@ async function fetchStandalone() {
   return fs.existsSync(py) ? ver(py) : null;
 }
 
-(async function main() {
+async function main() {
   let ranked = pickPython();
   let best = ranked[0];
 
@@ -220,4 +297,10 @@ async function fetchStandalone() {
     console.log("[MMM-KiaAccess] Import check failed:", (check.stderr || "").trim());
     process.exit(1);
   }
-})();
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { parseSha256Sums, sha256File };
