@@ -52,6 +52,16 @@ CONF_VIN = "vin"
 CONF_TOKEN = "token"
 CONF_GEOCODE = "geocode"
 
+
+def brand_display_name(brand: str | None) -> str:
+    """"KIA"/"HYUNDAI"/"GENESIS" (config_flow.py's BRANDS, stored uppercase
+    in CONF_BRAND) -> "Kia"/"Hyundai"/"Genesis". ONE canonical resolver --
+    config_flow.py's config-entry title used to show the raw uppercase code
+    ("HYUNDAI (user@example.com)") while entity.py's device name/
+    manufacturer title-cased it ("Hyundai"), two different displays of the
+    same brand with no shared source."""
+    return str(brand or "KIA").title()
+
 DEFAULT_SCAN_INTERVAL_MINUTES = 30
 DEFAULT_FORCE_REFRESH_TIMEOUT = 45
 # how old the CAR's own last-reported reading (vehicle.last_updated_at) can

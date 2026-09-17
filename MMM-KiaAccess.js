@@ -1624,12 +1624,23 @@ Module.register("MMM-KiaAccess", {
     const cc = (this.config.visuals || {}).chargeCost || {};
     const cur = (n) => (cc.currency || "$") + Number(n).toFixed(2);
     const imperial = this.config.units !== "metric";
-    const dist = (x) => imperial
-      ? (x.distanceMi != null ? x.distanceMi + " mi" : "—")
-      : (x.distanceKm != null ? x.distanceKm + " km" : "—");
-    const eff = (x) => imperial
-      ? (x.miPerKwh != null ? x.miPerKwh + " mi/kWh" : null)
-      : (x.kmPerKwh != null ? x.kmPerKwh + " km/kWh" : null);
+    // Every trip/summary object this method reads already carries BOTH a
+    // km-denominated and a mi-denominated sibling for distance/efficiency
+    // (core/trips.js computes both unconditionally) -- picking between an
+    // object's own "xKm"/"xMi" pair is the one thing dist/eff/td/the cost-
+    // per-distance line all do, so it's one small helper instead of each
+    // hand-rolling its own imperial ? X : Y with its own null-handling
+    // (which had already drifted: td had no fallback where dist() did).
+    const pick = (x, kmKey, miKey, unit) => {
+      const v = imperial ? x[miKey] : x[kmKey];
+      return v != null ? v + " " + (imperial ? "mi" : "km") + unit : null;
+    };
+    const dist = (x) => pick(x, "distanceKm", "distanceMi", "") || "—";
+    const eff = (x) => pick(x, "kmPerKwh", "miPerKwh", "/kWh");
+    const costPerDist = (x) => {
+      const v = imperial ? x.costPerMi : x.costPerKm;
+      return v != null ? cur(v) + "/" + (imperial ? "mi" : "km") : null;
+    };
     const val = (x) => [dist(x), eff(x), x.cost != null ? cur(x.cost) : null]
       .filter(Boolean).join(" · ");
 
@@ -1645,16 +1656,7 @@ Module.register("MMM-KiaAccess", {
     ).join("");
     let total = "";
     if (sum && sum.count) {
-      const td = imperial ? sum.distanceMi + " mi" : sum.distanceKm + " km";
-      const tbits = [
-        td,
-        imperial
-          ? (sum.miPerKwh != null ? sum.miPerKwh + " mi/kWh" : null)
-          : (sum.kmPerKwh != null ? sum.kmPerKwh + " km/kWh" : null),
-        imperial
-          ? (sum.costPerMi != null ? cur(sum.costPerMi) + "/mi" : null)
-          : (sum.costPerKm != null ? cur(sum.costPerKm) + "/km" : null)
-      ].filter(Boolean).join(" · ");
+      const tbits = [dist(sum), eff(sum), costPerDist(sum)].filter(Boolean).join(" · ");
       total =
         '<div style="opacity:.85;border-top:1px solid rgba(255,255,255,.15);margin-top:3px;padding-top:3px">' +
         '<span class="kiaaccess-bd-label">Last ' + days + ' d</span>' +
