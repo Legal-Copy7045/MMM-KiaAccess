@@ -49,7 +49,7 @@
     "step": {
       "init": {
         "title": "Kia Access options",
-        "description": "By default every update reads Kia's server-side cache, which is gentle on the car's 12V battery. Turn on 'Poll the car directly' only if you need up-to-the-minute data — it wakes the vehicle on every poll and can flatten the 12V battery if the car is parked for long periods.",
+        "description": "By default every update reads the manufacturer's server-side cache, which is gentle on the car's 12V battery. Turn on 'Poll the car directly' only if you need up-to-the-minute data — it wakes the vehicle on every poll and can flatten the 12V battery if the car is parked for long periods.",
         "data": {
           "vin": "VIN",
           "scan_interval": "Poll interval (minutes)",
@@ -80,9 +80,9 @@
         },
         "data_description": {
           "vin": "Which vehicle this entry tracks. Required once the account has more than one vehicle (each needs its own config entry) — blank is fine for a single-vehicle account. Changing this moves the entry to a different vehicle; it's rejected if another Kia Access entry already uses that VIN.",
-          "scan_interval": "How often Home Assistant asks Kia's servers for a fresh reading.",
+          "scan_interval": "How often Home Assistant asks the manufacturer's servers for a fresh reading.",
           "stale_after_minutes": "How old the CAR'S OWN last-reported reading can get before the data-stale sensor turns on — independent of the poll interval above, since a poll can succeed while the car itself hasn't reported in a while (parked, asleep, out of signal).",
-          "poll_car_directly": "Off (recommended): data comes from Kia's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
+          "poll_car_directly": "Off (recommended): data comes from the manufacturer's servers — refreshed whenever the car itself checks in (driving, charging, app use). On: each poll wakes the car for a live reading.",
           "force_refresh_timeout": "How long to wait for the car to answer before falling back to the cached copy for that poll.",
           "price_per_kwh": "Used to turn charge sessions into a running cost log. 0 disables cost tracking entirely (sessions are still logged in kWh).",
           "capacity_kwh": "Overrides the usable battery capacity used for range/cost-per-% calculations. 0 auto-detects from the vehicle's own reported values where available.",
@@ -96,7 +96,7 @@
           "static_destinations": "Always-shown destinations for the reachable list / driving-times panel, one per line as \"Name | address\" — e.g. \"White House | 1600 Pennsylvania Ave NW, Washington, DC\". Geocoded once and cached.",
           "geocoding_api_key": "A Geoapify key used only to turn calendar / static addresses into coordinates. Set this if your routing provider is TomTom (TomTom's Search API is not on every key) or you left the provider on “estimate”.",
           "zone_entities": "Narrows which Home Assistant zones appear on the MagicMirror driving-times panel. One per line by entity id or name (“zone.home” / “Work”); a line starting with “-” excludes that zone. Blank = show every zone within ~500 km of zone.home. The dashboard and sensor always show every such zone.",
-          "block_automated_climate": "Reject start_climate / stop_climate unless the call comes straight from a person (the card, the button, Developer Tools, a script you run by hand). Automations, scripts triggered by automations, scenes and the preconditioning blueprints are blocked. Does not touch the car's own scheduled climate set in the Kia app.",
+          "block_automated_climate": "Reject start_climate / stop_climate unless the call comes straight from a person (the card, the button, Developer Tools, a script you run by hand). Automations, scripts triggered by automations, scenes and the preconditioning blueprints are blocked. Does not touch the car's own scheduled climate set in the manufacturer's app.",
           "away_price_per_kwh": "Rate for charge sessions that start outside the home-charging zone (public chargers). 0 = fall back to the home rate.",
           "currency": "A label only, shown as the unit on the cost sensors (e.g. \"USD\", \"EUR\", \"GBP\") -- your price-per-kWh rates are already in this currency, nothing is converted.",
           "home_charge_zone": "The zone that counts as “home” for charging costs — e.g. zone.home, or a dedicated zone around your charger. Leave blank to cost every session at the home rate.",

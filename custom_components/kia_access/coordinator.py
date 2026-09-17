@@ -36,6 +36,7 @@ from .const import (
     DEFAULT_STALE_AFTER_MINUTES,
     DOMAIN,
     EVENT_KIA_ACCESS_ALERT,
+    brand_display_name,
 )
 
 # USA only, NOT Canada -- see kia_client.py's matching comment (root, and
@@ -1591,6 +1592,21 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._prev_cond["_charging"] = res["meta"]["charging"]
         self._first_alert_run = False
 
+    def _default_alert_title(self) -> str:
+        """"<Brand> <Model>" (or just "<Brand>" with no model yet) --
+        conditions.py's own DEFAULTS["title"] is the static literal
+        "Kia EV9", fine as ITS fallback (a bare unit-test import with no
+        cfg at all), but strings.json's options-form copy promises "blank
+        = the vehicle's own default" / "a generic default", not a
+        hardcoded brand+model. This is the real one, using the account's
+        own configured brand, so a Hyundai/Genesis owner (or anyone not
+        driving an EV9) who leaves the alert-title field blank -- the
+        documented, encouraged path -- doesn't get every alert titled for
+        a car that isn't theirs."""
+        model = self.vehicle.get("model")
+        brand = brand_display_name(self.entry.data.get(CONF_BRAND))
+        return f"{brand} {model}".strip() if model else brand
+
     async def _emit_alerts(self) -> None:
         """Fire kia_access_alert events on edge-triggered condition changes
         -- see _build_alert_state()/_track_parking()/_fire_condition_edges()
@@ -1602,7 +1618,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         failure -- see that method's docstring for why the old
         all-or-nothing early-return was a real bug, not just a style
         choice."""
-        cfg = self.entry.options.get("notifications", {}) or {}
+        # a copy, not the stored dict itself -- self.entry.options["notifications"]
+        # is the SAME object async_create_entry() persisted; mutating it in
+        # place here would silently corrupt the saved config entry outside
+        # of an actual options-flow save.
+        cfg = dict(self.entry.options.get("notifications", {}) or {})
+        if not cfg.get("title"):
+            cfg["title"] = self._default_alert_title()
         timers_before = (self._home_unplugged_since, self._moved_since, self._last_parked)
 
         state = self._build_alert_state()

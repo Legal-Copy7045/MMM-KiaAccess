@@ -507,6 +507,44 @@ function freshModule(overrides) {
   assert.strictEqual(hooks[0].payload.username, "driver@example.com");
 }
 
+// ---- processConditions(): an unset notifications.title must default to a
+// brand-derived title ("Hyundai"/"Genesis"), not the literal "Kia EV9" --
+// core/conditions.js's own DEFAULTS.title is that static string, and
+// config.js never even offers a title field to override it, so every
+// Hyundai/Genesis account previously got every notification titled for a
+// car that isn't theirs. ----
+{
+  const mod = freshModule({ brand: "GENESIS", notifications: {} });
+  mod.flatMap = {};
+  let seenCfg = null;
+  mod.conditions = {
+    evaluate: (st, cfg) => {
+      seenCfg = cfg;
+      return { conditions: [], meta: { charging: null } };
+    }
+  };
+  mod.processConditions();
+  assert.strictEqual(seenCfg.title, "Genesis", (
+    `blank title must default to the account's own brand, not a hardcoded 'Kia EV9': ${seenCfg.title}`
+  ));
+}
+
+// ---- processConditions(): an explicitly-set title must still win over the
+// brand-derived default ----
+{
+  const mod = freshModule({ brand: "HYUNDAI", notifications: { title: "My Tucson" } });
+  mod.flatMap = {};
+  let seenCfg2 = null;
+  mod.conditions = {
+    evaluate: (st, cfg) => {
+      seenCfg2 = cfg;
+      return { conditions: [], meta: { charging: null } };
+    }
+  };
+  mod.processConditions();
+  assert.strictEqual(seenCfg2.title, "My Tucson");
+}
+
 // ---- tripLogEl(): a metric-region install (config.units: "metric") must
 // see km/kWh and cost/km, not mi/kWh and cost/mi -- dist() and the summary
 // distance already branched on `imperial`, but the efficiency and cost

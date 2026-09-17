@@ -36,9 +36,10 @@ class _FakeHass:
 
 
 class _FakeEntry:
-    def __init__(self, entry_id="e1", options=None):
+    def __init__(self, entry_id="e1", options=None, brand="KIA"):
         self.entry_id = entry_id
         self.options = options or {}
+        self.data = {"brand": brand}
 
 
 def make_coordinator(vehicle, last_parked=None, entry=None):
@@ -166,11 +167,52 @@ def test_emit_alerts_persists_timers_even_when_condition_eval_fails():
     print("-- _emit_alerts: timers persist for the cycle even when condition evaluation raises")
 
 
+def test_default_alert_title_is_brand_and_model_aware():
+    """strings.json's alert_title field promises "blank = the vehicle's own
+    default" -- must NOT be the literal "Kia EV9" for a Hyundai/Genesis
+    account, or for a Kia account driving something other than an EV9."""
+    coord = make_coordinator(
+        vehicle={"model": "Ioniq 5"}, entry=_FakeEntry(brand="HYUNDAI"),
+    )
+    assert coord._default_alert_title() == "Hyundai Ioniq 5", coord._default_alert_title()
+
+    coord2 = make_coordinator(vehicle={}, entry=_FakeEntry(brand="GENESIS"))
+    assert coord2._default_alert_title() == "Genesis", (
+        "no model reported yet -- brand alone, not a hardcoded 'Kia EV9'"
+    )
+    print("-- _default_alert_title: brand/model-aware, not a hardcoded 'Kia EV9'")
+
+
+def test_emit_alerts_uses_default_title_when_unset():
+    """The default title actually reaches conditions.py's cfg -- not just
+    computed and discarded."""
+    coord = make_coordinator(vehicle={"model": "Tucson"}, entry=_FakeEntry(brand="HYUNDAI"))
+    seen_cfg = {}
+
+    def _capture(state, cfg, prev):
+        seen_cfg.update(cfg)
+        return {"conditions": [], "meta": {"charging": None}}
+
+    coordinator_mod.evaluate_conditions = _capture
+    try:
+        asyncio.run(coord._emit_alerts())
+    finally:
+        import importlib
+        importlib.reload(coordinator_mod)
+    assert seen_cfg.get("title") == "Hyundai Tucson", (
+        f"conditions.py must see the brand/model-derived default, not the literal "
+        f"'Kia EV9' or an empty title: {seen_cfg!r}"
+    )
+    print("-- _emit_alerts: the default title actually reaches condition evaluation")
+
+
 test_build_alert_state_flags_moved_while_parked()
 test_build_alert_state_no_move_when_parked_still()
 test_track_parking_snapshots_on_drive_to_park_transition()
 test_track_parking_waits_for_gps_fix_before_snapshotting()
 test_fire_condition_edges_swallows_evaluation_failure()
 test_emit_alerts_persists_timers_even_when_condition_eval_fails()
+test_default_alert_title_is_brand_and_model_aware()
+test_emit_alerts_uses_default_title_when_unset()
 
 print("all coordinator alerts tests passed")

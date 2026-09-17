@@ -880,6 +880,26 @@ for _key, _text in s["config"]["abort"].items():
         f"config abort '{_key}' names Kia specifically as the account brand: {_text!r}"
     )
 
+# Same check, but over the WHOLE strings.json tree (not just the config
+# step) -- the options step had its own instances of this: "Kia's server-
+# side cache", "Kia's servers", "the Kia app". "Kia Access"/"Kia Connect"
+# (the integration's own product name / one of the three brand SERVICES it
+# explicitly lists at sign-in) are allowed through; a possessive "Kia's" or
+# "the Kia app" claiming brand-specific ownership of the cloud/app is not.
+def _walk_strings(node, path=""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _walk_strings(v, f"{path}.{k}" if path else k)
+    elif isinstance(node, str):
+        yield path, node
+
+
+for _path, _text in _walk_strings(s):
+    assert "Kia's" not in _text and "the Kia app" not in _text, (
+        f"{_path} claims Kia-specific ownership of a service/app this integration "
+        f"also uses for Hyundai and Genesis accounts: {_text!r}"
+    )
+
 # Every options-form field needs BOTH a label (data) and a data_description --
 # a field with a label but no description previously slipped through (e.g.
 # stale_after_minutes had neither at all; several numeric fields had a label
