@@ -297,7 +297,26 @@ g.KiaAccessCommands={
     };
   }
 
-  return { buildState: buildState };
+  // Both Lovelace card sources (kia-access-card.src.js and
+  // kia-range-map-card.src.js) turn a hass entity's `attributes` object
+  // into the same `{ "vehicle.<key>": value }` shape buildState() expects
+  // -- each one used to carry its own identical copy of this function
+  // (byte-for-byte, including the same exclusion list) since they're
+  // bundled as two separate IIFEs with no shared scope of their own; this
+  // is the one place both already reach into (self.KiaAccessState, same as
+  // buildState above) for exactly that kind of sharing.
+  function flatFromAttributes(attrs) {
+    var flat = {};
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === "kia_access_raw" || k === "friendly_name" ||
+          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
+          k === "account") return;
+      flat["vehicle." + k] = attrs[k];
+    });
+    return flat;
+  }
+
+  return { buildState: buildState, flatFromAttributes: flatFromAttributes };
 });
 
 /* Optional graphical widgets for MMM-KiaAccess.
@@ -2637,17 +2656,6 @@ g.KiaAccessCommands={
     catch (e) { /* ignore */ }
   }
 
-  function flatFromAttributes(attrs) {
-    var flat = {};
-    Object.keys(attrs || {}).forEach(function (k) {
-      if (k === "kia_access_raw" || k === "friendly_name" ||
-          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
-          k === "account") return;
-      flat["vehicle." + k] = attrs[k];
-    });
-    return flat;
-  }
-
   function buttonHtml(c) {
     var ic = c.icon ? "<ha-icon icon='" + esc(c.icon) + "'></ha-icon>" : "";
     return "<button type='button' data-cmd='" + esc(c.key) + "'" +
@@ -2657,11 +2665,12 @@ g.KiaAccessCommands={
   // button groups only (no wrapper) — the climate panel is rendered alongside.
   // canPlugIn === false hides the "charge" category entirely (open/close
   // charge port, start/stop charging) -- a vehicle with no plug (gas, or a
-  // conventional non-plug hybrid -- see KiaAccessCard._canPlugInFor) has no
+  // conventional non-plug hybrid -- see core/state.js's buildState()
+  // canPlugIn field, the source of the value this is called with) has no
   // charge port and nothing to charge externally, so these controls would
   // otherwise sit there unconditionally, dispatching commands the car has
   // no way to honour. Any other value (including omitted) defaults to
-  // showing them -- same fail-safe reasoning as _canPlugInFor itself.
+  // showing them -- same fail-safe reasoning as buildState()'s canPlugIn.
   function actionsGroupsHtml(canPlugIn) {
     var visible = canPlugIn === false
       ? BUTTON_COMMANDS.filter(function (c) { return c.category !== "charge"; })
@@ -3011,31 +3020,6 @@ g.KiaAccessCommands={
       if (rowFilter && rowFilter.indexOf(key) === -1) return false;
       if (KiaAccessCard._hidePowertrainRow(key, engineType)) return false;
       return true;
-    }
-
-    // Raw vehicle.engine_type -> carDiagram()'s powertrain option
-    // ("ev"|"gas"|"hybrid"). An unset/unrecognised value defaults to "ev",
-    // matching this module's original EV-only diagram -- a genuinely
-    // missing engine_type (an older API response, or before v2.78.0's
-    // Enum-serialization fix) must never silently hide a real drive
-    // battery reading behind a wrong guess.
-    static _powertrainFor(rawEngineType) {
-      var t = String(rawEngineType || "").toUpperCase();
-      if (t === "ICE") return "gas";
-      if (t === "PHEV" || t === "HEV") return "hybrid";
-      return "ev";
-    }
-
-    // "hybrid" (_powertrainFor, above) covers BOTH plug-in hybrids (PHEV)
-    // and conventional hybrids (HEV -- e.g. a Kia Sportage Hybrid or
-    // Hyundai Tucson Hybrid, sold alongside a PHEV version of the same
-    // car), which has no plug at all, same as gas. actionsGroupsHtml()'s
-    // "charge" button group needs this finer distinction than powertrain
-    // alone. Unset/unrecognised defaults to true, same fail-safe reasoning
-    // as _powertrainFor.
-    static _canPlugInFor(rawEngineType) {
-      var t = String(rawEngineType || "").toUpperCase();
-      return t !== "ICE" && t !== "HEV";
     }
 
     _rangeInputs(flat) {
@@ -3405,7 +3389,7 @@ g.KiaAccessCommands={
       var st = hass.states[entId];
       this._entryId = st.attributes.entry_id || null;
       this._region = st.attributes.region || "USA";
-      var flat = flatFromAttributes(st.attributes);
+      var flat = S.flatFromAttributes(st.attributes);
       var state = S.buildState(flat, {});
       this._updateHomeAndMoveTracking(state);
       if (C) {
@@ -3427,19 +3411,19 @@ g.KiaAccessCommands={
         } catch (e) { /* ignore */ }
       }
       state.flashing = this._flashing === true;
-      // engine_type picks which centre cell(s) carDiagram() draws -- a
-      // plain drive battery (EV, and the default for an unset/unrecognised
-      // type, matching this module's original EV-only behaviour), a
-      // single fuel tank (ICE), or both side by side (PHEV/HEV).
-      // fuel_level is only meaningful for the non-EV cases;
-      // carDiagram()/verticalFuelTank() already render null as "—".
-      var fuelPctRaw = Number(flat["vehicle.fuel_level"]);
-      state.fuelPct = isFinite(fuelPctRaw) ? fuelPctRaw : null;
+      // state.powertrain/state.fuelPct (already set by buildState() above)
+      // pick which centre cell(s) carDiagram() draws -- a plain drive
+      // battery (EV, and the default for an unset/unrecognised engine_type,
+      // matching this module's original EV-only behaviour), a single fuel
+      // tank (ICE), or both side by side (PHEV/HEV). This used to
+      // re-derive both from `flat` locally instead of reading buildState()'s
+      // own already-correct fields -- same logic maintained twice, with its
+      // own copy of the engine_type mapping comment, in the same file.
       // the API reports temperatures in °C; the diagram and the climate panel
       // share one unit choice (card config, else the HA unit system)
       var diagram = V.carDiagram(state, {
         width: 230, battery: true, tempUnit: this._tempUnit(),
-        powertrain: KiaAccessCard._powertrainFor(flat["vehicle.engine_type"])
+        powertrain: state.powertrain
       });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";
@@ -3542,7 +3526,7 @@ g.KiaAccessCommands={
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml(KiaAccessCard._canPlugInFor(engineType)) +
+        actionsGroupsHtml(state.canPlugIn) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";
@@ -3602,6 +3586,7 @@ g.KiaAccessCommands={
 (function () {
   "use strict";
 
+  var S = self.KiaAccessState;
   var RNG = self.KiaAccessRange;
   var ISO = self.KiaAccessIsoline;
 
@@ -3674,16 +3659,6 @@ g.KiaAccessCommands={
     return ids[0] || null;
   }
 
-  function flatFromAttributes(attrs) {
-    var flat = {};
-    Object.keys(attrs || {}).forEach(function (k) {
-      if (k === "kia_access_raw" || k === "friendly_name" ||
-          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
-          k === "account") return;
-      flat["vehicle." + k] = attrs[k];
-    });
-    return flat;
-  }
 
   function kmToDisp(km, metric) {
     return metric ? Math.round(km) + " km" : Math.round(km * 0.621371) + " mi";
@@ -3835,7 +3810,7 @@ g.KiaAccessCommands={
       var st = entId && hass.states[entId];
       if (!st) return null;
       this._rawId = entId;
-      var flat = flatFromAttributes(st.attributes);
+      var flat = S.flatFromAttributes(st.attributes);
       this._entryId = st.attributes.entry_id || null;
       this._maybeFetchKeys();
       var fk = this._fetchedKeys || {};

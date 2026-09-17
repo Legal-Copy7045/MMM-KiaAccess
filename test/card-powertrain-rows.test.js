@@ -17,6 +17,9 @@ const assert = require("assert");
 const loadCardModule = require("./require-card-module.js");
 
 const { KiaAccessCard } = loadCardModule();
+// the bundle's UMD wrapper sets this as a global (self === global under
+// require-card-module.js's harness) -- see that file's header comment.
+const buildState = global.KiaAccessState.buildState;
 
 // ---- pure EV: fuel_driving_range / fuel_level / fuel_level_is_low are
 // noise (mirror total_driving_range) and must be hidden ----
@@ -56,26 +59,15 @@ assert.strictEqual(KiaAccessCard._hidePowertrainRow("ev_driving_range", ""), fal
 assert.strictEqual(KiaAccessCard._hidePowertrainRow("odometer", "EV"), false);
 assert.strictEqual(KiaAccessCard._hidePowertrainRow("odometer", "ICE"), false);
 
-// ---- KiaAccessCard._powertrainFor(): raw vehicle.engine_type -> carDiagram()'s
-// powertrain option, the wiring that picks whether the diagram shows a
-// plain drive battery, a fuel tank, or both side by side ----
-assert.strictEqual(KiaAccessCard._powertrainFor("EV"), "ev");
-assert.strictEqual(KiaAccessCard._powertrainFor("ICE"), "gas");
-assert.strictEqual(KiaAccessCard._powertrainFor("PHEV"), "hybrid");
-assert.strictEqual(KiaAccessCard._powertrainFor("HEV"), "hybrid");
-// case-insensitive -- jsonable()'s Enum.value passthrough (v2.78.0) always
-// gives the exact "EV"/"ICE"/"PHEV"/"HEV" casing, but nothing here should
-// depend on that
-assert.strictEqual(KiaAccessCard._powertrainFor("ev"), "ev");
-assert.strictEqual(KiaAccessCard._powertrainFor("ice"), "gas");
-// unset/unrecognised must default to "ev" -- matches this module's
-// original EV-only diagram, and must never silently hide a real drive
-// battery reading behind a wrong guess for an older API response (or a
-// still-broken engine_type serialization)
-assert.strictEqual(KiaAccessCard._powertrainFor(undefined), "ev");
-assert.strictEqual(KiaAccessCard._powertrainFor(null), "ev");
-assert.strictEqual(KiaAccessCard._powertrainFor(""), "ev");
-assert.strictEqual(KiaAccessCard._powertrainFor("something-unexpected"), "ev");
+// KiaAccessCard used to carry its own _powertrainFor()/_canPlugInFor()
+// statics, duplicating logic core/state.js's buildState() already computes
+// (same mapping, a second copy of the same explanatory comment, maintained
+// twice in one file) -- the card now reads state.powertrain/state.canPlugIn
+// directly instead. That mapping's own correctness (unset -> "ev"/true,
+// case-insensitivity, ICE/PHEV/HEV/EV handling) is already covered by
+// test/state.test.js and test/contract_test.py against the real
+// buildState() -- no need to re-test the same mapping a second time here
+// against a card-local copy that no longer exists.
 
 // ---- KiaAccessCard._rowVisible(): the `rows:` config allow-list, layered
 // on top of the powertrain hide rule ----
@@ -103,18 +95,6 @@ assert.strictEqual(KiaAccessCard._powertrainFor("something-unexpected"), "ev");
   assert.strictEqual(KiaAccessCard._rowVisible("odometer", [], "EV"), false);
 }
 
-// ---- _canPlugInFor(): distinguishes a plug-in hybrid (PHEV) from a
-// conventional, non-plug hybrid (HEV -- e.g. a Kia Sportage Hybrid or
-// Hyundai Tucson Hybrid, sold alongside a PHEV version of the same car).
-// Both map to the same _powertrainFor() "hybrid" bucket, which isn't fine
-// enough for anything that means "has a plug". ----
-assert.strictEqual(KiaAccessCard._canPlugInFor("EV"), true);
-assert.strictEqual(KiaAccessCard._canPlugInFor("PHEV"), true);
-assert.strictEqual(KiaAccessCard._canPlugInFor("HEV"), false, "a conventional hybrid has no plug");
-assert.strictEqual(KiaAccessCard._canPlugInFor("ICE"), false);
-assert.strictEqual(KiaAccessCard._canPlugInFor(""), true, "unset defaults to true (safe default)");
-assert.strictEqual(KiaAccessCard._canPlugInFor(undefined), true);
-
 // ---- actionsGroupsHtml(): the "charge" category button group (open/close
 // charge port, start/stop charging) must not render at all for a vehicle
 // with no plug -- gas, or a conventional (non-plug) hybrid. Other
@@ -136,13 +116,13 @@ assert.strictEqual(KiaAccessCard._canPlugInFor(undefined), true);
   const unset = KiaAccessCard._actionsGroupsHtml();
   assert.ok(unset.includes("data-cmd='start_charge'"), "no argument -> defaults to showing");
 
-  // exercised end-to-end through the real static helpers, matching how the
-  // render path actually calls this (actionsGroupsHtml(KiaAccessCard.
-  // _canPlugInFor(engineType))) -- a PHEV shows charging controls, an HEV
-  // does not, even though both share the same _powertrainFor() bucket
-  const phev = KiaAccessCard._actionsGroupsHtml(KiaAccessCard._canPlugInFor("PHEV"));
+  // exercised end-to-end through the real buildState(), matching how the
+  // render path actually calls this (actionsGroupsHtml(state.canPlugIn))
+  // -- a PHEV shows charging controls, an HEV does not, even though both
+  // share the same buildState() powertrain:"hybrid" bucket
+  const phev = KiaAccessCard._actionsGroupsHtml(buildState({ "vehicle.engine_type": "PHEV" }, {}).canPlugIn);
   assert.ok(phev.includes("data-cmd='start_charge'"), "PHEV: charging commands present");
-  const hev = KiaAccessCard._actionsGroupsHtml(KiaAccessCard._canPlugInFor("HEV"));
+  const hev = KiaAccessCard._actionsGroupsHtml(buildState({ "vehicle.engine_type": "HEV" }, {}).canPlugIn);
   assert.ok(!hev.includes("data-cmd='start_charge'"), "HEV: no charging commands (no plug)");
 }
 
