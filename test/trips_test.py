@@ -59,6 +59,10 @@ assert trip["distanceKm"] == 30, trip
 assert trip["usedPct"] == 6
 assert near(trip["kwh"], 6.0)
 assert 3 < trip["miPerKwh"] < 3.2, trip["miPerKwh"]
+# metric siblings of miPerKwh/kwhPer100mi -- 30 km / 6 kWh = 5 km/kWh
+assert near(trip["kmPerKwh"], 5.0), trip["kmPerKwh"]
+assert near(trip["kwhPer100km"], 20.0), trip["kwhPer100km"]
+assert near(trip["kmPerKwh"], trip["distanceKm"] / trip["kwh"])
 assert near(trip["cost"], 6.0 * 0.185)
 assert trip["chargedDuring"] is False
 
@@ -144,6 +148,8 @@ assert s["distanceKm"] == 50
 assert s["kwh"] == 10
 assert near(s["cost"], 1.85, 0.01)
 assert 0 < s["costPerMi"] < 0.1
+assert near(s["kmPerKwh"], 5.0), s["kmPerKwh"]
+assert near(s["costPerKm"], s["cost"] / s["distanceKm"], 0.001), s["costPerKm"]
 
 # --- DEFAULT_CAPACITY_KWH (the EV9's own usable pack size) must never be
 # used as a generic "capacity unknown" guess for some OTHER model -- see
@@ -212,6 +218,7 @@ assert hybrid_closed[0]["usedPct"] is None, "hybrid: usedPct must not be attribu
 assert hybrid_closed[0]["kwh"] is None, "hybrid: kwh must not be computed"
 assert hybrid_closed[0]["cost"] is None, "hybrid: cost must not be computed"
 assert hybrid_closed[0]["miPerKwh"] is None, "hybrid: efficiency must not be computed"
+assert hybrid_closed[0]["kmPerKwh"] is None, "hybrid: metric efficiency must not be computed either"
 
 _, ev_closed = run(_hybrid_samples, {"pricePerKwh": 0.185, "capacityKwh": 18, "powertrain": "ev"})
 assert ev_closed[0]["usedPct"] == 90, "same samples, pure EV: usedPct IS attributed"

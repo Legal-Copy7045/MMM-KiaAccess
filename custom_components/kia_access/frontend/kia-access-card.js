@@ -2290,6 +2290,12 @@ g.KiaAccessCommands={
       miPerKwh: (kwh != null && kwh > 0) ? round(dist * MI_PER_KM / kwh, 2) : null,
       kwhPer100mi: (kwh != null && dist > 0)
         ? round(kwh / (dist * MI_PER_KM) * 100, 1) : null,
+      // metric siblings of the two fields above -- dist is already in km
+      // regardless of region, so these are free (no separate unit-
+      // preference option needed, unlike miPerKwh/kwhPer100mi which this
+      // module has always returned unconditionally too)
+      kmPerKwh: (kwh != null && kwh > 0) ? round(dist / kwh, 2) : null,
+      kwhPer100km: (kwh != null && dist > 0) ? round(kwh / dist * 100, 1) : null,
       cost: (kwh != null && price > 0) ? round(kwh * price, 2) : null,
       pricePerKwh: price || null,
       fromLat: open.anchorLat, fromLon: open.anchorLon,
@@ -2434,7 +2440,9 @@ g.KiaAccessCommands={
       kwh: haveKwh ? round(kwh, 1) : null,
       cost: haveCost ? round(cost, 2) : null,
       miPerKwh: (haveKwh && kwh > 0) ? round(mi / kwh, 2) : null,
-      costPerMi: (haveCost && mi > 0) ? round(cost / mi, 3) : null
+      costPerMi: (haveCost && mi > 0) ? round(cost / mi, 3) : null,
+      kmPerKwh: (haveKwh && kwh > 0) ? round(km / kwh, 2) : null,
+      costPerKm: (haveCost && km > 0) ? round(cost / km, 3) : null
     };
   }
 

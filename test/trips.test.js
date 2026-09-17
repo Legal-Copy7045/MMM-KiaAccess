@@ -44,6 +44,10 @@ assert.ok(near(trip.distanceMi, 30 * 0.621371));
 assert.strictEqual(trip.usedPct, 6, "90 -> 84");
 assert.ok(near(trip.kwh, 6.0), "6% of 100 kWh");
 assert.ok(trip.miPerKwh > 3 && trip.miPerKwh < 3.2, trip.miPerKwh);
+// metric siblings of miPerKwh/kwhPer100mi -- 30 km / 6 kWh = 5 km/kWh
+assert.ok(near(trip.kmPerKwh, 5.0), trip.kmPerKwh);
+assert.ok(near(trip.kwhPer100km, 20.0), trip.kwhPer100km);
+assert.ok(near(trip.kmPerKwh, trip.distanceKm / trip.kwh));
 assert.ok(near(trip.cost, 6.0 * 0.185), trip.cost);
 assert.strictEqual(trip.chargedDuring, false);
 assert.ok(trip.straightLineKm > 0 && trip.straightLineKm < trip.distanceKm);
@@ -138,6 +142,8 @@ assert.strictEqual(sum.distanceKm, 50);
 assert.strictEqual(sum.kwh, 10);
 assert.ok(near(sum.cost, 1.85, 0.01));
 assert.ok(sum.costPerMi > 0 && sum.costPerMi < 0.1, sum.costPerMi);
+assert.ok(near(sum.kmPerKwh, 5.0), sum.kmPerKwh);
+assert.ok(near(sum.costPerKm, sum.cost / sum.distanceKm, 0.001), sum.costPerKm);
 
 // --- DEFAULT_CAPACITY_KWH (the EV9's own usable pack size) must never be
 // used as a generic "capacity unknown" guess for some OTHER model -- see
@@ -221,6 +227,7 @@ assert.ok(sum.costPerMi > 0 && sum.costPerMi < 0.1, sum.costPerMi);
   assert.strictEqual(hybridTrip.closed[0].kwh, null, "hybrid: kwh must not be computed");
   assert.strictEqual(hybridTrip.closed[0].cost, null, "hybrid: cost must not be computed");
   assert.strictEqual(hybridTrip.closed[0].miPerKwh, null, "hybrid: efficiency must not be computed");
+  assert.strictEqual(hybridTrip.closed[0].kmPerKwh, null, "hybrid: metric efficiency must not be computed either");
 
   const evTrip = run(samples, { pricePerKwh: 0.185, capacityKwh: 18, powertrain: "ev" });
   assert.strictEqual(evTrip.closed[0].usedPct, 90, "same samples, pure EV: usedPct IS attributed");
