@@ -361,9 +361,14 @@ automatically by `npm install`) sorts it out:
 2. Otherwise, **on Linux**, downloads a self-contained CPython 3.12 for your CPU
    architecture from
    [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-   into `./python-standalone/` — no compiler, ~2 min. On macOS / Windows without
-   a new-enough Python it stops with instructions instead of downloading.
-3. Builds `./venv` and installs the library.
+   into `./python-standalone/` — no compiler, ~2 min. The download's SHA-256 is
+   checked against that release's own `SHA256SUMS` before anything is extracted;
+   a mismatch discards the file and fails instead of silently installing it. On
+   macOS / Windows without a new-enough Python it stops with instructions
+   instead of downloading.
+3. Builds `./venv` and installs `hyundai_kia_connect_api`, pinned in
+   `requirements.txt` to an exact, tested version (not a floor/range) — bump it
+   deliberately, in the same commit as `manifest.json`'s matching pin.
 
 | Situation | Result |
 |---|---|
