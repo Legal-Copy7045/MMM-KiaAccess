@@ -183,5 +183,18 @@ assert.ok(!ptBadLabel.includes("vehicle-name"), ptBadLabel);
   assert.strictEqual(seen.auth, "Token tkn");
   assert.ok(seen.body.includes("ev_battery_percentage=63"), seen.body);
 
+  // ---- PromServer: /metrics has no authentication of its own, so it must
+  // bind loopback-only BY DEFAULT -- binding every interface would hand
+  // live battery %, location and (in rotate mode) the VIN label to
+  // anything on the LAN. An explicit host must still be honoured, for a
+  // user who deliberately wants wider access. ----
+  {
+    const def = new E.PromServer({ port: 9275, prefix: "kia", labels: {} });
+    assert.strictEqual(def.host, "127.0.0.1", "no host given -> defaults to loopback-only");
+
+    const explicit = new E.PromServer({ port: 9276, prefix: "kia", labels: {}, host: "0.0.0.0" });
+    assert.strictEqual(explicit.host, "0.0.0.0", "an explicit host must be honoured as-is");
+  }
+
   console.log("all exporter tests passed");
 })().catch((e) => { console.error(e); process.exit(1); });

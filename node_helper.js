@@ -947,6 +947,7 @@ module.exports = NodeHelper.create({
       if (!srv) {
         srv = new exporter.PromServer({
           port,
+          host: ex.prometheus.host,
           path: ex.prometheus.path,
           prefix: ex.prometheus.prefix || "kia",
           // base tags only -- a rotating module's several vehicles can share

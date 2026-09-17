@@ -1309,14 +1309,23 @@ exporter: {
     org: "home", bucket: "vehicles", token: "…",
     measurement: "kia_vehicle"
   },
-  prometheus: { enabled: true, port: 9110 }   // then scrape http://<host>:9110/metrics
+  prometheus: { enabled: true, port: 9110 }   // then scrape http://127.0.0.1:9110/metrics
 }
 ```
 
 Influx: one line-protocol `POST` per update (`kia_vehicle,vin=… ev_battery_percentage=63,…`).
 Prometheus: an always-on `/metrics` endpoint — `kia_ev_battery_percentage{vin="…"} 63`,
-plus `kia_stale`. Strings are skipped; booleans become `1`/`0`. Rotating through
-multiple `vehicles:`? Every car's samples carry its own `vin` tag/label — the
+plus `kia_stale`. `/metrics` has **no authentication of its own**, so it's
+bound to **loopback only (`127.0.0.1`) by default** — scrape it from
+something running on the same machine (a local Prometheus, or a reverse
+proxy that adds its own auth), not directly from another machine on your
+LAN. If you genuinely want to scrape it from elsewhere, set
+`prometheus.host: "0.0.0.0"` explicitly — that's a deliberate choice to
+expose live battery %, location and (in rotate mode) the VIN as a label to
+anything that can reach that port, so make sure your network is one you
+trust before doing that. Strings are skipped; booleans become `1`/`0`.
+Rotating through multiple `vehicles:`? Every car's samples carry its own
+`vin` tag/label — the
 Prometheus endpoint shows one series per vehicle rather than one server
 sharing a single, last-writer-wins snapshot. Remove a car from `vehicles:`
 and its series is dropped from `/metrics` on the next poll, instead of
