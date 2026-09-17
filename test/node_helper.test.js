@@ -977,6 +977,88 @@ async function testRangeMapRace() {
   }
 }
 
+// ---- _pinAccountValue(): security-sensitive config (pythonBin, the
+// webhook url/method/headers) is pinned to this account's first-seen
+// value for the life of the process -- socketNotificationReceived() trusts
+// whatever payload arrives on MagicMirror's own socket.io (normal for an
+// MM module, MM provides no per-module auth on it), but this module's
+// payload also carries account credentials, a value that gets passed
+// straight to child_process.spawn(), and a URL this module POSTs
+// arbitrary data to -- pinning closes the "a spoofed FOLLOW-UP
+// notification picks a different, attacker-chosen value" vector. ----
+{
+  const helper = freshHelper();
+  const store = {};
+
+  // first value seen -- adopted and returned as-is
+  assert.strictEqual(helper._pinAccountValue(store, "acct1", "/venv/bin/python3", "pythonBin"), "/venv/bin/python3");
+  assert.strictEqual(store.acct1, "/venv/bin/python3");
+
+  // an identical follow-up value -- still returns the (same) pinned value
+  assert.strictEqual(helper._pinAccountValue(store, "acct1", "/venv/bin/python3", "pythonBin"), "/venv/bin/python3");
+
+  // a DIFFERENT follow-up value (the attack this exists to stop) -- the
+  // original pinned value wins, the new one is never returned/used
+  assert.strictEqual(
+    helper._pinAccountValue(store, "acct1", "/usr/bin/tee", "pythonBin"),
+    "/venv/bin/python3",
+    "a later, different value must be ignored -- the first-seen value keeps winning"
+  );
+  assert.strictEqual(store.acct1, "/venv/bin/python3", "the store itself must not be overwritten either");
+
+  // a DIFFERENT account key gets its own independent pin -- one account's
+  // value never leaks into or overrides another's
+  assert.strictEqual(helper._pinAccountValue(store, "acct2", "/other/python", "pythonBin"), "/other/python");
+  assert.strictEqual(store.acct1, "/venv/bin/python3", "acct1's pin must be untouched by acct2's");
+
+  // works for object values too (the webhook url/method/headers bundle),
+  // compared by deep equality, not reference
+  const store2 = {};
+  const hookA = { url: "http://192.168.1.50/hook", method: "POST", headers: {} };
+  assert.deepStrictEqual(helper._pinAccountValue(store2, "acct1", hookA, "webhook"), hookA);
+  const hookASameShape = { url: "http://192.168.1.50/hook", method: "POST", headers: {} };
+  assert.deepStrictEqual(
+    helper._pinAccountValue(store2, "acct1", hookASameShape, "webhook"), hookA,
+    "an equal-by-value (not reference) repeat must still be treated as unchanged"
+  );
+  const hookAttacker = { url: "http://169.254.169.254/latest/meta-data/", method: "POST", headers: {} };
+  assert.deepStrictEqual(
+    helper._pinAccountValue(store2, "acct1", hookAttacker, "webhook"), hookA,
+    "an attacker-chosen webhook URL must never win over the first-seen one"
+  );
+}
+
+// ---- handleWebhook() now requires an account identity (region/brand/
+// username) on the payload so it CAN pin per-account -- confirm
+// acctKeyFor() (already used by the request/hour guard) produces a stable,
+// non-empty key from the shape MMM-KiaAccess.js now sends on KIA_WEBHOOK ----
+{
+  const helper = freshHelper();
+  const key = helper.acctKeyFor({ region: "USA", brand: "KIA", username: "u@e.com" });
+  assert.strictEqual(key, "USA|KIA|u@e.com");
+}
+
+// ---- _redactMqttUrl(): the common mqtt://user:pass@host broker-URL form
+// must never reach a log line or MQTT topic name with its credentials
+// intact -- a broker password logged in plain text (or broadcast in a
+// topic name, visible to anything subscribed to it) is a real leak. ----
+{
+  const helper = freshHelper();
+  assert.strictEqual(
+    helper._redactMqttUrl("mqtt://user:p%40ss@broker.local:1883"),
+    "mqtt://broker.local:1883"
+  );
+  assert.strictEqual(
+    helper._redactMqttUrl("mqtts://broker.local:8883"),
+    "mqtts://broker.local:8883",
+    "a URL with no credentials at all must pass through unchanged"
+  );
+  assert.strictEqual(
+    helper._redactMqttUrl("not a url"), "not a url",
+    "an unparseable value must fall back to the raw string, not throw"
+  );
+}
+
 testRangeMapRace()
   .then(() => console.log("all node_helper tests passed"))
   .catch((err) => { console.error(err); process.exitCode = 1; });
