@@ -1618,7 +1618,9 @@ Module.register("MMM-KiaAccess", {
     const dist = (x) => imperial
       ? (x.distanceMi != null ? x.distanceMi + " mi" : "—")
       : (x.distanceKm != null ? x.distanceKm + " km" : "—");
-    const eff = (x) => x.miPerKwh != null ? x.miPerKwh + " mi/kWh" : null;
+    const eff = (x) => imperial
+      ? (x.miPerKwh != null ? x.miPerKwh + " mi/kWh" : null)
+      : (x.kmPerKwh != null ? x.kmPerKwh + " km/kWh" : null);
     const val = (x) => [dist(x), eff(x), x.cost != null ? cur(x.cost) : null]
       .filter(Boolean).join(" · ");
 
@@ -1637,8 +1639,12 @@ Module.register("MMM-KiaAccess", {
       const td = imperial ? sum.distanceMi + " mi" : sum.distanceKm + " km";
       const tbits = [
         td,
-        sum.miPerKwh != null ? sum.miPerKwh + " mi/kWh" : null,
-        sum.costPerMi != null ? cur(sum.costPerMi) + "/mi" : null
+        imperial
+          ? (sum.miPerKwh != null ? sum.miPerKwh + " mi/kWh" : null)
+          : (sum.kmPerKwh != null ? sum.kmPerKwh + " km/kWh" : null),
+        imperial
+          ? (sum.costPerMi != null ? cur(sum.costPerMi) + "/mi" : null)
+          : (sum.costPerKm != null ? cur(sum.costPerKm) + "/km" : null)
       ].filter(Boolean).join(" · ");
       total =
         '<div style="opacity:.85;border-top:1px solid rgba(255,255,255,.15);margin-top:3px;padding-top:3px">' +
