@@ -254,14 +254,20 @@
   }
 
   // ---- climate control panel -------------------------------------------------
-  // set_temp's native unit/bounds depend on the VEHICLE's region (USA/Canada
-  // send °F 62-82; everywhere else is °C 16-30, see core/commands.json's
-  // `metric` variant and coordinator.py's climate_temp_unit()) -- NOT on the
-  // dashboard's display preference, which is a separate, independent choice
-  // (_tempUnit()). climTempBounds() picks the vehicle-native set, and the
-  // panel converts only for DISPLAY when that differs from native.
+  // set_temp's native unit/bounds depend on the VEHICLE's region (USA sends
+  // °F 62-82; everywhere else, INCLUDING Canada, is °C 16-30 -- see
+  // core/commands.json's `metric` variant and coordinator.py's
+  // climate_temp_unit()) -- NOT on the dashboard's display preference, which
+  // is a separate, independent choice (_tempUnit()). climTempBounds() picks
+  // the vehicle-native set, and the panel converts only for DISPLAY when
+  // that differs from native.
+  //
+  // Canada is deliberately NOT in this set: hyundai_kia_connect_api's
+  // KiaUvoApiCA.start_climate takes set_temp in Celsius (a hard lookup into
+  // a 14.0-31.5°C tuple) and only KiaUvoApiUSA actually wants Fahrenheit --
+  // see kia_client.py's matching comment on `fahrenheit`.
   var CLIM_OPTS = (CMD_BY_KEY.start_climate && CMD_BY_KEY.start_climate.options) || {};
-  var FAHRENHEIT_REGIONS = { USA: true, CA: true };
+  var FAHRENHEIT_REGIONS = { USA: true };
   function climTempBounds(region) {
     var o = CLIM_OPTS.set_temp || {};
     var fahrenheit = FAHRENHEIT_REGIONS[String(region || "USA").toUpperCase()] !== undefined;
@@ -1135,10 +1141,11 @@
     }
   }
 
-  // exposed for test/card-powertrain-rows.test.js -- actionsGroupsHtml()
-  // itself stays a plain closure (not a static method) since it has no
-  // other reason to live on the class; this is just a testable seam.
+  // exposed for tests -- both stay plain closures (not static methods)
+  // since neither has any other reason to live on the class; this is just
+  // a testable seam.
   KiaAccessCard._actionsGroupsHtml = actionsGroupsHtml;
+  KiaAccessCard._climTempBounds = climTempBounds;
 
   if (!customElements.get("kia-access-card")) {
     customElements.define("kia-access-card", KiaAccessCard);

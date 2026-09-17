@@ -49,7 +49,7 @@ g.KiaAccessEntities={
   ]
 };
 g.KiaAccessCommands={
-  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)); \"poi\" = method(vehicle_id, [POIInfo(...)]) built from name/address or latitude/longitude (address is geocoded). `dormant: true` marks a command whose library method exists but isn't implemented for all regions yet (it returns a clear error until it is). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file. NOTE on start_climate for the USA region (this project's target): the library's KiaUvoApiUSA sends `set_temp` in FAHRENHEIT, valid 62-82 (below/above → \"LOW\"/\"HIGH\"); `climate` is the A/C master switch (must be true to blow air); `defrost` = front windscreen; `heating` is a bit-flag (1 = rear window + mirrors); `steering_wheel` 0-2; `*_seat` levels are KiaUvoApiUSA._seat_settings codes (0 off, 6/7/8 heat lo/md/hi, 3/4/5 cool lo/md/hi). EU/other regions use °C 16-30 and different seat codes — adjust the option bounds if you retarget. An option can carry a `metric` sub-object with the non-Fahrenheit-region variant of default/min/max/step/unit (currently just `set_temp`) — anything dispatching this catalogue for a specific vehicle (kia_client.py's default-filling, the Lovelace card's climate panel) must pick `metric` over the top level when that vehicle's region isn't USA/Canada; the raw generated HA service (services.yaml) can't be region-scoped since it's one static file shared by every config entry, so it keeps the top-level (Fahrenheit) numbers as a reasonable default and widens min/max to not reject a metric value passed explicitly. The HA integration also exposes native climate/lock/number/switch/select entities for all of this (already region-aware independent of this catalogue -- see coordinator.py's climate_temp_unit()/build_climate_options()).",
+  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)); \"poi\" = method(vehicle_id, [POIInfo(...)]) built from name/address or latitude/longitude (address is geocoded). `dormant: true` marks a command whose library method exists but isn't implemented for all regions yet (it returns a clear error until it is). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file. NOTE on start_climate for the USA region (this project's target): the library's KiaUvoApiUSA sends `set_temp` in FAHRENHEIT, valid 62-82 (below/above → \"LOW\"/\"HIGH\"); `climate` is the A/C master switch (must be true to blow air); `defrost` = front windscreen; `heating` is a bit-flag (1 = rear window + mirrors); `steering_wheel` 0-2; `*_seat` levels are KiaUvoApiUSA._seat_settings codes (0 off, 6/7/8 heat lo/md/hi, 3/4/5 cool lo/md/hi). EU/other regions use °C 16-30 and different seat codes — adjust the option bounds if you retarget. An option can carry a `metric` sub-object with the non-Fahrenheit-region variant of default/min/max/step/unit (currently just `set_temp`) — anything dispatching this catalogue for a specific vehicle (kia_client.py's default-filling, the Lovelace card's climate panel) must pick `metric` over the top level when that vehicle's region isn't USA (Canada included -- KiaUvoApiCA takes set_temp in Celsius, not Fahrenheit, despite region code CA sitting right next to USA in most of this project's other region lists); the raw generated HA service (services.yaml) can't be region-scoped since it's one static file shared by every config entry, so it keeps the top-level (Fahrenheit) numbers as a reasonable default and widens min/max to not reject a metric value passed explicitly. The HA integration also exposes native climate/lock/number/switch/select entities for all of this (already region-aware independent of this catalogue -- see coordinator.py's climate_temp_unit()/build_climate_options()).",
   "version": 6,
   "commands": [
     { "key": "lock", "name": "Lock", "method": "lock", "call": "bare", "icon": "mdi:lock", "category": "security" },
@@ -2684,14 +2684,20 @@ g.KiaAccessCommands={
   }
 
   // ---- climate control panel -------------------------------------------------
-  // set_temp's native unit/bounds depend on the VEHICLE's region (USA/Canada
-  // send °F 62-82; everywhere else is °C 16-30, see core/commands.json's
-  // `metric` variant and coordinator.py's climate_temp_unit()) -- NOT on the
-  // dashboard's display preference, which is a separate, independent choice
-  // (_tempUnit()). climTempBounds() picks the vehicle-native set, and the
-  // panel converts only for DISPLAY when that differs from native.
+  // set_temp's native unit/bounds depend on the VEHICLE's region (USA sends
+  // °F 62-82; everywhere else, INCLUDING Canada, is °C 16-30 -- see
+  // core/commands.json's `metric` variant and coordinator.py's
+  // climate_temp_unit()) -- NOT on the dashboard's display preference, which
+  // is a separate, independent choice (_tempUnit()). climTempBounds() picks
+  // the vehicle-native set, and the panel converts only for DISPLAY when
+  // that differs from native.
+  //
+  // Canada is deliberately NOT in this set: hyundai_kia_connect_api's
+  // KiaUvoApiCA.start_climate takes set_temp in Celsius (a hard lookup into
+  // a 14.0-31.5°C tuple) and only KiaUvoApiUSA actually wants Fahrenheit --
+  // see kia_client.py's matching comment on `fahrenheit`.
   var CLIM_OPTS = (CMD_BY_KEY.start_climate && CMD_BY_KEY.start_climate.options) || {};
-  var FAHRENHEIT_REGIONS = { USA: true, CA: true };
+  var FAHRENHEIT_REGIONS = { USA: true };
   function climTempBounds(region) {
     var o = CLIM_OPTS.set_temp || {};
     var fahrenheit = FAHRENHEIT_REGIONS[String(region || "USA").toUpperCase()] !== undefined;
@@ -3565,10 +3571,11 @@ g.KiaAccessCommands={
     }
   }
 
-  // exposed for test/card-powertrain-rows.test.js -- actionsGroupsHtml()
-  // itself stays a plain closure (not a static method) since it has no
-  // other reason to live on the class; this is just a testable seam.
+  // exposed for tests -- both stay plain closures (not static methods)
+  // since neither has any other reason to live on the class; this is just
+  // a testable seam.
   KiaAccessCard._actionsGroupsHtml = actionsGroupsHtml;
+  KiaAccessCard._climTempBounds = climTempBounds;
 
   if (!customElements.get("kia-access-card")) {
     customElements.define("kia-access-card", KiaAccessCard);

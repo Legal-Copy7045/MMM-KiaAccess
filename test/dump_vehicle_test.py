@@ -433,6 +433,30 @@ default_eu_car = [_ClimateVeh("VIN1")]
 _run_climate({"command": "start_climate", "region": "EU"}, default_eu_car)
 assert default_eu_car[0].set_temp == 21, "omitted set_temp must use the metric default for an EU vehicle"
 
+# --- Canada is NOT a Fahrenheit region, despite sitting next to "USA" in
+# most of this project's other region lists. hyundai_kia_connect_api's
+# KiaUvoApiCA.start_climate takes set_temp in CELSIUS (a hard `.index()`
+# lookup into a 14.0-31.5C tuple in 0.5 steps) -- treating CA like USA
+# here sent a 62-82 Fahrenheit value that was never in that tuple, so
+# start_climate raised an unhandled ValueError on every call for a real
+# Canadian account. Confirmed against the installed library source
+# (KiaUvoApiCA.py), not assumed. ---
+ca_car = [_ClimateVeh("VIN1")]
+_run_climate({"command": "start_climate", "region": "CA", "options": {"set_temp": 21}}, ca_car)
+assert ca_car[0].set_temp == 21, "a real Celsius value for a CA vehicle must pass -- CA is metric, not Fahrenheit"
+
+bad_ca_car = [_ClimateVeh("VIN1")]
+try:
+    _run_climate({"command": "start_climate", "region": "CA", "options": {"set_temp": 70}}, bad_ca_car)
+    raise AssertionError("70 (Fahrenheit-shaped) must be rejected for a CA/metric vehicle")
+except kia_client.ClientError as e:
+    assert "set_temp" in str(e)
+assert not hasattr(bad_ca_car[0], "set_temp"), "the vehicle must never receive the out-of-region value"
+
+default_ca_car = [_ClimateVeh("VIN1")]
+_run_climate({"command": "start_climate", "region": "CA"}, default_ca_car)
+assert default_ca_car[0].set_temp == 21, "omitted set_temp must use the metric (Celsius) default for a CA vehicle"
+
 # --- domain-range guard: a structurally-valid-looking but semantically
 # impossible reading (percentage outside 0-100, a negative range/odometer)
 # becomes None rather than propagating as a fake but plausible-looking

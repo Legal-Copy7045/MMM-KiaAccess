@@ -711,7 +711,16 @@ def run_command(job, token_file=None):
     # DEFAULT substitution needs this; an explicitly-passed value (e.g. from
     # the HA climate entity, which already converts correctly) is trusted
     # as-is and never reinterpreted here.
-    fahrenheit = str(job.get("region", "USA")).upper() in ("USA", "CA")
+    #
+    # USA only, NOT Canada: hyundai_kia_connect_api's KiaUvoApiCA.start_climate
+    # takes set_temp in CELSIUS (self.temperature_range_c_new, 14.0-31.5 in
+    # 0.5 steps -- KiaUvoApiCA.py) and does a hard `.index(options.set_temp)`
+    # lookup into that tuple; only KiaUvoApiUSA actually wants Fahrenheit.
+    # Treating CA as a Fahrenheit region (as this project did through v2.87.x)
+    # sends a 62-82 value that is never in that tuple, so start_climate
+    # raises an unhandled ValueError on every single call for a Canadian
+    # account -- confirmed against the installed library source, not assumed.
+    fahrenheit = str(job.get("region", "USA")).upper() == "USA"
 
     def _with_default(key):
         spec_for_key = opt_specs.get(key) or {}
