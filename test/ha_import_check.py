@@ -814,6 +814,22 @@ assert "vin" not in s["config"]["step"]["user"]["data"], (
     "after login, from the account's own vehicle list (async_step_vehicle)"
 )
 
+# The integration validates Kia, Hyundai, AND Genesis accounts at setup
+# (config_flow.py's BRANDS) -- user-facing copy that names only "Kia" as
+# the account/brand identity (not just "Kia Access", the integration's own
+# product name) is factually wrong for two of the three brands it supports.
+for _step, _field in (("user", "description"), ("otp", "description")):
+    _text = s["config"]["step"][_step][_field]
+    assert "Kia just" not in _text and "Kia account" not in _text, (
+        f"config step '{_step}'.{_field} names Kia specifically as the "
+        f"account/brand, but this integration also supports Hyundai and "
+        f"Genesis accounts: {_text!r}"
+    )
+for _key, _text in s["config"]["abort"].items():
+    assert "Kia account" not in _text, (
+        f"config abort '{_key}' names Kia specifically as the account brand: {_text!r}"
+    )
+
 # Every options-form field needs BOTH a label (data) and a data_description --
 # a field with a label but no description previously slipped through (e.g.
 # stale_after_minutes had neither at all; several numeric fields had a label
