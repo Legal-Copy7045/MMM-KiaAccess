@@ -5,7 +5,7 @@ import asyncio
 import logging
 import math
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_CLIMATE_PREFS,
     DEFAULT_FORCE_REFRESH_TIMEOUT,
     DEFAULT_SCAN_INTERVAL_MINUTES,
+    DEFAULT_STALE_AFTER_MINUTES,
     DOMAIN,
     EVENT_KIA_ACCESS_ALERT,
 )
@@ -61,6 +62,17 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self.account_poller: account_poll.AccountPoller | None = None
         self.vehicle: dict = {}
         self.meta: dict = {}
+        # set at the end of every SUCCESSFUL update (fetch_err is None,
+        # below) -- distinct from DataUpdateCoordinator's own
+        # last_update_success (a bool, flips back to True the moment a poll
+        # merely succeeds again) and from vehicle.last_updated_at (the CAR's
+        # own self-reported check-in time, which a successful poll can
+        # legitimately echo back unchanged for a while). This is "when did
+        # WE last hear anything at all from Kia's cloud", used alongside
+        # is_stale (below) to distinguish "poll is failing" (HA already
+        # marks entities unavailable for that) from "polls keep succeeding,
+        # but the car itself hasn't reported anything new in a while".
+        self.last_successful_update: datetime | None = None
         self._prev_cond: dict = {}
         self._announced: dict = {}
         self._first_alert_run = True
@@ -1174,6 +1186,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                         data={**self.entry.data, CONF_TOKEN: new_token},
                     )
                 self.vehicle = vehicle
+                self.last_successful_update = dt_util.utcnow()
                 await self._update_sessions()
                 await self._update_trips()
 
@@ -1193,6 +1206,51 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
             await self._emit_alerts()
             return self.vehicle
+
+    @property
+    def stale_after_minutes(self) -> float:
+        raw = self.entry.options.get("stale_after_minutes", DEFAULT_STALE_AFTER_MINUTES)
+        try:
+            minutes = float(raw)
+        except (TypeError, ValueError):
+            return float(DEFAULT_STALE_AFTER_MINUTES)
+        return minutes if minutes > 0 else float(DEFAULT_STALE_AFTER_MINUTES)
+
+    @property
+    def vehicle_reported_at(self) -> datetime | None:
+        """The CAR's own self-reported last-check-in time
+        (vehicle.last_updated_at), parsed -- None if missing or unparseable,
+        which is itself informative (an older/degraded API response, or a
+        vehicle that has never reported)."""
+        raw = (self.vehicle or {}).get("last_updated_at")
+        if not raw:
+            return None
+        parsed = dt_util.parse_datetime(str(raw))
+        if parsed is None:
+            return None
+        return dt_util.as_utc(parsed)
+
+    @property
+    def data_age_seconds(self) -> float | None:
+        reported = self.vehicle_reported_at
+        if reported is None:
+            return None
+        return max(0.0, (dt_util.utcnow() - reported).total_seconds())
+
+    @property
+    def is_stale(self) -> bool | None:
+        """True once the CAR's own last-reported reading is older than
+        stale_after_minutes -- distinct from last_update_success (which HA
+        already reflects as entities going unavailable when polling itself
+        fails): this can be True even while every poll keeps succeeding, if
+        the car just hasn't reported anything new. None (not True/False)
+        when there's no reported timestamp to judge staleness from at all
+        -- e.g. before the very first successful poll -- so a consumer
+        doesn't mistake "we don't know yet" for "definitely fresh"."""
+        age = self.data_age_seconds
+        if age is None:
+            return None
+        return age > self.stale_after_minutes * 60
 
     @staticmethod
     def _haversine_km(a_lat, a_lon, b_lat, b_lon) -> float | None:

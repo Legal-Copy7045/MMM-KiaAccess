@@ -42,6 +42,7 @@ const HASS_TESTS = [
   "test/ha_import_check.py",
   "test/coordinator_analytics_test.py",
   "test/coordinator_stress_test.py",
+  "test/coordinator_stale_test.py",
   "test/map_keys_test.py"
 ];
 
