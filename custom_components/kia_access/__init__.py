@@ -411,7 +411,7 @@ def _strict_int(value):
     return int(f)
 
 
-def _check_command_authorized(hass: HomeAssistant, call: ServiceCall, coordinator) -> None:
+async def _check_command_authorized(hass: HomeAssistant, call: ServiceCall, coordinator) -> None:
     """The control commands (lock/unlock/climate/charge/...) are registered
     as DOMAIN services (hass.services.async_register), not entity services
     (async_register_entity_service) -- kia_access.unlock isn't "target this
@@ -433,7 +433,7 @@ def _check_command_authorized(hass: HomeAssistant, call: ServiceCall, coordinato
     checks already treat non-user-attributed calls."""
     if call.context is None or call.context.user_id is None:
         return
-    user = hass.auth.async_get_user(call.context.user_id)
+    user = await hass.auth.async_get_user(call.context.user_id)
     if user is None or user.is_admin:
         return
     registry = er.async_get(hass)
@@ -488,7 +488,7 @@ def _register_services(hass: HomeAssistant) -> None:
         def _make_handler(command_key: str):
             async def _handler(call: ServiceCall) -> None:
                 coordinator = _coordinator_for(hass, call)
-                _check_command_authorized(hass, call, coordinator)
+                await _check_command_authorized(hass, call, coordinator)
                 options = {
                     k: v for k, v in call.data.items() if k != "entry_id"
                 }

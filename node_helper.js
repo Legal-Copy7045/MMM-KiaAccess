@@ -218,9 +218,22 @@ module.exports = NodeHelper.create({
   // handleFetch()/handleWebhook()) specifically so it's testable without
   // spawning a real child process or making a real HTTP request.
   _pinAccountValue(store, acctKey, value, label) {
+    // `current === undefined` used to be the "not pinned yet" sentinel, but
+    // a bare property read can't tell "never set" apart from "set to
+    // undefined" -- and `config.pythonBin` IS undefined for most installs
+    // (it's optional, resolved later by resolvePython()'s own fallback).
+    // For any account that never configures pythonBin, that meant the pin
+    // NEVER actually latched: `current` read back as undefined again on
+    // every subsequent call, so every call re-took the "first assignment"
+    // branch and happily accepted whatever value arrived THAT time --
+    // completely defeating this method's entire purpose (a spoofed
+    // KIA_FETCH claiming a malicious pythonBin would be accepted at any
+    // time, not just before the real module's first message). Check
+    // hasOwnProperty instead, which correctly distinguishes the two.
+    const seen = Object.prototype.hasOwnProperty.call(store, acctKey);
     const current = store[acctKey];
-    const same = current !== undefined && JSON.stringify(current) === JSON.stringify(value);
-    if (current === undefined) {
+    const same = seen && JSON.stringify(current) === JSON.stringify(value);
+    if (!seen) {
       store[acctKey] = value;
       return value;
     }

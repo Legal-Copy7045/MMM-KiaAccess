@@ -1206,9 +1206,18 @@ Module.register("MMM-KiaAccess", {
         // no identity at all, so node_helper had no way to tell a legitimate
         // webhook notification from this module apart from a spoofed one
         // claiming a different URL.
-        region: cfg.region,
-        brand: cfg.brand,
-        username: cfg.username,
+        // NOT `cfg` (that's this.config.notifications, the sub-config a few
+        // lines up) -- region/brand/username live on this.config itself,
+        // same as serialisableConfig() already reads them for KIA_FETCH.
+        // `cfg.region` etc. were always undefined here, so acctKeyFor()
+        // collapsed every account onto the identical "undefined|undefined|
+        // undefined" key -- in a multi-account setup, node_helper's webhook
+        // pinning (the fix this identity was added for) could pin one
+        // account's webhook and silently apply it to another account's
+        // webhook traffic.
+        region: this.config.region,
+        brand: this.config.brand,
+        username: this.config.username,
         events: fired,
         webhook: hook,
         state: hook.includeState ? this.flatMap : null

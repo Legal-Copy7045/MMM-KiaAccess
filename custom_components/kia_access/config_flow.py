@@ -496,9 +496,19 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
             # the only place an HA user can override the notification
             # title, which defaulted to the literal "Kia EV9" for every
             # Hyundai/Genesis install with no way to change it.
+            existing_notifications = dict(self._entry.options.get("notifications", {}))
+            # If the "alerts" section didn't come back in this submission at
+            # all (whatever the cause -- collapsed-section frontend
+            # behavior, a non-standard programmatic caller), setdefault()
+            # seeds these from the previously saved values instead of the
+            # pop()s below silently treating "missing" the same as "user
+            # cleared it", which would erase a saved custom title.
+            user_input.setdefault("alert_title", existing_notifications.get("title", ""))
+            user_input.setdefault(
+                "quiet_while_driving", existing_notifications.get("quietWhileDriving", True)
+            )
             alert_title = (user_input.pop("alert_title", "") or "").strip()
             quiet_while_driving = user_input.pop("quiet_while_driving", True)
-            existing_notifications = dict(self._entry.options.get("notifications", {}))
             existing_notifications["quietWhileDriving"] = quiet_while_driving
             if alert_title:
                 existing_notifications["title"] = alert_title
@@ -506,7 +516,18 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                 existing_notifications.pop("title", None)
             user_input["notifications"] = existing_notifications
             if not errors:
-                return self.async_create_entry(title="", data=user_input)
+                # Merge onto the existing saved options rather than treating
+                # user_input as the complete final state -- the same
+                # protection as above, generalized to every OTHER section:
+                # a section entirely missing from this submission keeps its
+                # previously saved fields instead of reverting to blank
+                # schema defaults. A section that DID arrive already carries
+                # every one of its own fields (voluptuous validates the
+                # whole nested schema), including intentional blanks, so
+                # this changes nothing for a normal, fully-rendered submit.
+                merged = dict(self._entry.options)
+                merged.update(user_input)
+                return self.async_create_entry(title="", data=merged)
         opts = dict(self._entry.options)
         notif_opts = opts.get("notifications", {}) or {}
 
