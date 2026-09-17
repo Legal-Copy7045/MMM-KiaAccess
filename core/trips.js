@@ -72,7 +72,16 @@
     if (dist == null || dist < (num(opts.minKm) != null ? num(opts.minKm) : MIN_KM)) {
       return null;
     }
-    var usedPct = (!open.chargedSince && open.anchorPct != null && open.lastPct != null)
+    // a hybrid (PHEV/HEV) that runs the battery down and then keeps driving
+    // on gas still shows a full SOC-percent delta for the WHOLE trip's
+    // distance -- attributing all of it to the battery would overstate
+    // efficiency (and, via core/analytics.js's rangeAccuracy(), the learned
+    // personalRangeFactor used for trip planning) by an amount this data
+    // has no way to bound. A pure gas car already excludes itself here (no
+    // ev_battery_percentage at all -> anchorPct/lastPct stay null); a
+    // hybrid needs the same treatment explicitly.
+    var evAttributable = opts.powertrain !== "hybrid";
+    var usedPct = (evAttributable && !open.chargedSince && open.anchorPct != null && open.lastPct != null)
       ? open.anchorPct - open.lastPct : null;
     var kwh = (usedPct != null && usedPct > 0 && cap != null) ? (usedPct / 100) * cap : null;
     var mins = Math.max(1, Math.round((endAt - open.anchorAt) / 60000));

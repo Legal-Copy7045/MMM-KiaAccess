@@ -124,9 +124,19 @@
       return "ev";
     })();
 
+    // ev_driving_range is EV-only -- an ICE/PHEV-on-gas vehicle never sets
+    // it, and total_driving_range (Kia's "however you'd currently drive"
+    // figure) is what every other range-reading call site in this project
+    // already falls back to (coordinator.py, node_helper.js, the Lovelace
+    // card, the range-map card) -- buildState()'s own rangeKm had fallen
+    // behind those and stayed EV-only, silently going null for anything
+    // that isn't a pure EV even though a usable range value exists.
+    var rangeKm = num("ev_driving_range");
+    if (rangeKm == null || rangeKm <= 0) rangeKm = num("total_driving_range");
+
     return {
       batteryPct: num("ev_battery_percentage"),
-      rangeKm: num("ev_driving_range"),
+      rangeKm: rangeKm,
       chargeKw: num("ev_charging_power"),
       chargeAmps: num("ev_charging_current"),
       charging: bool("ev_battery_is_charging"),

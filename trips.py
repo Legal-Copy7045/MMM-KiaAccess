@@ -85,8 +85,13 @@ def _close(open_t, opts, end_at):
         min_km = MIN_KM
     if dist is None or dist < min_km:
         return None
+    # see core/trips.js's identical comment -- a hybrid that exhausts the
+    # battery and finishes a trip on gas must not have the whole distance
+    # attributed to the battery
+    ev_attributable = opts.get("powertrain") != "hybrid"
     used_pct = (open_t["anchorPct"] - open_t["lastPct"]
-                if (not open_t.get("chargedSince")
+                if (ev_attributable
+                    and not open_t.get("chargedSince")
                     and open_t.get("anchorPct") is not None
                     and open_t.get("lastPct") is not None)
                 else None)

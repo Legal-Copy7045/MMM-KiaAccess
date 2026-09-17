@@ -221,9 +221,19 @@ g.KiaAccessCommands={
       return "ev";
     })();
 
+    // ev_driving_range is EV-only -- an ICE/PHEV-on-gas vehicle never sets
+    // it, and total_driving_range (Kia's "however you'd currently drive"
+    // figure) is what every other range-reading call site in this project
+    // already falls back to (coordinator.py, node_helper.js, the Lovelace
+    // card, the range-map card) -- buildState()'s own rangeKm had fallen
+    // behind those and stayed EV-only, silently going null for anything
+    // that isn't a pure EV even though a usable range value exists.
+    var rangeKm = num("ev_driving_range");
+    if (rangeKm == null || rangeKm <= 0) rangeKm = num("total_driving_range");
+
     return {
       batteryPct: num("ev_battery_percentage"),
-      rangeKm: num("ev_driving_range"),
+      rangeKm: rangeKm,
       chargeKw: num("ev_charging_power"),
       chargeAmps: num("ev_charging_current"),
       charging: bool("ev_battery_is_charging"),
@@ -1434,6 +1444,17 @@ g.KiaAccessCommands={
     prev = prev || {};
     var title = cfg.title || DEFAULTS.title;
     var driving = cfg.quietWhileDriving !== false && s.carOn === true;
+    // a pure gas vehicle has no drive battery to read or plug in -- treating
+    // it like one produced two permanently-wrong conditions: "EV battery
+    // level unknown" forever (threshold() below emits active:null when
+    // cur == null, which is every tick for a car with no ev_battery_percentage
+    // at all) and a "home and not plugged in" alert that fires the moment
+    // it's parked and never clears (s.plugged also stays null forever for a
+    // gas car -- `s.plugged === true` can never become true to clear it).
+    // s.powertrain is missing (not "gas") for any caller that hasn't been
+    // updated to pass it, so this defaults to the old always-evaluate
+    // behaviour rather than silently suppressing a real EV's alert.
+    var hasBattery = s.powertrain !== "gas";
     var out = [];
 
     function emit(reason, level, active, message, value, oneShot) {
@@ -1467,8 +1488,10 @@ g.KiaAccessCommands={
         threshold: below
       });
     }
-    threshold("ev_battery_low", num(s.batteryPct), checkCfg(cfg, "evBatteryLow"), "EV battery");
-    threshold("ev_battery_critical", num(s.batteryPct), checkCfg(cfg, "evBatteryCritical"), "EV battery critically");
+    if (hasBattery) {
+      threshold("ev_battery_low", num(s.batteryPct), checkCfg(cfg, "evBatteryLow"), "EV battery");
+      threshold("ev_battery_critical", num(s.batteryPct), checkCfg(cfg, "evBatteryCritical"), "EV battery critically");
+    }
     threshold("battery_12v_low", num(s.car12vPct), checkCfg(cfg, "battery12vLow"), "12V battery");
     threshold("battery_12v_critical", num(s.car12vPct), checkCfg(cfg, "battery12vCritical"), "12V battery critically");
 
@@ -1651,7 +1674,7 @@ g.KiaAccessCommands={
     // needs s.atHome (bool) + s.homeUnpluggedMin (minutes home+unplugged) from
     // the caller; inert when s.atHome isn't provided.
     var cHP = checkCfg(cfg, "notPluggedInHome");
-    if (cHP.enabled) {
+    if (cHP.enabled && hasBattery) {
       var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
       var homeMin = num(s.homeUnpluggedMin);
       var hr = new Date().getHours();
@@ -2199,7 +2222,16 @@ g.KiaAccessCommands={
     if (dist == null || dist < (num(opts.minKm) != null ? num(opts.minKm) : MIN_KM)) {
       return null;
     }
-    var usedPct = (!open.chargedSince && open.anchorPct != null && open.lastPct != null)
+    // a hybrid (PHEV/HEV) that runs the battery down and then keeps driving
+    // on gas still shows a full SOC-percent delta for the WHOLE trip's
+    // distance -- attributing all of it to the battery would overstate
+    // efficiency (and, via core/analytics.js's rangeAccuracy(), the learned
+    // personalRangeFactor used for trip planning) by an amount this data
+    // has no way to bound. A pure gas car already excludes itself here (no
+    // ev_battery_percentage at all -> anchorPct/lastPct stay null); a
+    // hybrid needs the same treatment explicitly.
+    var evAttributable = opts.powertrain !== "hybrid";
+    var usedPct = (evAttributable && !open.chargedSince && open.anchorPct != null && open.lastPct != null)
       ? open.anchorPct - open.lastPct : null;
     var kwh = (usedPct != null && usedPct > 0 && cap != null) ? (usedPct / 100) * cap : null;
     var mins = Math.max(1, Math.round((endAt - open.anchorAt) / 60000));
@@ -2603,18 +2635,25 @@ g.KiaAccessCommands={
       (c.confirm ? " data-confirm='1'" : "") + ">" + ic + esc(c.name) + "</button>";
   }
 
-  // button groups only (no wrapper) — the climate panel is rendered alongside
-  function actionsGroupsHtml() {
+  // button groups only (no wrapper) — the climate panel is rendered alongside.
+  // powertrain "gas" hides the "charge" category entirely (open/close charge
+  // port, start/stop charging) -- a pure gas vehicle has no charge port and
+  // no drive battery to charge, so these controls would otherwise sit there
+  // unconditionally, dispatching commands the car has no way to honour.
+  function actionsGroupsHtml(powertrain) {
+    var visible = powertrain === "gas"
+      ? BUTTON_COMMANDS.filter(function (c) { return c.category !== "charge"; })
+      : BUTTON_COMMANDS;
     var seen = {};
     var html = CAT_ORDER.map(function (cat) {
-      var items = BUTTON_COMMANDS.filter(function (c) { return (c.category || "other") === cat; });
+      var items = visible.filter(function (c) { return (c.category || "other") === cat; });
       items.forEach(function (c) { seen[c.key] = 1; });
       if (!items.length) return "";
       return "<div class='ka-group'><div class='ka-group-label'>" +
         esc(CAT_LABEL[cat] || cat) + "</div><div class='ka-btns'>" +
         items.map(buttonHtml).join("") + "</div></div>";
     }).join("");
-    var rest = BUTTON_COMMANDS.filter(function (c) { return !seen[c.key]; });
+    var rest = visible.filter(function (c) { return !seen[c.key]; });
     if (rest.length) {
       html += "<div class='ka-group'><div class='ka-btns'>" +
         rest.map(buttonHtml).join("") + "</div></div>";
@@ -3463,7 +3502,7 @@ g.KiaAccessCommands={
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml() +
+        actionsGroupsHtml(KiaAccessCard._powertrainFor(engineType)) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";
@@ -3491,6 +3530,11 @@ g.KiaAccessCommands={
       this._wireClimate();
     }
   }
+
+  // exposed for test/card-powertrain-rows.test.js -- actionsGroupsHtml()
+  // itself stays a plain closure (not a static method) since it has no
+  // other reason to live on the class; this is just a testable seam.
+  KiaAccessCard._actionsGroupsHtml = actionsGroupsHtml;
 
   if (!customElements.get("kia-access-card")) {
     customElements.define("kia-access-card", KiaAccessCard);

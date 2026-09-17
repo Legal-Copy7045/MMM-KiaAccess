@@ -444,6 +444,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 "capacityKwh": opts.get("capacity_kwh") or _num(v.get("ev_battery_capacity")),
                 # see _update_sessions()'s identical comment above
                 "model": v.get("model"),
+                # hybrid trips can't have their whole distance attributed to
+                # the battery -- see trips.py's _close() comment
+                "powertrain": state.get("powertrain"),
             },
         )
         changed = res["open"] != self._open_trip

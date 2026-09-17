@@ -186,4 +186,34 @@ assert.strictEqual(find(r, "cant_get_home"), undefined);
 r = C.evaluate({ atHome: false, homeDistanceKm: 200 }, {}, {});
 assert.strictEqual(find(r, "cant_get_home"), undefined);
 
+// --- powertrain: a pure gas vehicle has no drive battery to read or plug
+// into -- ev_battery_low/critical and not_plugged_home must not be emitted
+// at all (not just inactive), since they're permanently meaningless rather
+// than "currently false". battery_12v_low/critical still apply (every car
+// has a 12V battery) ---
+r = C.evaluate({ powertrain: "gas", batteryPct: null, car12vPct: 30 }, {}, {});
+assert.strictEqual(find(r, "ev_battery_low"), undefined, "gas: no ev_battery_low condition at all");
+assert.strictEqual(find(r, "ev_battery_critical"), undefined, "gas: no ev_battery_critical condition at all");
+assert.strictEqual(find(r, "battery_12v_low").active, true, "gas: 12V battery check still applies");
+
+r = C.evaluate(
+  { powertrain: "gas", atHome: true, homeUnpluggedMin: 999, plugged: null },
+  {}, {}
+);
+assert.strictEqual(find(r, "not_plugged_home"), undefined, "gas: parked-and-not-plugged-in is meaningless, not evaluated");
+
+// an EV/hybrid (or state with no powertrain field at all -- the safe
+// default) must still get every one of these
+r = C.evaluate({ batteryPct: 5 }, {}, {});
+assert.strictEqual(find(r, "ev_battery_low").active, true, "no powertrain field -> defaults to evaluating (safe default)");
+r = C.evaluate({ powertrain: "ev", batteryPct: 5 }, {}, {});
+assert.strictEqual(find(r, "ev_battery_low").active, true);
+r = C.evaluate({ powertrain: "hybrid", batteryPct: 5 }, {}, {});
+assert.strictEqual(find(r, "ev_battery_low").active, true, "hybrid still has a drive battery");
+r = C.evaluate(
+  { powertrain: "hybrid", atHome: true, homeUnpluggedMin: 999, plugged: false },
+  {}, {}
+);
+assert.strictEqual(find(r, "not_plugged_home").active, true, "hybrid can still plug in");
+
 console.log("all conditions tests passed");
