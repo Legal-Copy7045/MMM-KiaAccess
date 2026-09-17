@@ -261,7 +261,14 @@ Module.register("MMM-KiaAccess", {
       criticalPopup: false,
       notifyOnStartup: "critical", // false | "critical" | true — which levels fire on the first data after (re)start
       quietWhileDriving: true, // suppress open-part / unlocked alerts while the car is on
-      title: "Kia EV9",
+      // NOT defaulted here on purpose -- start()'s merge(this.defaults.
+      // notifications, this.config.notifications) fills in any key the
+      // user's own config.js doesn't set, so a literal default here would
+      // permanently win over processConditions()'s own brand-aware
+      // fallback (this.config.brand -> "Kia"/"Hyundai"/"Genesis") for
+      // every account that doesn't explicitly set a title. Leave unset;
+      // processConditions() computes the real default per-account.
+      // title: "My EV9",
       // Per-condition config. Set any key to `false` to disable it, or pass an
       // object to override its `level` / thresholds. Anything omitted keeps the
       // built-in default (see conditions.js CHECK_DEFAULTS).
@@ -1026,7 +1033,19 @@ Module.register("MMM-KiaAccess", {
   // edge-triggered vehicle-state notifications
   processConditions() {
     if (!this.conditions || !this.flatMap) return;
-    const cfg = this.config.notifications || {};
+    // a copy, not this.config.notifications itself -- mutating the live
+    // module config in place would leak into every later read of it.
+    const cfg = Object.assign({}, this.config.notifications || {});
+    if (!cfg.title) {
+      // core/conditions.js's own DEFAULTS.title is the static literal
+      // "Kia EV9" -- fine as a last-resort fallback with no cfg at all,
+      // but every account here has a configured brand (KIA/HYUNDAI/
+      // GENESIS); a Hyundai or Genesis owner who leaves this field blank
+      // (config.js never even offers a title field to set) got every
+      // notification titled for a car that isn't theirs.
+      const BRAND_NAMES = { KIA: "Kia", HYUNDAI: "Hyundai", GENESIS: "Genesis" };
+      cfg.title = BRAND_NAMES[String(this.config.brand || "").toUpperCase()] || "Kia";
+    }
 
     // clone the (memoised) state so the home context doesn't pollute the cache
     const st = Object.assign({}, this.visualState());
