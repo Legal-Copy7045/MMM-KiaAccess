@@ -66,11 +66,25 @@ def test_ev_vehicle_gets_charging_buttons():
     print("-- EV vehicle: charging buttons present")
 
 
-def test_hybrid_vehicle_gets_charging_buttons():
+def test_phev_gets_charging_buttons():
     entities = _setup(button_mod, "PHEV")
     names = [e._attr_name for e in entities]
-    assert "Start charging" in names, "PHEV/HEV can still charge a drive battery"
-    print("-- hybrid vehicle: charging buttons present")
+    assert "Start charging" in names, "a PHEV has a plug"
+    print("-- PHEV: charging buttons present")
+
+
+def test_hev_gets_no_charging_buttons():
+    """An HEV (conventional, non-plug hybrid -- e.g. a Kia Sportage Hybrid
+    or Hyundai Tucson Hybrid, sold alongside a PHEV version of the same
+    car) has no plug at all, same as gas -- it must NOT get charging
+    buttons even though it shares powertrain_for()'s "hybrid" bucket with
+    a PHEV."""
+    entities = _setup(button_mod, "HEV")
+    names = [e._attr_name for e in entities]
+    for charge_name in ("Open charge port", "Close charge port", "Start charging", "Stop charging"):
+        assert charge_name not in names, f"HEV (no plug) must not get a {charge_name!r} button"
+    assert "Lock" in names, "non-charge commands unaffected"
+    print("-- HEV: no charging buttons (no plug), non-charge commands unaffected")
 
 
 def test_unset_engine_type_defaults_to_ev_safe():
@@ -101,11 +115,31 @@ def test_ev_vehicle_gets_charge_limit_numbers():
     print("-- EV vehicle: charge-limit number entities present")
 
 
+def test_phev_gets_charge_limit_numbers():
+    entities = _setup(number_mod, "PHEV")
+    names = [e._attr_name for e in entities]
+    assert "AC charge limit" in names and "DC charge limit" in names
+    print("-- PHEV: charge-limit number entities present")
+
+
+def test_hev_gets_no_charge_limit_numbers():
+    """An HEV has no plug -- no external charging, no charge limits to set."""
+    entities = _setup(number_mod, "HEV")
+    names = [e._attr_name for e in entities]
+    assert "Climate run time" in names, "non-charge numbers must still be created"
+    assert "AC charge limit" not in names
+    assert "DC charge limit" not in names
+    print("-- HEV: no charge-limit number entities (no plug)")
+
+
 if __name__ == "__main__":
     test_gas_vehicle_gets_no_charging_buttons()
     test_ev_vehicle_gets_charging_buttons()
-    test_hybrid_vehicle_gets_charging_buttons()
+    test_phev_gets_charging_buttons()
+    test_hev_gets_no_charging_buttons()
     test_unset_engine_type_defaults_to_ev_safe()
     test_gas_vehicle_gets_no_charge_limit_numbers()
     test_ev_vehicle_gets_charge_limit_numbers()
+    test_phev_gets_charge_limit_numbers()
+    test_hev_gets_no_charge_limit_numbers()
     print("all entity gating tests passed")

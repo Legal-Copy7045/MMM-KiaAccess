@@ -101,17 +101,24 @@
     prev = prev || {};
     var title = cfg.title || DEFAULTS.title;
     var driving = cfg.quietWhileDriving !== false && s.carOn === true;
-    // a pure gas vehicle has no drive battery to read or plug in -- treating
-    // it like one produced two permanently-wrong conditions: "EV battery
-    // level unknown" forever (threshold() below emits active:null when
-    // cur == null, which is every tick for a car with no ev_battery_percentage
-    // at all) and a "home and not plugged in" alert that fires the moment
-    // it's parked and never clears (s.plugged also stays null forever for a
-    // gas car -- `s.plugged === true` can never become true to clear it).
-    // s.powertrain is missing (not "gas") for any caller that hasn't been
-    // updated to pass it, so this defaults to the old always-evaluate
-    // behaviour rather than silently suppressing a real EV's alert.
+    // a pure gas vehicle has no drive battery to read -- treating it like
+    // one produced a permanently-wrong "EV battery level unknown" (threshold()
+    // below emits active:null when cur == null, which is every tick for a
+    // car with no ev_battery_percentage at all). s.powertrain is missing
+    // (not "gas") for any caller that hasn't been updated to pass it, so
+    // this defaults to the old always-evaluate behaviour rather than
+    // silently suppressing a real EV's alert.
     var hasBattery = s.powertrain !== "gas";
+    // separately: a conventional (non-plug) hybrid -- an HEV, e.g. a Kia
+    // Sportage Hybrid or Hyundai Tucson Hybrid, sold alongside a PHEV
+    // version of the same car -- has no plug at all, same as gas. Without
+    // this, "home and not plugged in" fired on every HEV, permanently: its
+    // s.plugged stays null forever, so the condition that would clear the
+    // alert (`plugged === true`) can never become true. s.canPlugIn is the
+    // finer signal (buildState() sets it); a caller that only ever set
+    // s.powertrain (predating canPlugIn) still gets the gas case right via
+    // that fallback -- it just can't tell HEV from PHEV, same as before.
+    var canPlugIn = s.canPlugIn != null ? s.canPlugIn !== false : s.powertrain !== "gas";
     var out = [];
 
     function emit(reason, level, active, message, value, oneShot) {
@@ -331,7 +338,7 @@
     // needs s.atHome (bool) + s.homeUnpluggedMin (minutes home+unplugged) from
     // the caller; inert when s.atHome isn't provided.
     var cHP = checkCfg(cfg, "notPluggedInHome");
-    if (cHP.enabled && hasBattery) {
+    if (cHP.enabled && canPlugIn) {
       var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
       var homeMin = num(s.homeUnpluggedMin);
       var hr = new Date().getHours();

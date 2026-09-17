@@ -26,6 +26,19 @@ def powertrain_for(engine_type) -> str:
     return "ev"
 
 
+def can_plug_in_for(engine_type) -> bool:
+    """Raw vehicle.engine_type -> can this vehicle be plugged in at all?
+    False for ICE (gas) AND HEV (a conventional, non-plug hybrid -- e.g. a
+    Kia Sportage Hybrid or Hyundai Tucson Hybrid, sold alongside a PHEV
+    version of the same car) -- powertrain_for() maps both PHEV and HEV to
+    the same "hybrid" bucket, which isn't fine enough for anything that
+    means "has a plug" (the notPluggedInHome alert, charging buttons/
+    charge-limit sliders). Unset/unrecognised defaults to True, same
+    fail-safe reasoning as powertrain_for()."""
+    t = str(engine_type or "").upper()
+    return t not in ("ICE", "HEV")
+
+
 def _bool(f, key):
     v = f.get("vehicle." + key)
     if v in _TRUE:
@@ -137,6 +150,7 @@ def build_state(flat, opts=None):
             faults.append(label)
 
     powertrain = powertrain_for(f.get("vehicle.engine_type"))
+    can_plug_in = can_plug_in_for(f.get("vehicle.engine_type"))
 
     # ev_driving_range is EV-only -- see core/state.js's identical comment.
     range_km = _num(f, "ev_driving_range")
@@ -187,6 +201,7 @@ def build_state(flat, opts=None):
         "locationLon": _num(f, "location_longitude"),
         "faults": faults,
         "powertrain": powertrain,
+        "canPlugIn": can_plug_in,
         "fuelPct": _num(f, "fuel_level"),
         "history": opts.get("history") or [],
         "units": opts.get("units") or "imperial",

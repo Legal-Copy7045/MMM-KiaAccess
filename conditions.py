@@ -106,8 +106,14 @@ def evaluate(s, cfg, prev):
     title = cfg.get("title") or DEFAULTS["title"]
     driving = cfg.get("quietWhileDriving") is not False and s.get("carOn") is True
     # see core/conditions.js's identical comment -- a pure gas vehicle has no
-    # drive battery to read or plug in
+    # drive battery to read
     has_battery = s.get("powertrain") != "gas"
+    # see core/conditions.js's identical comment -- a non-plug hybrid (HEV)
+    # has no plug at all, same as gas
+    can_plug_in = (
+        s.get("canPlugIn") is not False if s.get("canPlugIn") is not None
+        else s.get("powertrain") != "gas"
+    )
     out = []
 
     def emit(reason, level, active, message, value=None, one_shot=False):
@@ -312,7 +318,7 @@ def evaluate(s, cfg, prev):
 
     # ---- home but not plugged in ----
     c_hp = _check_cfg(cfg, "notPluggedInHome")
-    if c_hp.get("enabled") and has_battery:
+    if c_hp.get("enabled") and can_plug_in:
         grace = _num(c_hp.get("graceMin")) if c_hp.get("graceMin") is not None else 20
         home_min = _num(s.get("homeUnpluggedMin"))
         hr = time.localtime().tm_hour
