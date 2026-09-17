@@ -109,6 +109,8 @@ jobs:
         run: python test/coordinator_stress_test.py
       - name: Coordinator stale/fresh data-model suite
         run: python test/coordinator_stale_test.py
+      - name: EV-only entity gating (button/number)
+        run: python test/entity_gating_test.py
       - name: Range-map key wiring
         run: python test/map_keys_test.py
 

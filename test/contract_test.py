@@ -54,4 +54,33 @@ for path in files:
         assert got is want, f"{label} - {reason}.active: got {got!r} want {want!r}"
         checks += 1
 
+# ---- powertrain gating: a pure gas vehicle has no drive battery to read
+# or plug into -- mirrors test/conditions.test.js's identical direct
+# assertions (not fixture-driven, since the fixture corpus above only
+# checks a listed reason's `active` value, not whether a reason was
+# emitted at all) ----
+by_reason = {c["reason"]: c for c in evaluate(
+    {"powertrain": "gas", "batteryPct": None, "car12vPct": 30}, {}, {}
+)["conditions"]}
+assert "ev_battery_low" not in by_reason, "gas: no ev_battery_low condition at all"
+assert "ev_battery_critical" not in by_reason, "gas: no ev_battery_critical condition at all"
+assert by_reason["battery_12v_low"]["active"] is True, "gas: 12V battery check still applies"
+
+by_reason = {c["reason"]: c for c in evaluate(
+    {"powertrain": "gas", "atHome": True, "homeUnpluggedMin": 999, "plugged": None}, {}, {}
+)["conditions"]}
+assert "not_plugged_home" not in by_reason, "gas: parked-and-not-plugged-in is meaningless, not evaluated"
+
+by_reason = {c["reason"]: c for c in evaluate({"batteryPct": 5}, {}, {})["conditions"]}
+assert by_reason["ev_battery_low"]["active"] is True, "no powertrain field -> defaults to evaluating"
+
+by_reason = {c["reason"]: c for c in evaluate({"powertrain": "hybrid", "batteryPct": 5}, {}, {})["conditions"]}
+assert by_reason["ev_battery_low"]["active"] is True, "hybrid still has a drive battery"
+
+by_reason = {c["reason"]: c for c in evaluate(
+    {"powertrain": "hybrid", "atHome": True, "homeUnpluggedMin": 999, "plugged": False}, {}, {}
+)["conditions"]}
+assert by_reason["not_plugged_home"]["active"] is True, "hybrid can still plug in"
+checks += 6
+
 print(f"all contract tests passed ({len(files)} fixtures, {checks} assertions)")

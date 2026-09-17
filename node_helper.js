@@ -767,7 +767,10 @@ module.exports = NodeHelper.create({
       // see the session-tracking block above for why
       model: vehicle.model,
       minKm: tcfg.minKm,
-      parkGapMin: tcfg.parkGapMin
+      parkGapMin: tcfg.parkGapMin,
+      // hybrid trips can't have their whole distance attributed to the
+      // battery -- see trips.js's close() comment
+      powertrain: tripState.powertrain
     });
     let tripChanged = JSON.stringify(tr.open) !== JSON.stringify(s.openTrip);
     s.openTrip = tr.open;

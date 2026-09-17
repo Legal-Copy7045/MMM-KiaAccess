@@ -105,6 +105,9 @@ def evaluate(s, cfg, prev):
     prev = prev or {}
     title = cfg.get("title") or DEFAULTS["title"]
     driving = cfg.get("quietWhileDriving") is not False and s.get("carOn") is True
+    # see core/conditions.js's identical comment -- a pure gas vehicle has no
+    # drive battery to read or plug in
+    has_battery = s.get("powertrain") != "gas"
     out = []
 
     def emit(reason, level, active, message, value=None, one_shot=False):
@@ -138,8 +141,9 @@ def evaluate(s, cfg, prev):
         emit(reason, c.get("level"), active, f"{label} low - {round(cur)}%",
              {"pct": cur, "threshold": below})
 
-    threshold("ev_battery_low", _num(s.get("batteryPct")), _check_cfg(cfg, "evBatteryLow"), "EV battery")
-    threshold("ev_battery_critical", _num(s.get("batteryPct")), _check_cfg(cfg, "evBatteryCritical"), "EV battery critically")
+    if has_battery:
+        threshold("ev_battery_low", _num(s.get("batteryPct")), _check_cfg(cfg, "evBatteryLow"), "EV battery")
+        threshold("ev_battery_critical", _num(s.get("batteryPct")), _check_cfg(cfg, "evBatteryCritical"), "EV battery critically")
     threshold("battery_12v_low", _num(s.get("car12vPct")), _check_cfg(cfg, "battery12vLow"), "12V battery")
     threshold("battery_12v_critical", _num(s.get("car12vPct")), _check_cfg(cfg, "battery12vCritical"), "12V battery critically")
 
@@ -308,7 +312,7 @@ def evaluate(s, cfg, prev):
 
     # ---- home but not plugged in ----
     c_hp = _check_cfg(cfg, "notPluggedInHome")
-    if c_hp.get("enabled"):
+    if c_hp.get("enabled") and has_battery:
         grace = _num(c_hp.get("graceMin")) if c_hp.get("graceMin") is not None else 20
         home_min = _num(s.get("homeUnpluggedMin"))
         hr = time.localtime().tm_hour

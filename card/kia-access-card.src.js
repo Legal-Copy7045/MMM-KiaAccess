@@ -224,18 +224,25 @@
       (c.confirm ? " data-confirm='1'" : "") + ">" + ic + esc(c.name) + "</button>";
   }
 
-  // button groups only (no wrapper) — the climate panel is rendered alongside
-  function actionsGroupsHtml() {
+  // button groups only (no wrapper) — the climate panel is rendered alongside.
+  // powertrain "gas" hides the "charge" category entirely (open/close charge
+  // port, start/stop charging) -- a pure gas vehicle has no charge port and
+  // no drive battery to charge, so these controls would otherwise sit there
+  // unconditionally, dispatching commands the car has no way to honour.
+  function actionsGroupsHtml(powertrain) {
+    var visible = powertrain === "gas"
+      ? BUTTON_COMMANDS.filter(function (c) { return c.category !== "charge"; })
+      : BUTTON_COMMANDS;
     var seen = {};
     var html = CAT_ORDER.map(function (cat) {
-      var items = BUTTON_COMMANDS.filter(function (c) { return (c.category || "other") === cat; });
+      var items = visible.filter(function (c) { return (c.category || "other") === cat; });
       items.forEach(function (c) { seen[c.key] = 1; });
       if (!items.length) return "";
       return "<div class='ka-group'><div class='ka-group-label'>" +
         esc(CAT_LABEL[cat] || cat) + "</div><div class='ka-btns'>" +
         items.map(buttonHtml).join("") + "</div></div>";
     }).join("");
-    var rest = BUTTON_COMMANDS.filter(function (c) { return !seen[c.key]; });
+    var rest = visible.filter(function (c) { return !seen[c.key]; });
     if (rest.length) {
       html += "<div class='ka-group'><div class='ka-btns'>" +
         rest.map(buttonHtml).join("") + "</div></div>";
@@ -1084,7 +1091,7 @@
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml() +
+        actionsGroupsHtml(KiaAccessCard._powertrainFor(engineType)) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";
@@ -1112,6 +1119,11 @@
       this._wireClimate();
     }
   }
+
+  // exposed for test/card-powertrain-rows.test.js -- actionsGroupsHtml()
+  // itself stays a plain closure (not a static method) since it has no
+  // other reason to live on the class; this is just a testable seam.
+  KiaAccessCard._actionsGroupsHtml = actionsGroupsHtml;
 
   if (!customElements.get("kia-access-card")) {
     customElements.define("kia-access-card", KiaAccessCard);

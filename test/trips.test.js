@@ -199,4 +199,35 @@ assert.ok(sum.costPerMi > 0 && sum.costPerMi < 0.1, sum.costPerMi);
     "a hyphenated 'EV-9' model string must still match and fall back to the 99.8kWh default");
 }
 
+// ---- powertrain: hybrid (PHEV/HEV) trips must NOT have usedPct/kwh/cost
+// computed -- a battery-then-gas trip shows the same SOC delta as a
+// pure-battery trip of the same length, so attributing the whole distance
+// to the battery would overstate efficiency and (via analytics.js's
+// rangeAccuracy) the learned personalRangeFactor. A pure EV trip is
+// unaffected. ----
+{
+  const samples = [
+    { t: t + 0 * MIN, odometerKm: 2000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 5 * MIN, odometerKm: 2000, batteryPct: 90, carOn: false, locationLat: 40.7539, locationLon: -79.8103 },
+    { t: t + 20 * MIN, odometerKm: 2050, batteryPct: 0, carOn: true, locationLat: 40.62, locationLon: -79.80 },
+    { t: t + 45 * MIN, odometerKm: 2050, batteryPct: 0, carOn: false, locationLat: 40.55, locationLon: -79.88 },
+    { t: t + 60 * MIN, odometerKm: 2050, batteryPct: 0, carOn: false, locationLat: 40.55, locationLon: -79.88 }
+  ];
+
+  const hybridTrip = run(samples, { pricePerKwh: 0.185, capacityKwh: 18, powertrain: "hybrid" });
+  assert.strictEqual(hybridTrip.closed.length, 1);
+  assert.strictEqual(hybridTrip.closed[0].distanceKm, 50, "distance is still tracked for a hybrid");
+  assert.strictEqual(hybridTrip.closed[0].usedPct, null, "hybrid: usedPct must not be attributed to the battery");
+  assert.strictEqual(hybridTrip.closed[0].kwh, null, "hybrid: kwh must not be computed");
+  assert.strictEqual(hybridTrip.closed[0].cost, null, "hybrid: cost must not be computed");
+  assert.strictEqual(hybridTrip.closed[0].miPerKwh, null, "hybrid: efficiency must not be computed");
+
+  const evTrip = run(samples, { pricePerKwh: 0.185, capacityKwh: 18, powertrain: "ev" });
+  assert.strictEqual(evTrip.closed[0].usedPct, 90, "same samples, pure EV: usedPct IS attributed");
+  assert.ok(evTrip.closed[0].kwh > 0, "pure EV: kwh IS computed");
+
+  const noOptTrip = run(samples, { pricePerKwh: 0.185, capacityKwh: 18 });
+  assert.strictEqual(noOptTrip.closed[0].usedPct, 90, "no powertrain option -> unchanged (ev-like) default behaviour");
+}
+
 console.log("all trips tests passed");

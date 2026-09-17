@@ -191,4 +191,33 @@ assert near(ev_hyphen9_closed[0]["kwh"], 5.988), (
     "the 99.8kWh default"
 )
 
+# ---- powertrain: hybrid (PHEV/HEV) trips must NOT have used_pct/kwh/cost
+# computed -- see core/trips.js's identical test/comment ----
+_hybrid_samples = [
+    {"t": t + 0 * MIN, "odometerKm": 2000, "batteryPct": 90, "carOn": False,
+     "locationLat": 40.7539, "locationLon": -79.8103},
+    {"t": t + 5 * MIN, "odometerKm": 2000, "batteryPct": 90, "carOn": False,
+     "locationLat": 40.7539, "locationLon": -79.8103},
+    {"t": t + 20 * MIN, "odometerKm": 2050, "batteryPct": 0, "carOn": True,
+     "locationLat": 40.62, "locationLon": -79.80},
+    {"t": t + 45 * MIN, "odometerKm": 2050, "batteryPct": 0, "carOn": False,
+     "locationLat": 40.55, "locationLon": -79.88},
+    {"t": t + 60 * MIN, "odometerKm": 2050, "batteryPct": 0, "carOn": False,
+     "locationLat": 40.55, "locationLon": -79.88},
+]
+
+_, hybrid_closed = run(_hybrid_samples, {"pricePerKwh": 0.185, "capacityKwh": 18, "powertrain": "hybrid"})
+assert hybrid_closed[0]["distanceKm"] == 50, "distance is still tracked for a hybrid"
+assert hybrid_closed[0]["usedPct"] is None, "hybrid: usedPct must not be attributed to the battery"
+assert hybrid_closed[0]["kwh"] is None, "hybrid: kwh must not be computed"
+assert hybrid_closed[0]["cost"] is None, "hybrid: cost must not be computed"
+assert hybrid_closed[0]["miPerKwh"] is None, "hybrid: efficiency must not be computed"
+
+_, ev_closed = run(_hybrid_samples, {"pricePerKwh": 0.185, "capacityKwh": 18, "powertrain": "ev"})
+assert ev_closed[0]["usedPct"] == 90, "same samples, pure EV: usedPct IS attributed"
+assert ev_closed[0]["kwh"] > 0, "pure EV: kwh IS computed"
+
+_, no_opt_closed = run(_hybrid_samples, {"pricePerKwh": 0.185, "capacityKwh": 18})
+assert no_opt_closed[0]["usedPct"] == 90, "no powertrain option -> unchanged (ev-like) default behaviour"
+
 print("all trips tests passed")

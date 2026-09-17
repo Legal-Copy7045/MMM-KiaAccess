@@ -101,6 +101,17 @@
     prev = prev || {};
     var title = cfg.title || DEFAULTS.title;
     var driving = cfg.quietWhileDriving !== false && s.carOn === true;
+    // a pure gas vehicle has no drive battery to read or plug in -- treating
+    // it like one produced two permanently-wrong conditions: "EV battery
+    // level unknown" forever (threshold() below emits active:null when
+    // cur == null, which is every tick for a car with no ev_battery_percentage
+    // at all) and a "home and not plugged in" alert that fires the moment
+    // it's parked and never clears (s.plugged also stays null forever for a
+    // gas car -- `s.plugged === true` can never become true to clear it).
+    // s.powertrain is missing (not "gas") for any caller that hasn't been
+    // updated to pass it, so this defaults to the old always-evaluate
+    // behaviour rather than silently suppressing a real EV's alert.
+    var hasBattery = s.powertrain !== "gas";
     var out = [];
 
     function emit(reason, level, active, message, value, oneShot) {
@@ -134,8 +145,10 @@
         threshold: below
       });
     }
-    threshold("ev_battery_low", num(s.batteryPct), checkCfg(cfg, "evBatteryLow"), "EV battery");
-    threshold("ev_battery_critical", num(s.batteryPct), checkCfg(cfg, "evBatteryCritical"), "EV battery critically");
+    if (hasBattery) {
+      threshold("ev_battery_low", num(s.batteryPct), checkCfg(cfg, "evBatteryLow"), "EV battery");
+      threshold("ev_battery_critical", num(s.batteryPct), checkCfg(cfg, "evBatteryCritical"), "EV battery critically");
+    }
     threshold("battery_12v_low", num(s.car12vPct), checkCfg(cfg, "battery12vLow"), "12V battery");
     threshold("battery_12v_critical", num(s.car12vPct), checkCfg(cfg, "battery12vCritical"), "12V battery critically");
 
@@ -318,7 +331,7 @@
     // needs s.atHome (bool) + s.homeUnpluggedMin (minutes home+unplugged) from
     // the caller; inert when s.atHome isn't provided.
     var cHP = checkCfg(cfg, "notPluggedInHome");
-    if (cHP.enabled) {
+    if (cHP.enabled && hasBattery) {
       var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
       var homeMin = num(s.homeUnpluggedMin);
       var hr = new Date().getHours();

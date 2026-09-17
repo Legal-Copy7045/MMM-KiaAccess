@@ -12,6 +12,20 @@ _TRUE = {True, "true", "True", 1, "1"}
 _FALSE = {False, "false", "False", 0, "0"}
 
 
+def powertrain_for(engine_type) -> str:
+    """Raw vehicle.engine_type -> "ev"|"gas"|"hybrid". Unset/unrecognised
+    defaults to "ev" -- see core/state.js's identical comment. Exposed as
+    its own function (not just inline in build_state()) so button.py/
+    number.py can gate EV-only commands/entities from coordinator.vehicle
+    directly, without needing a full build_state() flat-map round trip."""
+    t = str(engine_type or "").upper()
+    if t == "ICE":
+        return "gas"
+    if t in ("PHEV", "HEV"):
+        return "hybrid"
+    return "ev"
+
+
 def _bool(f, key):
     v = f.get("vehicle." + key)
     if v in _TRUE:
@@ -122,9 +136,16 @@ def build_state(flat, opts=None):
         if _bool(f, key) is True and label not in faults:
             faults.append(label)
 
+    powertrain = powertrain_for(f.get("vehicle.engine_type"))
+
+    # ev_driving_range is EV-only -- see core/state.js's identical comment.
+    range_km = _num(f, "ev_driving_range")
+    if range_km is None or range_km <= 0:
+        range_km = _num(f, "total_driving_range")
+
     return {
         "batteryPct": _num(f, "ev_battery_percentage"),
-        "rangeKm": _num(f, "ev_driving_range"),
+        "rangeKm": range_km,
         "chargeKw": _num(f, "ev_charging_power"),
         "chargeAmps": _num(f, "ev_charging_current"),
         "charging": _bool(f, "ev_battery_is_charging"),
@@ -165,6 +186,8 @@ def build_state(flat, opts=None):
         "locationLat": _num(f, "location_latitude"),
         "locationLon": _num(f, "location_longitude"),
         "faults": faults,
+        "powertrain": powertrain,
+        "fuelPct": _num(f, "fuel_level"),
         "history": opts.get("history") or [],
         "units": opts.get("units") or "imperial",
         "tokenAgeDays": token_age_days(),

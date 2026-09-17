@@ -19,18 +19,29 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import COMMANDS, DOMAIN
 from .entity import KiaAccessEntity
+from .vehicle_state import powertrain_for
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    # a pure gas vehicle has no charge port / no battery to charge -- the
+    # commands.json "charge" category is exactly (and only) the EV/hybrid
+    # commands (start/stop charge, open/close charge port), so it doubles
+    # as the gate here with no separate per-command flag needed. Read once
+    # at setup: async_config_entry_first_refresh() already ran (see
+    # __init__.py) so coordinator.vehicle reflects the real engine_type by
+    # the time platforms are set up, not whatever an empty pre-poll dict
+    # would default to.
+    powertrain = powertrain_for(coordinator.vehicle.get("engine_type"))
     async_add_entities(
         [KiaAccessRefreshButton(coordinator)]
         + [
             KiaAccessButton(coordinator, spec)
             for spec in COMMANDS
             if not spec.get("options")
+            and not (powertrain == "gas" and spec.get("category") == "charge")
         ]
     )
 
