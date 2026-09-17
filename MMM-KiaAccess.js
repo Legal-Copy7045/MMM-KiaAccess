@@ -1194,6 +1194,15 @@ Module.register("MMM-KiaAccess", {
     const hook = cfg.webhook || {};
     if (hook.enabled && hook.url && fired.length) {
       this.sendSocketNotification("KIA_WEBHOOK", {
+        // identifies the account this webhook belongs to, so node_helper can
+        // pin hook.url to its first-seen value per account (see node_helper's
+        // start()/handleWebhook() comments) -- KIA_WEBHOOK previously carried
+        // no identity at all, so node_helper had no way to tell a legitimate
+        // webhook notification from this module apart from a spoofed one
+        // claiming a different URL.
+        region: cfg.region,
+        brand: cfg.brand,
+        username: cfg.username,
         events: fired,
         webhook: hook,
         state: hook.includeState ? this.flatMap : null

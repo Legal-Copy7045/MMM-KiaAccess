@@ -92,6 +92,26 @@ module.exports = NodeHelper.create({
     // share one request budget instead of each getting their own -- see
     // the request/hour guard in handleFetch().
     this.acctState = {};
+    // acctKey -> the pythonBin / webhook config this account's FIRST
+    // KIA_FETCH/KIA_WEBHOOK notification carried, pinned for the life of
+    // this process -- see handleFetch()'s and handleWebhook()'s matching
+    // comments for why: MagicMirror's own socket.io has no per-module
+    // auth, so socketNotificationReceived() above trusts whatever payload
+    // arrives on it, from anywhere that can reach it (normal for an MM
+    // module -- but this one's payload also carries account credentials,
+    // spawns a locally-configured binary, and can POST to an
+    // attacker-chosen URL, which raises the stakes of that trust
+    // considerably). config.js itself never changes at runtime, so a
+    // legitimate module's own value is stable for the life of the
+    // process; pinning to the first value seen and ignoring any later
+    // attempt to change it closes the "a spoofed FOLLOW-UP notification
+    // picks a different, attacker-chosen value" vector. It can't defend
+    // against a spoofed message that wins the race and arrives BEFORE
+    // this module's own real first notification -- that residual risk is
+    // MagicMirror's own socket trust model, not something a single module
+    // can close from inside itself.
+    this.trustedPythonBin = {};
+    this.trustedWebhook = {};
     // An instance field (defaulting to the real module-level CACHE_DIR)
     // rather than reading the module constant directly everywhere below --
     // lets a test point a helper instance at a throwaway temp directory
@@ -135,6 +155,19 @@ module.exports = NodeHelper.create({
   handleWebhook(msg) {
     const hook = (msg && msg.webhook) || {};
     if (!hook.enabled || !hook.url) return;
+
+    // hook.url/method/headers are pinned to this account's first-seen
+    // values -- see start()'s comment on this.trustedWebhook for why (a
+    // spoofed KIA_WEBHOOK claiming a different, attacker-chosen URL would
+    // otherwise make this module POST arbitrary data to an arbitrary
+    // destination, including internal-network addresses the mirror itself
+    // can reach but an outside attacker can't). Keyed the same way as
+    // trustedPythonBin, using the account identity MMM-KiaAccess.js now
+    // includes on every KIA_WEBHOOK notification.
+    const acctKey = this.acctKeyFor(msg || {});
+    const requested = { url: hook.url, method: hook.method, headers: hook.headers };
+    Object.assign(hook, this._pinAccountValue(this.trustedWebhook, acctKey, requested, "webhook"));
+
     const opts = {
       method: hook.method || "POST",
       headers: hook.headers || {},
@@ -175,11 +208,56 @@ module.exports = NodeHelper.create({
     return [config.region, config.brand, config.username].join("|");
   },
 
+  // Pins a security-sensitive config value (pythonBin, the webhook
+  // url/method/headers) to whatever this account's FIRST notification
+  // carried, for the life of this process -- see start()'s comment on
+  // this.trustedPythonBin/this.trustedWebhook for why. `store` is one of
+  // those two maps; `label` is only used in the warning log line.
+  // Returns the value THIS call should actually use (the pinned one, not
+  // necessarily `value`) -- extracted as its own method (not inlined in
+  // handleFetch()/handleWebhook()) specifically so it's testable without
+  // spawning a real child process or making a real HTTP request.
+  _pinAccountValue(store, acctKey, value, label) {
+    const current = store[acctKey];
+    const same = current !== undefined && JSON.stringify(current) === JSON.stringify(value);
+    if (current === undefined) {
+      store[acctKey] = value;
+      return value;
+    }
+    if (!same) {
+      Log.warn(
+        `[MMM-KiaAccess] ignoring a ${label} change that differs from this account's ` +
+          "first-seen one — restart MagicMirror if you actually changed it in config.js"
+      );
+    }
+    return current;
+  },
+
   // sha256 purely to get a fixed-length, filesystem-safe, non-cleartext name
   // for a local (git-ignored) cache file / identity tag — not a security
   // boundary.
   _idHash(id) {
     return crypto.createHash("sha256").update(id).digest("hex").slice(0, 16);
+  },
+
+  // Strips embedded userinfo (mqtt://user:pass@host -> mqtt://host) before a
+  // broker URL goes anywhere that isn't the mqtt.connect() call itself --
+  // the common `mqtt://user:pass@host` broker-URL form puts the broker
+  // password in plain text in anything that echoes the URL verbatim
+  // (previously: the "mqtt connected to ..." log line, and the topicPrefix-
+  // collision warning's readable account label, which also leaked into an
+  // MQTT topic name -- visible to anything subscribed to it, not just the
+  // module's own log). Falls back to the raw string if it doesn't parse as
+  // a URL at all, rather than throwing.
+  _redactMqttUrl(url) {
+    try {
+      const u = new URL(url);
+      u.username = "";
+      u.password = "";
+      return u.toString();
+    } catch (e) {
+      return url;
+    }
   },
 
   cacheFile(id) {
@@ -432,13 +510,21 @@ module.exports = NodeHelper.create({
     acct.reqTimes.push(now);
     this.inFlight[id] = true;
 
+    // pythonBin is pinned to this account's first-seen value -- see start()'s
+    // comment on this.trustedPythonBin for why. A real config.js change
+    // needs a MagicMirror restart to take effect either way, so this only
+    // costs the (already-required) restart, never a legitimate reconfigure.
+    const pinnedPythonBin = this._pinAccountValue(
+      this.trustedPythonBin, acctKey, config.pythonBin, "pythonBin"
+    );
+
     // One bridge call fetches every configured vehicle at once
     // (allVehicles:true, see kia_client.fetch()) instead of running one
     // bridge process per car -- cheaper on Kia's servers, and each vehicle
     // still gets its own isolated history/session/trip/cache/mqtt identity
     // below (see child.on("close") and onPayload()'s `id` param), exactly
     // like a dedicated single-vehicle module instance would.
-    const pythonBin = resolvePython(config.pythonBin);
+    const pythonBin = resolvePython(pinnedPythonBin);
     const script = path.join(__dirname, "kia_bridge.py");
     const job = {
       username: config.username,
@@ -1243,7 +1329,7 @@ module.exports = NodeHelper.create({
     // stripped). A short hash of the actual (username, url) pair -- the same
     // identity components `key` above is keyed on, password aside -- makes
     // the segment collision-proof regardless of what the readable part does.
-    const acctReadable = String(m.username || m.url || "account")
+    const acctReadable = String(m.username || this._redactMqttUrl(m.url) || "account")
       .toLowerCase().replace(/[^a-z0-9_.@-]/g, "_").slice(0, 40);
     const acctSeg = acctReadable + "-" + this._idHash((m.username || "") + "|" + (m.url || "")).slice(0, 8);
     const statusTopic = prefix + "/status/" + acctSeg;
@@ -1275,7 +1361,7 @@ module.exports = NodeHelper.create({
     client._kiaStatusTopic = statusTopic;
     client._kiaDiscovered = false;
     client.on("connect", () => {
-      Log.info("[MMM-KiaAccess] mqtt connected to " + m.url);
+      Log.info("[MMM-KiaAccess] mqtt connected to " + this._redactMqttUrl(m.url));
       client.publish(statusTopic, "online", { retain: true });
       // Legacy plain topic, best-effort: still published "online" here for
       // any dashboard/automation already watching it, but it no longer

@@ -3608,6 +3608,17 @@ g.KiaAccessCommands={
   var LEAFLET_VER = "1.9.4";
   var LEAFLET_JS = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/" + LEAFLET_VER + "/leaflet.js";
   var LEAFLET_CSS = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/" + LEAFLET_VER + "/leaflet.css";
+  // Subresource Integrity for the pinned version above -- this script runs
+  // inside the HA dashboard's own origin, where `hass` and the user's auth
+  // token live, so a CDN or DNS compromise serving different bytes under
+  // this same URL would be a full HA account takeover, not just a broken
+  // map. Hashes are cdnjs' own published SRI values for leaflet@1.9.4
+  // (https://api.cdnjs.com/libraries/leaflet/1.9.4?fields=sri), verified
+  // against a freshly downloaded copy of both files before pinning here --
+  // bump both the version above and these hashes together if Leaflet is
+  // ever upgraded.
+  var LEAFLET_JS_SRI = "sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg==";
+  var LEAFLET_CSS_SRI = "sha512-Zcn6bjR/8RZbLEpLIeOwNtzREBAJnUKESxces60Mpoj+2okopSAcSUIUOseddDm0cxnGQzxIR7vJgsLZbdLE3w==";
 
   var _jsPromise = null;
   function loadLeafletJs() {
@@ -3616,7 +3627,8 @@ g.KiaAccessCommands={
     _jsPromise = new Promise(function (resolve, reject) {
       var s = document.createElement("script");
       s.src = LEAFLET_JS;
-      s.crossOrigin = "";
+      s.integrity = LEAFLET_JS_SRI;
+      s.crossOrigin = "anonymous";
       s.onload = function () { resolve(self.L); };
       s.onerror = function () { _jsPromise = null; reject(new Error("could not load Leaflet")); };
       document.head.appendChild(s);
@@ -3866,6 +3878,8 @@ g.KiaAccessCommands={
       var css = document.createElement("link");
       css.rel = "stylesheet";
       css.href = LEAFLET_CSS;
+      css.integrity = LEAFLET_CSS_SRI;
+      css.crossOrigin = "anonymous";
       root.innerHTML =
         "<ha-card><div class='krm-wrap'>" +
         "<div id='krm-map' style='height:" + h + "px'></div>" +

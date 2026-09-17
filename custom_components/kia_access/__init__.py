@@ -12,11 +12,13 @@ import os
 from datetime import timedelta
 
 import voluptuous as vol
+from homeassistant.auth.permissions.const import POLICY_CONTROL
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError, Unauthorized
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
 from . import kia_client
@@ -409,6 +411,46 @@ def _strict_int(value):
     return int(f)
 
 
+def _check_command_authorized(hass: HomeAssistant, call: ServiceCall, coordinator) -> None:
+    """The control commands (lock/unlock/climate/charge/...) are registered
+    as DOMAIN services (hass.services.async_register), not entity services
+    (async_register_entity_service) -- kia_access.unlock isn't "target this
+    entity_id", it's "run this command against whichever account entry_id
+    resolves to". HA's own authorization only checks that the calling user
+    may call services in the kia_access domain AT ALL; it has no entity to
+    apply the user's entity-level policy against, so a restricted user
+    whose policy hides lock.<vehicle> (or the device entirely) could still
+    call kia_access.unlock directly and physically unlock the car -- a real
+    bypass of the permission model the lock entity implies.
+
+    Approximates entity-level authorization for these domain services by
+    checking CONTROL permission on the vehicle's own lock entity -- the one
+    entity every config entry always has, and the most security-relevant
+    one to gate physical vehicle control on. An admin, or a call with no
+    attributable user (context.user_id is None: an automation, script, or
+    internal call, not a signed-in HA user making a live decision) is
+    allowed through unchecked, matching how HA's own per-entity permission
+    checks already treat non-user-attributed calls."""
+    if call.context is None or call.context.user_id is None:
+        return
+    user = hass.auth.async_get_user(call.context.user_id)
+    if user is None or user.is_admin:
+        return
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id(
+        "lock", DOMAIN, f"{coordinator.entry.entry_id}_lock"
+    )
+    if entity_id is None:
+        # nothing registered to check against (shouldn't happen -- every
+        # entry gets a lock entity) -- fail open rather than block a
+        # legitimate call over a lookup that should always succeed
+        return
+    if not user.permissions.check_entity(entity_id, POLICY_CONTROL):
+        raise Unauthorized(
+            context=call.context, entity_id=entity_id, permission=POLICY_CONTROL
+        )
+
+
 def _register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, COMMANDS[0]["key"]):
         return
@@ -446,6 +488,7 @@ def _register_services(hass: HomeAssistant) -> None:
         def _make_handler(command_key: str):
             async def _handler(call: ServiceCall) -> None:
                 coordinator = _coordinator_for(hass, call)
+                _check_command_authorized(hass, call, coordinator)
                 options = {
                     k: v for k, v in call.data.items() if k != "entry_id"
                 }
