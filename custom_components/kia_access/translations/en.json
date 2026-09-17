@@ -105,6 +105,53 @@
           "away_cost_grace_min": "How long after unplugging the away cost sensor may still update — public networks often bill a few minutes to an hour later.",
           "alert_title": "Shown as the notification title for kia_access_alert events. Blank uses a generic default — set this if you'd like it to name your specific vehicle or brand.",
           "quiet_while_driving": "Hold back warning/info alerts (door open, low 12V, etc.) while the car is moving, and deliver them once it's parked. Critical alerts always fire immediately."
+        },
+        "sections": {
+          "battery_and_cost": {
+            "name": "Battery & charging cost",
+            "data": {
+              "price_per_kwh": "Price per kWh (your all-in marginal rate, 0 = no cost tracking)",
+              "away_price_per_kwh": "Away / public price per kWh",
+              "currency": "Currency code for cost sensors",
+              "capacity_kwh": "Usable battery capacity kWh (0 = auto)",
+              "home_charge_zone": "Home-charging zone",
+              "charge_rates": "Per-zone charging rates (optional)",
+              "away_cost_entity": "Away charge-cost sensor (optional)",
+              "away_cost_grace_min": "Away cost grace (minutes)"
+            }
+          },
+          "polling_advanced": {
+            "name": "Advanced polling",
+            "description": "Only needed if the default cache-based polling isn't enough for your setup.",
+            "data": {
+              "stale_after_minutes": "Stale-data threshold (minutes)",
+              "poll_car_directly": "Poll the car directly (wakes the vehicle — drains the 12V battery)",
+              "force_refresh_timeout": "Live wake-up wait (seconds) — only used when polling directly",
+              "block_automated_climate": "Block automated climate control"
+            }
+          },
+          "destinations": {
+            "name": "Range & destinations",
+            "data": {
+              "range_factor": "Range reach factor (haircut on the car's range estimate)",
+              "range_reserve_pct": "Range reach reserve % (arrive with this much charge left)",
+              "calendar_entities": "Calendar entities for trip destinations (comma-separated, e.g. calendar.work, calendar.family)",
+              "calendar_lookahead_hours": "Calendar look-ahead (hours) for upcoming destinations",
+              "static_destinations": "Fixed destinations (one per line: Name | address)",
+              "zone_entities": "Zones to show on the MagicMirror panel",
+              "drive_time_provider": "Drive-time provider for reachable destinations",
+              "routing_api_key": "Routing API key (Geoapify or TomTom)",
+              "geocoding_api_key": "Geoapify geocoding key (optional)",
+              "drive_time_routes": "Per-destination routes (road names + traffic delay)"
+            }
+          },
+          "alerts": {
+            "name": "Alerts",
+            "data": {
+              "alert_title": "Alert title (blank = the vehicle's own default)",
+              "quiet_while_driving": "Suppress non-critical alerts while driving"
+            }
+          }
         }
       }
     },

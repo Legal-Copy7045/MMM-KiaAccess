@@ -1010,15 +1010,28 @@ def _run_options_vin_change(new_vin, other_entries):
         "config_entries": _FakeConfigEntries([entry_a, *other_entries]),
         "async_add_executor_job": _FakeHass.async_add_executor_job,
     })()
-    user_input = {"vin": new_vin, "scan_interval": 30, "poll_car_directly": False,
-                  "force_refresh_timeout": 45, "block_automated_climate": False,
-                  "price_per_kwh": 0, "away_price_per_kwh": 0, "home_charge_zone": "",
-                  "charge_rates": "", "away_cost_grace_min": 90, "capacity_kwh": 0,
-                  "range_factor": 1, "range_reserve_pct": 15, "calendar_entities": "",
-                  "calendar_lookahead_hours": 24, "drive_time_provider": "estimate",
-                  "routing_api_key": "", "drive_time_routes": True,
-                  "static_destinations": "", "geocoding_api_key": "", "zone_entities": "",
-                  "away_cost_entity": ""}
+    # nested under the same section keys the real frontend submits post-
+    # sectioning (see async_step_init's own comment) -- exercises the
+    # flatten-sections-back-onto-user_input step, not just the VIN logic
+    user_input = {
+        "vin": new_vin, "scan_interval": 30,
+        "battery_and_cost": {
+            "price_per_kwh": 0, "away_price_per_kwh": 0, "currency": "USD",
+            "capacity_kwh": 0, "home_charge_zone": "", "charge_rates": "",
+            "away_cost_entity": "", "away_cost_grace_min": 90,
+        },
+        "polling_advanced": {
+            "stale_after_minutes": 30, "poll_car_directly": False,
+            "force_refresh_timeout": 45, "block_automated_climate": False,
+        },
+        "destinations": {
+            "range_factor": 1, "range_reserve_pct": 15, "calendar_entities": "",
+            "calendar_lookahead_hours": 24, "static_destinations": "",
+            "zone_entities": "", "drive_time_provider": "estimate",
+            "routing_api_key": "", "geocoding_api_key": "", "drive_time_routes": True,
+        },
+        "alerts": {"alert_title": "", "quiet_while_driving": True},
+    }
     # this test is about the uid-sync/collision behaviour, not vehicle
     # discovery -- stub the (real, network-calling) discovery helper so it
     # can't reach out to Kia's servers with these fake credentials; a None
@@ -1041,6 +1054,19 @@ def _run_options_vin_change(new_vin, other_entries):
 res, entry_a, ce = _run_options_vin_change("VIN2", [])
 assert res["type"] == "create_entry", "a free VIN must be accepted"
 assert entry_a.data["vin"] == "VIN2"
+# sectioned submission must be saved FLAT -- every other module reads these
+# options flat (opts.get("price_per_kwh"), etc.); a section dict surviving
+# into entry.options unflattened would silently break every one of them
+assert res["data"]["price_per_kwh"] == 0 and "battery_and_cost" not in res["data"], (
+    f"options must be flattened before saving, not left nested under section keys: {res['data']}"
+)
+assert res["data"]["stale_after_minutes"] == 30 and "polling_advanced" not in res["data"]
+assert res["data"]["drive_time_provider"] == "estimate" and "destinations" not in res["data"]
+assert res["data"]["notifications"] == {"quietWhileDriving": True}, (
+    "alert_title/quiet_while_driving must still fold into the nested "
+    f"notifications dict conditions.py reads, after being unpacked from "
+    f"the 'alerts' section: {res['data'].get('notifications')!r}"
+)
 assert entry_a.unique_id == "USA:KIA:user@example.com:VIN2", (
     "unique_id must be updated alongside data -- leaving it stale is exactly "
     "the bug this fix closes"
@@ -1106,6 +1132,43 @@ _form_multi = _show_options_form(
 )
 _key2, _sel2 = _vin_schema_entry(_form_multi)
 assert set(_sel2.container) == {"VIN1", "VIN2"}, _sel2.container
+
+# The options form's REAL schema (top-level fields + everything nested
+# inside each section()) must line up exactly with what strings.json
+# actually documents -- a field added to one and not the other (or moved
+# into the wrong section) would silently ship with no label/description,
+# or a translation entry for a field the form doesn't have anymore.
+_outer_schema = _form_single["data_schema"].schema
+_real_top_level = set()
+_real_sectioned: dict[str, set] = {}
+for _k, _v in _outer_schema.items():
+    _name = str(_k)
+    if isinstance(_v, cf_mod.section):
+        _real_sectioned[_name] = {str(_ik) for _ik in _v.schema.schema}
+    else:
+        _real_top_level.add(_name)
+
+_str_sections = s["options"]["step"]["init"]["sections"]
+assert set(_str_sections) == set(_real_sectioned), (
+    f"strings.json sections {set(_str_sections)} don't match the real "
+    f"schema's section() keys {set(_real_sectioned)}"
+)
+for _sec_name, _real_fields in _real_sectioned.items():
+    _str_fields = set(_str_sections[_sec_name]["data"])
+    assert _str_fields == _real_fields, (
+        f"strings.json section '{_sec_name}' declares {_str_fields} but the "
+        f"real schema has {_real_fields}"
+    )
+
+# every field (top-level or sectioned) must still have both an entry in
+# the flat data/data_description maps -- those stay flat regardless of
+# which section a field lives in (HA's own convention, see solaredge's
+# strings.json for the same pattern)
+_all_real_fields = _real_top_level | {f for fs in _real_sectioned.values() for f in fs}
+assert _all_real_fields == set(_init_data), (
+    f"options form fields {_all_real_fields} don't match strings.json's "
+    f"flat 'data' map {set(_init_data)}"
+)
 
 # a stored VIN the account isn't currently reporting (stale, or a past typo)
 # must stay selectable rather than silently vanishing from the form

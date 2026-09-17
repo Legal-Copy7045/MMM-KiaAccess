@@ -7,6 +7,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 
 try:  # HA moved / renamed this over the years — it's only a type hint
     from homeassistant.data_entry_flow import FlowResult
@@ -70,6 +71,13 @@ _LOGGER = logging.getLogger(__name__)
 
 REGIONS = ["USA", "CA", "EU", "AU", "NZ", "IN", "BR", "CN"]
 BRANDS = ["KIA", "HYUNDAI", "GENESIS"]
+
+# The options form's field groups (was one flat 22+-field wall in a single
+# async_step_init -- see async_step_init's own comment on why the section
+# keys need flattening back onto user_input before saving). Order here is
+# display order in the form; keep in sync with strings.json/en.json's
+# options.step.init.sections and with async_step_init's data_schema.
+_OPTIONS_SECTIONS = ("battery_and_cost", "polling_advanced", "destinations", "alerts")
 
 def _discovery_job(entry) -> dict:
     d = entry.data
@@ -429,6 +437,19 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
         vin_default = self._entry.data.get(CONF_VIN, "")
         discovered = await _discover_vehicles_for_entry(self.hass, self._entry)
         if user_input is not None:
+            # This form groups most of its ~25 fields into collapsible
+            # sections (was one flat 22+-field wall) -- section()-wrapped
+            # keys arrive from the frontend as NESTED dicts under the
+            # section's own key, not flattened, so every field-specific
+            # handler below (VIN, alert_title/quiet_while_driving) and the
+            # final async_create_entry() -- which must still save a flat
+            # options dict, since every other module reads e.g.
+            # opts.get("price_per_kwh") flat -- needs them promoted back to
+            # the top level first.
+            for _section_key in _OPTIONS_SECTIONS:
+                _nested = user_input.pop(_section_key, None)
+                if isinstance(_nested, dict):
+                    user_input.update(_nested)
             # VIN lives in entry.data (set at initial setup), not
             # entry.options like everything else this flow edits -- pull it
             # out and update entry.data directly instead of letting it land
@@ -526,156 +547,195 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
             errors=errors,
             data_schema=vol.Schema(
                 {
+                    # Kept out of any section -- these two are the fields
+                    # people come back to this form to change most often
+                    # (which vehicle, how often to poll), so they stay
+                    # visible instead of behind a collapsed section header.
                     vin_field: vin_selector,
                     vol.Optional(
                         "scan_interval",
                         default=opts.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES),
                     ): _number(5, 1440, 1),
-                    vol.Optional(
-                        "stale_after_minutes",
-                        # how old the CAR's own last-reported reading can get
-                        # before binary_sensor.<vehicle>_data_stale turns on
-                        default=opts.get("stale_after_minutes", DEFAULT_STALE_AFTER_MINUTES),
-                    ): _number(5, 1440, 5),
-                    vol.Optional(
-                        "poll_car_directly",
-                        # infer from the old seconds-based option the first time this
-                        # form is opened, then persist the choice explicitly
-                        default=opts.get(
-                            "poll_car_directly",
-                            float(opts.get("force_refresh_timeout", 0) or 0) > 0,
+                    vol.Optional("battery_and_cost"): section(
+                        vol.Schema(
+                            {
+                                vol.Optional(
+                                    "price_per_kwh",
+                                    default=float(opts.get("price_per_kwh") or 0),
+                                ): _number(0, 10, 0.001),
+                                vol.Optional(
+                                    "away_price_per_kwh",
+                                    default=float(opts.get("away_price_per_kwh") or 0),
+                                ): _number(0, 10, 0.001),
+                                vol.Optional(
+                                    "currency",
+                                    default=opts.get("currency", "USD"),
+                                    description={
+                                        "suggested_value": opts.get("currency", "USD")
+                                    },
+                                ): str,
+                                vol.Optional(
+                                    "capacity_kwh",
+                                    default=float(opts.get("capacity_kwh") or 0),
+                                ): _number(0, 300, 0.1),
+                                vol.Optional(
+                                    "home_charge_zone",
+                                    description={
+                                        "suggested_value": opts.get("home_charge_zone", "")
+                                    },
+                                ): _zone_entity(),
+                                vol.Optional(
+                                    "charge_rates",
+                                    default=opts.get("charge_rates", ""),
+                                    description={
+                                        "suggested_value": opts.get("charge_rates", "")
+                                    },
+                                ): _multiline(),
+                                vol.Optional(
+                                    "away_cost_entity",
+                                    description={
+                                        "suggested_value": opts.get("away_cost_entity", "")
+                                    },
+                                ): _sensor_entity(),
+                                vol.Optional(
+                                    "away_cost_grace_min",
+                                    # `or 90` would show 90 in this form even after the
+                                    # user explicitly saved 0 (the field's own min bound)
+                                    default=float(
+                                        90 if opts.get("away_cost_grace_min") is None
+                                        else opts["away_cost_grace_min"]
+                                    ),
+                                ): _number(0, 720, 5),
+                            }
                         ),
-                    ): bool,
-                    vol.Optional(
-                        "force_refresh_timeout",
-                        # min 0: pre-toggle installs stored 0 here to mean
-                        # "cached only" and must still be able to save the form
-                        default=opts.get(
-                            "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
+                        options={"collapsed": False},
+                    ),
+                    vol.Optional("polling_advanced"): section(
+                        vol.Schema(
+                            {
+                                vol.Optional(
+                                    "stale_after_minutes",
+                                    # how old the CAR's own last-reported reading can
+                                    # get before binary_sensor.<vehicle>_data_stale
+                                    # turns on
+                                    default=opts.get(
+                                        "stale_after_minutes", DEFAULT_STALE_AFTER_MINUTES
+                                    ),
+                                ): _number(5, 1440, 5),
+                                vol.Optional(
+                                    "poll_car_directly",
+                                    # infer from the old seconds-based option the
+                                    # first time this form is opened, then persist
+                                    # the choice explicitly
+                                    default=opts.get(
+                                        "poll_car_directly",
+                                        float(opts.get("force_refresh_timeout", 0) or 0) > 0,
+                                    ),
+                                ): bool,
+                                vol.Optional(
+                                    "force_refresh_timeout",
+                                    # min 0: pre-toggle installs stored 0 here to
+                                    # mean "cached only" and must still be able to
+                                    # save the form
+                                    default=opts.get(
+                                        "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
+                                    ),
+                                ): _number(0, 180, 1),
+                                vol.Optional(
+                                    "block_automated_climate",
+                                    default=opts.get("block_automated_climate", False),
+                                ): bool,
+                            }
                         ),
-                    ): _number(0, 180, 1),
-                    vol.Optional(
-                        "block_automated_climate",
-                        default=opts.get("block_automated_climate", False),
-                    ): bool,
-                    vol.Optional(
-                        "price_per_kwh",
-                        default=float(opts.get("price_per_kwh") or 0),
-                    ): _number(0, 10, 0.001),
-                    vol.Optional(
-                        "away_price_per_kwh",
-                        default=float(opts.get("away_price_per_kwh") or 0),
-                    ): _number(0, 10, 0.001),
-                    vol.Optional(
-                        "currency",
-                        default=opts.get("currency", "USD"),
-                        description={
-                            "suggested_value": opts.get("currency", "USD")
-                        },
-                    ): str,
-                    vol.Optional(
-                        "home_charge_zone",
-                        description={
-                            "suggested_value": opts.get("home_charge_zone", "")
-                        },
-                    ): _zone_entity(),
-                    vol.Optional(
-                        "charge_rates",
-                        default=opts.get("charge_rates", ""),
-                        description={
-                            "suggested_value": opts.get("charge_rates", "")
-                        },
-                    ): _multiline(),
-                    vol.Optional(
-                        "away_cost_entity",
-                        description={
-                            "suggested_value": opts.get("away_cost_entity", "")
-                        },
-                    ): _sensor_entity(),
-                    vol.Optional(
-                        "away_cost_grace_min",
-                        # `or 90` would show 90 in this form even after the
-                        # user explicitly saved 0 (the field's own min bound)
-                        default=float(
-                            90 if opts.get("away_cost_grace_min") is None
-                            else opts["away_cost_grace_min"]
+                        options={"collapsed": True},
+                    ),
+                    vol.Optional("destinations"): section(
+                        vol.Schema(
+                            {
+                                vol.Optional(
+                                    "range_factor",
+                                    default=float(opts.get("range_factor") or 0.92),
+                                ): _number(0.5, 1, 0.01),
+                                vol.Optional(
+                                    "range_reserve_pct",
+                                    default=float(opts.get("range_reserve_pct") or 10),
+                                ): _number(0, 50, 1),
+                                vol.Optional(
+                                    "calendar_entities",
+                                    default=opts.get("calendar_entities", ""),
+                                    description={
+                                        "suggested_value": opts.get("calendar_entities", "")
+                                    },
+                                ): str,
+                                vol.Optional(
+                                    "calendar_lookahead_hours",
+                                    default=float(opts.get("calendar_lookahead_hours") or 72),
+                                ): _number(6, 336, 1),
+                                vol.Optional(
+                                    "static_destinations",
+                                    default=opts.get("static_destinations", ""),
+                                    description={
+                                        "suggested_value": opts.get("static_destinations", "")
+                                    },
+                                ): _multiline(),
+                                vol.Optional(
+                                    "zone_entities",
+                                    default=opts.get("zone_entities", ""),
+                                    description={
+                                        "suggested_value": opts.get("zone_entities", "")
+                                    },
+                                ): _multiline(),
+                                vol.Optional(
+                                    "drive_time_provider",
+                                    default=opts.get("drive_time_provider", "estimate"),
+                                ): vol.In(["estimate", "geoapify", "tomtom"]),
+                                vol.Optional(
+                                    "routing_api_key",
+                                    default=opts.get("routing_api_key", ""),
+                                    description={
+                                        "suggested_value": opts.get("routing_api_key", "")
+                                    },
+                                ): str,
+                                vol.Optional(
+                                    "geocoding_api_key",
+                                    default=opts.get("geocoding_api_key", ""),
+                                    description={
+                                        "suggested_value": opts.get("geocoding_api_key", "")
+                                    },
+                                ): str,
+                                vol.Optional(
+                                    "drive_time_routes",
+                                    default=opts.get("drive_time_routes", True),
+                                ): bool,
+                            }
                         ),
-                    ): _number(0, 720, 5),
-                    vol.Optional(
-                        "capacity_kwh",
-                        default=float(opts.get("capacity_kwh") or 0),
-                    ): _number(0, 300, 0.1),
-                    vol.Optional(
-                        "range_factor",
-                        default=float(opts.get("range_factor") or 0.92),
-                    ): _number(0.5, 1, 0.01),
-                    vol.Optional(
-                        "range_reserve_pct",
-                        default=float(opts.get("range_reserve_pct") or 10),
-                    ): _number(0, 50, 1),
-                    vol.Optional(
-                        "calendar_entities",
-                        default=opts.get("calendar_entities", ""),
-                        description={
-                            "suggested_value": opts.get("calendar_entities", "")
-                        },
-                    ): str,
-                    vol.Optional(
-                        "calendar_lookahead_hours",
-                        default=float(opts.get("calendar_lookahead_hours") or 72),
-                    ): _number(6, 336, 1),
-                    vol.Optional(
-                        "static_destinations",
-                        default=opts.get("static_destinations", ""),
-                        description={
-                            "suggested_value": opts.get("static_destinations", "")
-                        },
-                    ): _multiline(),
-                    vol.Optional(
-                        "zone_entities",
-                        default=opts.get("zone_entities", ""),
-                        description={
-                            "suggested_value": opts.get("zone_entities", "")
-                        },
-                    ): _multiline(),
-                    vol.Optional(
-                        "drive_time_provider",
-                        default=opts.get("drive_time_provider", "estimate"),
-                    ): vol.In(["estimate", "geoapify", "tomtom"]),
-                    vol.Optional(
-                        "routing_api_key",
-                        default=opts.get("routing_api_key", ""),
-                        description={
-                            "suggested_value": opts.get("routing_api_key", "")
-                        },
-                    ): str,
-                    vol.Optional(
-                        "geocoding_api_key",
-                        default=opts.get("geocoding_api_key", ""),
-                        description={
-                            "suggested_value": opts.get("geocoding_api_key", "")
-                        },
-                    ): str,
-                    vol.Optional(
-                        "drive_time_routes",
-                        default=opts.get("drive_time_routes", True),
-                    ): bool,
-                    vol.Optional(
-                        "alert_title",
-                        # default "" (not "Kia EV9"): an empty value here means
-                        # "use conditions.py's own default", so a Hyundai/Genesis
-                        # owner who never touches this field still gets that
-                        # generic default rather than this form silently writing
-                        # a wrong brand name into their notifications.
-                        default=notif_opts.get("title", ""),
-                        description={
-                            "suggested_value": notif_opts.get("title", "")
-                        },
-                    ): str,
-                    vol.Optional(
-                        "quiet_while_driving",
-                        default=notif_opts.get("quietWhileDriving", True),
-                    ): bool,
+                        options={"collapsed": True},
+                    ),
+                    vol.Optional("alerts"): section(
+                        vol.Schema(
+                            {
+                                vol.Optional(
+                                    "alert_title",
+                                    # default "" (not "Kia EV9"): an empty value
+                                    # here means "use conditions.py's own
+                                    # default", so a Hyundai/Genesis owner who
+                                    # never touches this field still gets that
+                                    # generic default rather than this form
+                                    # silently writing a wrong brand name into
+                                    # their notifications.
+                                    default=notif_opts.get("title", ""),
+                                    description={
+                                        "suggested_value": notif_opts.get("title", "")
+                                    },
+                                ): str,
+                                vol.Optional(
+                                    "quiet_while_driving",
+                                    default=notif_opts.get("quietWhileDriving", True),
+                                ): bool,
+                            }
+                        ),
+                        options={"collapsed": True},
+                    ),
                 }
             ),
         )
