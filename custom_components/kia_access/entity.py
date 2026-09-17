@@ -4,7 +4,7 @@ from __future__ import annotations
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_BRAND, DOMAIN
+from .const import CONF_BRAND, DOMAIN, brand_display_name
 from .coordinator import KiaAccessCoordinator
 
 
@@ -49,15 +49,14 @@ class KiaAccessEntity(CoordinatorEntity[KiaAccessCoordinator]):
         )
 
     def _brand_name(self) -> str:
-        # "KIA"/"HYUNDAI"/"GENESIS" (config_flow.py's BRANDS) -> "Kia"/
-        # "Hyundai"/"Genesis" -- this integration validates all three
-        # brands at setup, so a bare "Kia" fallback mislabeled every
-        # Hyundai/Genesis vehicle wherever the cloud hadn't reported its
-        # own manufacturer/name field yet. ONE canonical brand-display
-        # resolver, used by device_info here AND by sensor.py's
-        # vehicle_name attribute -- the earlier fix only touched
-        # device_info, leaving the same hardcoded "Kia" in sensor.py.
-        return str(self.coordinator.entry.data.get(CONF_BRAND) or "KIA").title()
+        # this integration validates all three brands at setup, so a bare
+        # "Kia" fallback mislabeled every Hyundai/Genesis vehicle wherever
+        # the cloud hadn't reported its own manufacturer/name field yet.
+        # brand_display_name() is the one canonical resolver -- used here,
+        # by sensor.py's vehicle_name attribute, and by config_flow.py's
+        # config-entry title, so all three stay in sync instead of each
+        # inventing its own casing.
+        return brand_display_name(self.coordinator.entry.data.get(CONF_BRAND))
 
     def _currency(self) -> str:
         # ISO 4217-ish display code for the cost sensors -- purely a label,

@@ -85,6 +85,15 @@ assert _calls <= {"bare", "positional", "climate_options", "poi"}, f"unknown cal
 assert {"lock", "climate", "number", "switch", "select"} <= set(const.PLATFORMS)
 assert const.SEAT_LEVELS["Heat - high"] == 8 and const.SEAT_LEVELS["Off"] == 0
 assert set(const.DEFAULT_CLIMATE_PREFS) >= {"duration", "front_left_seat", "steering_wheel"}
+
+# brand_display_name(): the ONE canonical "KIA"/"HYUNDAI"/"GENESIS" ->
+# "Kia"/"Hyundai"/"Genesis" resolver -- entity.py's device_info/sensor.py's
+# vehicle_name and config_flow.py's config-entry title all call this now,
+# instead of each independently title-casing (or not) the raw stored value.
+assert const.brand_display_name("HYUNDAI") == "Hyundai"
+assert const.brand_display_name("GENESIS") == "Genesis"
+assert const.brand_display_name(None) == "Kia", "no brand at all -- default to Kia, not blank/error"
+assert const.brand_display_name("") == "Kia"
 _sc = next(c for c in const.COMMANDS if c["key"] == "start_climate")
 assert "front_left_seat" in _sc["options"] and "rear_right_seat" in _sc["options"]
 

@@ -65,6 +65,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_STALE_AFTER_MINUTES,
     DOMAIN,
+    brand_display_name,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -415,7 +416,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_GEOCODE: self._job.get(CONF_GEOCODE, False),
             CONF_TOKEN: token,
         }
-        title = f"{self._job.get(CONF_BRAND, 'KIA')} ({self._job['username']})"
+        title = f"{brand_display_name(self._job.get(CONF_BRAND))} ({self._job['username']})"
         if data[CONF_VIN]:
             title += f" — {data[CONF_VIN]}"
         return self.async_create_entry(title=title, data=data)
