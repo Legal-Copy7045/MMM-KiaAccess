@@ -468,9 +468,26 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                         data={**self._entry.data, CONF_VIN: new_vin},
                         unique_id=target_uid,
                     )
+            # "alert_title"/"quiet_while_driving" are flat form fields that
+            # fold into the nested notifications dict conditions.py actually
+            # reads (cfg.get("title")/cfg.get("quietWhileDriving")) -- every
+            # other field here saves flat, but this whole form is otherwise
+            # the only place an HA user can override the notification
+            # title, which defaulted to the literal "Kia EV9" for every
+            # Hyundai/Genesis install with no way to change it.
+            alert_title = (user_input.pop("alert_title", "") or "").strip()
+            quiet_while_driving = user_input.pop("quiet_while_driving", True)
+            existing_notifications = dict(self._entry.options.get("notifications", {}))
+            existing_notifications["quietWhileDriving"] = quiet_while_driving
+            if alert_title:
+                existing_notifications["title"] = alert_title
+            else:
+                existing_notifications.pop("title", None)
+            user_input["notifications"] = existing_notifications
             if not errors:
                 return self.async_create_entry(title="", data=user_input)
         opts = dict(self._entry.options)
+        notif_opts = opts.get("notifications", {}) or {}
 
         if discovered:
             choices = {
@@ -635,6 +652,22 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         "drive_time_routes",
                         default=opts.get("drive_time_routes", True),
+                    ): bool,
+                    vol.Optional(
+                        "alert_title",
+                        # default "" (not "Kia EV9"): an empty value here means
+                        # "use conditions.py's own default", so a Hyundai/Genesis
+                        # owner who never touches this field still gets that
+                        # generic default rather than this form silently writing
+                        # a wrong brand name into their notifications.
+                        default=notif_opts.get("title", ""),
+                        description={
+                            "suggested_value": notif_opts.get("title", "")
+                        },
+                    ): str,
+                    vol.Optional(
+                        "quiet_while_driving",
+                        default=notif_opts.get("quietWhileDriving", True),
                     ): bool,
                 }
             ),

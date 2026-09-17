@@ -274,10 +274,13 @@ ent_mod = importlib.import_module(f"{pkg}.entity")
 class _FakeCoordEntry:
     entry_id = "entry123"
 
+    def __init__(self, brand="KIA"):
+        self.data = {"brand": brand}
+
 
 class _FakeCoordinator:
-    def __init__(self, vehicle):
-        self.entry = _FakeCoordEntry()
+    def __init__(self, vehicle, brand="KIA"):
+        self.entry = _FakeCoordEntry(brand)
         self.vehicle = vehicle
 
 
@@ -291,7 +294,8 @@ class _FakeEntity(ent_mod.KiaAccessEntity):
 
 _fake_coord = _FakeCoordinator({})  # first-fetch-just-happened, still empty
 _ent = _FakeEntity(_fake_coord)
-assert _ent.device_info["name"] == "Kia", "no vehicle data yet -> generic fallback name"
+assert _ent.device_info["name"] == "Kia", "no vehicle data yet -> brand-derived fallback name"
+assert _ent.device_info["manufacturer"] == "Kia"
 _fake_coord.vehicle = {"name": "My EV9", "model": "EV9", "VIN": "5XY123"}  # a LATER poll fills it in
 assert _ent.device_info["name"] == "My EV9", (
     "device_info must reflect the CURRENT coordinator.vehicle, not whatever "
@@ -299,6 +303,15 @@ assert _ent.device_info["name"] == "My EV9", (
 )
 assert _ent.device_info["model"] == "EV9"
 assert _ent.device_info["serial_number"] == "5XY123"
+
+# A Hyundai/Genesis entry (this integration validates all three brands at
+# setup) with no vehicle data yet must NOT fall back to the literal "Kia" --
+# that mislabeled every non-Kia install's HA device until the cloud sent
+# back its own manufacturer/name field.
+_hyundai_coord = _FakeCoordinator({}, brand="HYUNDAI")
+_hyundai_ent = _FakeEntity(_hyundai_coord)
+assert _hyundai_ent.device_info["name"] == "Hyundai", _hyundai_ent.device_info
+assert _hyundai_ent.device_info["manufacturer"] == "Hyundai"
 
 # lock.py: a FAILED lock/unlock command must not leave is_locked stuck at
 # the optimistic value forever -- is_locked checks _optimistic before the
@@ -756,6 +769,18 @@ assert {"user", "otp", "vehicle", "reauth_confirm"} <= set(s["config"]["step"])
 assert "vin" not in s["config"]["step"]["user"]["data"], (
     "VIN must not be collected on the initial form -- it's only knowable "
     "after login, from the account's own vehicle list (async_step_vehicle)"
+)
+
+# Every options-form field needs BOTH a label (data) and a data_description --
+# a field with a label but no description previously slipped through (e.g.
+# stale_after_minutes had neither at all; several numeric fields had a label
+# but no description explaining their units/effect), and nothing caught it
+# until a manual review.
+_init_data = s["options"]["step"]["init"]["data"]
+_init_desc = s["options"]["step"]["init"]["data_description"]
+_missing_desc = sorted(set(_init_data) - set(_init_desc))
+assert not _missing_desc, (
+    f"options step 'init' has data_description entries for every label -- missing: {_missing_desc}"
 )
 
 # Multi-vehicle unique-id scoping: without a VIN, two "Add Integration"
