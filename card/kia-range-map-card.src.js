@@ -11,6 +11,7 @@
 (function () {
   "use strict";
 
+  var S = self.KiaAccessState;
   var RNG = self.KiaAccessRange;
   var ISO = self.KiaAccessIsoline;
 
@@ -83,16 +84,6 @@
     return ids[0] || null;
   }
 
-  function flatFromAttributes(attrs) {
-    var flat = {};
-    Object.keys(attrs || {}).forEach(function (k) {
-      if (k === "kia_access_raw" || k === "friendly_name" ||
-          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
-          k === "account") return;
-      flat["vehicle." + k] = attrs[k];
-    });
-    return flat;
-  }
 
   function kmToDisp(km, metric) {
     return metric ? Math.round(km) + " km" : Math.round(km * 0.621371) + " mi";
@@ -244,7 +235,7 @@
       var st = entId && hass.states[entId];
       if (!st) return null;
       this._rawId = entId;
-      var flat = flatFromAttributes(st.attributes);
+      var flat = S.flatFromAttributes(st.attributes);
       this._entryId = st.attributes.entry_id || null;
       this._maybeFetchKeys();
       var fk = this._fetchedKeys || {};

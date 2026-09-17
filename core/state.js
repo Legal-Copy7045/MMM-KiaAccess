@@ -200,5 +200,24 @@
     };
   }
 
-  return { buildState: buildState };
+  // Both Lovelace card sources (kia-access-card.src.js and
+  // kia-range-map-card.src.js) turn a hass entity's `attributes` object
+  // into the same `{ "vehicle.<key>": value }` shape buildState() expects
+  // -- each one used to carry its own identical copy of this function
+  // (byte-for-byte, including the same exclusion list) since they're
+  // bundled as two separate IIFEs with no shared scope of their own; this
+  // is the one place both already reach into (self.KiaAccessState, same as
+  // buildState above) for exactly that kind of sharing.
+  function flatFromAttributes(attrs) {
+    var flat = {};
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === "kia_access_raw" || k === "friendly_name" ||
+          k === "icon" || k === "entry_id" || k === "vehicle_name" ||
+          k === "account") return;
+      flat["vehicle." + k] = attrs[k];
+    });
+    return flat;
+  }
+
+  return { buildState: buildState, flatFromAttributes: flatFromAttributes };
 });
