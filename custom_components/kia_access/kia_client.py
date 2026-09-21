@@ -427,6 +427,70 @@ def make_manager(job, saved_token=None):
     )
 
 
+def _note_auth_failure(job, exc):
+    """Record one more authentication failure for this account. Returns the
+    "cooling down" ClientError to raise once the breaker has tripped, else
+    None (a sub-threshold failure -- the caller re-raises the original)."""
+    path = _auth_state_file(job)
+    new_state = _record_auth_failure(_load_auth_state(path))
+    _save_auth_state(path, new_state)
+    # remaining > 0, not merely "cooldownUntil is set": a cooldown that has
+    # already EXPIRED leaves its old cooldownUntil in the state file, and
+    # the first sub-threshold failure after it would otherwise be mistaken
+    # for a fresh cooldown ("cooling down for ~-29 min").
+    remaining = _cooldown_remaining_sec(new_state)
+    if remaining <= 0:
+        return None
+    mins = int(remaining // 60) + 1
+    return ClientError(
+        f"authentication failed {AUTH_FAILURE_THRESHOLD} times in a "
+        f"row ({exc}) -- cooling down for ~{mins} min instead of "
+        "continuing to retry, to avoid making a likely account "
+        "lockout worse. This will clear and retry normally on its own."
+    )
+
+
+def _refresh_cached_state(vm, job):
+    """vm.update_all_vehicles_with_cached_state(), behind the same auth-
+    failure circuit breaker connect() applies to check_and_refresh_token().
+
+    That call is where hyundai_kia_connect_api's _retry_on_auth_error wrapper
+    re-logs-in when the server rejects a session -- and it turns ANY failure
+    of that re-login (including an outright crash, e.g. upstream issue
+    Hyundai-Kia-Connect/hyundai_kia_connect_api#1313, "'int' object has no
+    attribute 'get'") into AuthenticationError("Re-login failed: ...").
+    connect() had already succeeded by then (the local token was fine), so
+    that failure used to bypass the breaker entirely: every poll re-tried the
+    failing login on the normal schedule, the exact pattern that gets an
+    account rate-limited or locked out.
+
+    Only AuthenticationError counts -- a timeout or bad payload is not a
+    rejected login and propagates untouched. An OTP-required response is not
+    a rejection either: it maps to OtpRequired exactly as in connect().
+    Success clears the failure history, which is why connect() no longer
+    does: only a completed API call proves the login is actually healthy."""
+    try:
+        from hyundai_kia_connect_api.exceptions import (
+            AuthenticationError,
+            AuthenticationOTPRequired,
+        )
+    except Exception:  # library stubbed/absent: nothing to classify against
+        vm.update_all_vehicles_with_cached_state()
+        return
+    try:
+        vm.update_all_vehicles_with_cached_state()
+    except AuthenticationOTPRequired as exc:
+        raise OtpRequired(ENROLL_HINT) from exc
+    except AuthenticationError as exc:
+        cooldown = _note_auth_failure(job, exc)
+        if cooldown is not None:
+            raise cooldown from exc
+        raise
+    path = _auth_state_file(job)
+    if _load_auth_state(path):  # only touch disk when there's something to clear
+        _save_auth_state(path, {})
+
+
 def connect(job, token_file=None):
     """Return (vm, enrolled_at). Raises OtpRequired / ClientError."""
     account_hash = _account_hash(
@@ -464,9 +528,7 @@ def connect(job, token_file=None):
         geocode_api_use_email=geocode,
     )
 
-    auth_state_file = _auth_state_file(job)
-    auth_state = _load_auth_state(auth_state_file)
-    remaining = _cooldown_remaining_sec(auth_state)
+    remaining = _cooldown_remaining_sec(_load_auth_state(_auth_state_file(job)))
     if remaining > 0:
         mins = int(remaining // 60) + 1
         # Refuses even the attempt -- no call to Kia's servers happens at
@@ -484,20 +546,15 @@ def connect(job, token_file=None):
     except AuthenticationOTPRequired as exc:
         raise OtpRequired(ENROLL_HINT) from exc
     except Exception as exc:
-        new_state = _record_auth_failure(auth_state)
-        _save_auth_state(auth_state_file, new_state)
-        if new_state.get("cooldownUntil"):
-            mins = int((new_state["cooldownUntil"] - time.time()) // 60) + 1
-            raise ClientError(
-                f"authentication failed {AUTH_FAILURE_THRESHOLD} times in a "
-                f"row ({exc}) -- cooling down for ~{mins} min instead of "
-                "continuing to retry, to avoid making a likely account "
-                "lockout worse. This will clear and retry normally on its own."
-            ) from exc
+        cooldown = _note_auth_failure(job, exc)
+        if cooldown is not None:
+            raise cooldown from exc
         raise
 
-    if auth_state:  # only touch disk when there was something to clear
-        _save_auth_state(auth_state_file, {})
+    # NOT cleared here: check_and_refresh_token() succeeding only proves the
+    # LOCAL token was usable, not that the server will accept the next real
+    # request. The failure history is cleared by _refresh_cached_state()
+    # once an actual API call has also gone through -- see its docstring.
 
     # Persist the rotated token to token.json only for the file-based caller
     # (the MagicMirror bridge, which never puts a "token" key in the job). When
@@ -624,7 +681,7 @@ def fetch(job, token_file=None):
             )
         elif "e" in err:
             meta_note = f"live wake-up failed: {err['e']}"
-    vm.update_all_vehicles_with_cached_state()
+    _refresh_cached_state(vm, job)
 
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
@@ -680,7 +737,7 @@ def run_command(job, token_file=None):
         raise ClientError(f"unknown command {name!r}")
 
     vm, _ = connect(job, token_file)
-    vm.update_all_vehicles_with_cached_state()
+    _refresh_cached_state(vm, job)
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
         raise _no_match_error(vm, job.get("vin", ""))
