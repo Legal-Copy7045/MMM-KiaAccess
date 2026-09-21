@@ -15,6 +15,12 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
+  // AC charging current is estimated from kW when the car doesn't report it:
+  // 80 A x 240 V = 19.2 kW is a home Level 2 charger's physical maximum, so
+  // anything above is DC fast charging.
+  var AC_NOMINAL_V = 240;
+  var AC_MAX_KW = 19.2;
+
   var COL = {
     outline: "#9aa0a6",
     dim: "#5f6368",
@@ -724,7 +730,16 @@
         ? (kwBig ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + "kW"
         : null;
       var aNum = Number(s.chargeAmps);
-      var amps = isFinite(aNum) && aNum > 0 ? Math.round(aNum) + "A" : null;
+      var amps = null;
+      if (isFinite(aNum) && aNum > 0) {
+        amps = Math.round(aNum) + "A";
+      } else if (kw && kwNum <= AC_MAX_KW) {
+        // Kia USA reports kW only (the library's ev_charging_current is
+        // "Europe feature only"), so estimate the current for AC charging and
+        // mark it "~". Not attempted above the AC range: DC voltage depends
+        // on the car's pack and isn't reported, so a figure would be a guess.
+        amps = "~" + Math.round((kwNum * 1000) / AC_NOMINAL_V) + "A";
+      }
       var rows = [];
       if (kw) rows.push([kw, COL.ok, kwBig ? 10 : 11]);
       if (amps) rows.push([amps, COL.text, 11]);
