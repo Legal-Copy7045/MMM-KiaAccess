@@ -24,8 +24,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 _fake_pkg = types.ModuleType("hyundai_kia_connect_api")
 
 
-class _AuthenticationOTPRequired(Exception):
+class _AuthenticationError(Exception):
     pass
+
+
+class _AuthenticationOTPRequired(_AuthenticationError):
+    pass  # a subclass in the real library too
 
 
 class _FakeToken:
@@ -34,7 +38,11 @@ class _FakeToken:
         return raw
 
 
-_CONTROL = {"fail": False, "calls": 0}
+# "refresh": what update_all_vehicles_with_cached_state() does -- None (ok),
+# "auth" (the library's _retry_on_auth_error wrapper's
+# AuthenticationError("Re-login failed: ..."), raised AFTER connect()
+# already succeeded), "otp", or "other" (a non-auth failure).
+_CONTROL = {"fail": False, "calls": 0, "refresh": None, "refresh_calls": 0}
 
 
 class _FakeVehicleManager:
@@ -47,12 +55,25 @@ class _FakeVehicleManager:
         if _CONTROL["fail"]:
             raise Exception("simulated: 'int' object has no attribute 'get'")
 
+    def update_all_vehicles_with_cached_state(self):
+        _CONTROL["refresh_calls"] += 1
+        mode = _CONTROL["refresh"]
+        if mode == "auth":
+            raise _AuthenticationError(
+                "Re-login failed: 'int' object has no attribute 'get'"
+            )
+        if mode == "otp":
+            raise _AuthenticationOTPRequired("OTP required to refresh token")
+        if mode == "other":
+            raise ValueError("simulated non-auth failure (timeout, bad payload)")
+
 
 _fake_pkg.VehicleManager = _FakeVehicleManager
 _token_mod = types.ModuleType("hyundai_kia_connect_api.Token")
 _token_mod.Token = _FakeToken
 _exceptions_mod = types.ModuleType("hyundai_kia_connect_api.exceptions")
 _exceptions_mod.AuthenticationOTPRequired = _AuthenticationOTPRequired
+_exceptions_mod.AuthenticationError = _AuthenticationError
 sys.modules["hyundai_kia_connect_api"] = _fake_pkg
 sys.modules["hyundai_kia_connect_api.Token"] = _token_mod
 sys.modules["hyundai_kia_connect_api.exceptions"] = _exceptions_mod
@@ -65,6 +86,8 @@ JOB = {"region": "USA", "brand": "KIA", "username": "u@e.com", "password": "pw",
 def _reset(tmpdir):
     _CONTROL["fail"] = False
     _CONTROL["calls"] = 0
+    _CONTROL["refresh"] = None
+    _CONTROL["refresh_calls"] = 0
     K._HERE = tmpdir  # redirect auth-state (and token) files into a scratch dir
     K.time.time = lambda: _NOW["t"]
 
@@ -146,15 +169,134 @@ with tempfile.TemporaryDirectory() as tmpdir:
         "a call during the cooldown window must not touch check_and_refresh_token() at all"
     )
 
-    # once the cooldown expires, connect() tries again -- and a SUCCESS
-    # clears the auth-state file entirely (proven by checking a fresh
-    # failure streak afterward starts back at 1, not continuing the old count)
+    # once the cooldown expires, connect() tries again -- and it succeeds.
+    # A successful connect() alone must NOT clear the failure history: it
+    # only proves the LOCAL token was usable, not that the server will
+    # accept the very next request (see the post-connect scenarios below).
     _NOW["t"] += K.AUTH_COOLDOWN_BASE_MIN * 60 + 1
     _CONTROL["fail"] = False
-    K.connect(JOB)  # must succeed, no exception
+    vm, _ = K.connect(JOB)  # must succeed, no exception
     assert _CONTROL["calls"] == K.AUTH_FAILURE_THRESHOLD + 1
 
     state_file = K._auth_state_file(JOB)
-    assert K._load_auth_state(state_file) == {}, "a successful connect() must clear the auth-state file"
+    assert K._load_auth_state(state_file) != {}, (
+        "connect() success alone must not wipe the failure history -- the "
+        "server can still reject the first real API call"
+    )
+    # ...it clears only once a real API call has ALSO gone through
+    K._refresh_cached_state(vm, JOB)
+    assert K._load_auth_state(state_file) == {}, (
+        "a successful state refresh must clear the auth-state file"
+    )
+
+
+# ---- the failure mode from the upstream issue (Hyundai-Kia-Connect/
+# hyundai_kia_connect_api#1313): connect() succeeds (the local token is
+# fine), then the library's own _retry_on_auth_error wrapper re-logs-in
+# inside update_all_vehicles_with_cached_state() and that raises
+# AuthenticationError("Re-login failed: ..."). That used to bypass the
+# breaker entirely (only check_and_refresh_token() was guarded), and even a
+# counted failure would have been wiped by the next poll's successful
+# connect(). Every poll re-attempted the failing login on the normal
+# schedule -- the pattern that got an account locked out. ----
+def _poll_via_fetch():
+    return K.fetch(dict(JOB, refresh=False))
+
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _CONTROL["refresh"] = "auth"
+
+    for i in range(K.AUTH_FAILURE_THRESHOLD - 1):
+        try:
+            _poll_via_fetch()
+            raise AssertionError("fetch() should have raised")
+        except K.ClientError as e:
+            raise AssertionError(f"a sub-threshold failure must re-raise the original error: {e}")
+        except _AuthenticationError as e:
+            assert "Re-login failed" in str(e)
+        _NOW["t"] += 5
+
+    try:
+        _poll_via_fetch()
+        raise AssertionError("fetch() should have raised")
+    except K.ClientError as e:
+        assert "cooling down" in str(e).lower(), e
+    assert _CONTROL["refresh_calls"] == K.AUTH_FAILURE_THRESHOLD
+
+    # cooling down: the next poll must not touch Kia at all -- neither the
+    # token check nor the API call
+    calls_before, refresh_before = _CONTROL["calls"], _CONTROL["refresh_calls"]
+    _NOW["t"] += 60
+    try:
+        _poll_via_fetch()
+        raise AssertionError("fetch() should have refused during the cooldown")
+    except K.ClientError as e:
+        assert "cooling down" in str(e).lower()
+    assert (_CONTROL["calls"], _CONTROL["refresh_calls"]) == (calls_before, refresh_before), (
+        "no traffic of any kind may reach Kia while cooling down"
+    )
+
+# run_command() shares the same guarded refresh
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _CONTROL["refresh"] = "auth"
+    for i in range(K.AUTH_FAILURE_THRESHOLD):
+        try:
+            K.run_command(dict(JOB, command="lock"))
+            raise AssertionError("run_command() should have raised")
+        except K.ClientError as e:
+            assert i == K.AUTH_FAILURE_THRESHOLD - 1 and "cooling down" in str(e).lower(), (i, e)
+        except _AuthenticationError:
+            assert i < K.AUTH_FAILURE_THRESHOLD - 1
+        _NOW["t"] += 5
+
+# an OTP-required response is NOT a rejected login: it maps to OtpRequired
+# (same as connect()) and is not counted toward the breaker
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _CONTROL["refresh"] = "otp"
+    for i in range(K.AUTH_FAILURE_THRESHOLD + 1):
+        try:
+            _poll_via_fetch()
+            raise AssertionError("fetch() should have raised")
+        except K.OtpRequired:
+            pass
+    assert K._load_auth_state(K._auth_state_file(JOB)) == {}, "OTP-required must not count as an auth failure"
+
+# a non-auth failure (timeout, bad payload, ...) propagates untouched and is
+# not counted -- the breaker is for rejected logins, not every hiccup
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _CONTROL["refresh"] = "other"
+    for i in range(K.AUTH_FAILURE_THRESHOLD + 1):
+        try:
+            _poll_via_fetch()
+            raise AssertionError("fetch() should have raised")
+        except ValueError:
+            pass
+    assert K._load_auth_state(K._auth_state_file(JOB)) == {}
+
+# a cooldown that has already EXPIRED leaves a stale cooldownUntil in the
+# state file. The first (sub-threshold) failure afterward must re-raise the
+# raw error like any other sub-threshold failure -- not be mistaken for a
+# fresh cooldown ("cooling down for ~-29 min").
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _CONTROL["fail"] = True
+    for i in range(K.AUTH_FAILURE_THRESHOLD):
+        try:
+            K.connect(JOB)
+        except Exception:
+            pass
+        _NOW["t"] += 5
+    _NOW["t"] += K.AUTH_COOLDOWN_BASE_MIN * 60 + K.AUTH_FAILURE_WINDOW_SEC + 1  # cooldown over
+    try:
+        K.connect(JOB)
+        raise AssertionError("connect() should have raised")
+    except K.ClientError as e:
+        raise AssertionError(f"first failure after an expired cooldown was mistaken for a new cooldown: {e}")
+    except Exception as e:
+        assert "cooling down" not in str(e).lower()
 
 print("all auth_cooldown tests passed")
