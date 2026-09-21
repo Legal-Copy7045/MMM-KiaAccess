@@ -203,9 +203,11 @@ Module.register("MMM-KiaAccess", {
           { pctOver: 35, color: "#ff5555" } //  35%+        -> red
         ],
         hideUnreachable: false, // drop destinations beyond the car's range
-        // which HA zones to show here (calendar + static are always shown).
-        // [] = every zone HA sent. Names (or "zone.x"), case-insensitive;
-        // a "-Name" entry excludes that zone instead.
+        // which HA zones to show here. [] = every zone HA sent. Names (or
+        // "zone.x"), case-insensitive; a "-Name" entry excludes that zone
+        // instead. Zones listed here (or picked in HA's "Fixed destinations
+        // & zones" option) and fixed destinations always get a row; calendar
+        // events fill the rows left under `max`, soonest first.
         zones: []
       },
       // trip log — auto-detected drives (odometer delta + SoC drop): distance,

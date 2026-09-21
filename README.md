@@ -282,8 +282,7 @@ directly** (+ **Live wake-up wait**), **Price per kWh** / **Away price per kWh**
 / **Home-charging zone** / **Per-zone charging rates** / **Away charge-cost
 sensor** / **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
-(hours)** / **Static destinations** / **Zones to show on the MagicMirror
-panel**, and **Drive-time provider** / **Routing API key** / **Geocoding API
+(hours)** / **Fixed destinations & zones**, and **Drive-time provider** / **Routing API key** / **Geocoding API
 key** / **Per-destination routes**. Leave **Poll the
 car directly** off (the default) to only ever read Kia's cached data and never
 wake the car — with it off, every update sends both `refresh: false` **and**
@@ -845,7 +844,7 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
   with its live drive time, the route (`via I-95 · Main St`), an ETA
   **coloured by traffic delay**, the calendar event time, and the battery
   you'd **arrive with**. Needs `source: "homeassistant"` and the integration's
-  **Calendar entities** / **Static destinations** / **Drive-time provider**
+  **Calendar entities** / **Fixed destinations & zones** / **Drive-time provider**
   (TomTom) set up — the mirror just renders `sensor.<v>_range_reach`. Without
   routed data it falls back to a straight-line estimate over `location.pois`.
 
@@ -856,7 +855,8 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
     max: 8,
     order: "grouped",      // 📅 calendar (by time) → ⭐ static → 📍 zones (by distance) | "nearest"
     zones: [],             // [] = every zone HA sent. ["Home", "Work"] whitelists;
-                           //   "-Grandma" excludes. Calendar + static always show.
+                           //   "-Grandma" excludes. Listed zones + fixed destinations
+                           //   always get a row; calendar events fill the rest.
     showVia: true,
     showConsumption: true, // "→78% ~14kWh"
     delayStops: [          // ETA colour by % slower than free-flow
@@ -871,14 +871,16 @@ car (`ev_first_departure_enabled`) — "Departure 07:00 · Mon–Fri · preheat 
   `sensor.<v>_range_reach` always show every US zone. Set it in **either**
   place (the integration option wins if both are set):
 
-  - the integration's **Configure → Zones to show on the MagicMirror panel**
-    option (no `config.js` edit needed), or
+  - the zones picked in the integration's **Configure → Fixed destinations &
+    zones** (no `config.js` edit needed), or
   - `drivingTimes.zones` here in `config.js`.
 
-  The **destinations** come from Home Assistant: your US `zone.*`, the
-  integration's **Static destinations** (`Configure` → one `Name | address`
-  per line — always shown), and **Calendar** event locations in the look-ahead
-  window. TomTom (`Drive-time provider` + `Routing API key`, **Per-destination
+  The **destinations** come from Home Assistant: your US `zone.*`, the fixed
+  destinations typed into **Configure → Fixed destinations & zones**
+  (`Name | address`), and **Calendar** event locations in the look-ahead
+  window. When there are more than `max`, the zones you picked and the fixed
+  destinations are kept and calendar events fill the remaining rows, soonest
+  first — the furthest-out events drop off until an earlier one ends. TomTom (`Drive-time provider` + `Routing API key`, **Per-destination
   routes** on) supplies the road breakdown and the free-flow time behind the
   delay colour; Geoapify gives road names only; `estimate` gives neither.
 
@@ -932,12 +934,15 @@ Home Assistant does the same automatically as **`sensor.<vehicle>_range_reach`**
 **Destinations** are your **US** `zone.*` entities, plus (from the **Configure**
 dialog):
 
-- **Zones to show on the MagicMirror panel** — narrows which zones appear on
-  the *mirror's* driving-times panel (the dashboard / sensor always show every
-  US zone). Blank = all; one zone per line by entity id or name (`zone.home` /
-  `Work`); a line starting with `-` excludes that zone.
-- **Static destinations** — one `Name | address` per line, always shown
-  (geocoded once, cached), e.g. `White House | 1600 Pennsylvania Ave NW, Washington, DC`.
+- **Fixed destinations & zones** — one field for both. Pick zones from the
+  dropdown (multi-select) and/or type a fixed destination as `Name | address`
+  and press Enter, e.g. `White House | 1600 Pennsylvania Ave NW, Washington, DC`
+  (geocoded once, cached, and also shown in Home Assistant). Everything you
+  list always gets a row on the *mirror's* driving-times panel; calendar
+  events fill whatever rows are left. Picking zones narrows which zones the
+  mirror shows (the dashboard / sensor always show every US zone); pick none
+  and every zone is eligible, but only after the calendar events. Type
+  `-Name` to hide a zone.
 - **Calendar entities** + **Calendar look-ahead (hours)** — any event with a
   location in the next N hours, geocoded and cached (a destination further
   than ~500 km from `zone.home` is skipped as implausible, not filtered by

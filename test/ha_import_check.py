@@ -1158,6 +1158,7 @@ assert not ce2.updates, "no update should have been attempted once a collision w
 # a section that genuinely WAS submitted must still update normally.
 _prev_options = {
     "scan_interval": 15,
+    "zone_entities": "zone.work", "static_destinations": "Gym | 12 Main St",
     "price_per_kwh": 0.22, "currency": "GBP", "capacity_kwh": 77.4,
     "notifications": {"title": "My EV6", "quietWhileDriving": False},
 }
@@ -1212,6 +1213,135 @@ assert _saved["notifications"] == {"title": "My EV6", "quietWhileDriving": False
 assert _saved["scan_interval"] == 45, "a field that WAS submitted must still update normally"
 assert _saved["stale_after_minutes"] == 20 and _saved["poll_car_directly"] is True, (
     "a section that WAS submitted must still save its new values normally"
+)
+assert _saved["zone_entities"] == "zone.work" and _saved["static_destinations"] == "Gym | 12 Main St", (
+    "a missing 'destinations' section must keep the saved zones and fixed destinations: " f"{_saved}"
+)
+
+# ---- the combined "Fixed destinations & zones" field. It replaced two options
+# (zone_entities: which zones the MagicMirror panel shows; static_destinations:
+# "Name | address" fixed places), and is still STORED as those two, so nothing
+# needs migrating -- these check the split/load in both directions. ----
+_zone_opts = [
+    {"value": "zone.work", "label": "Work"},
+    {"value": "zone.nana_s_house", "label": "Nana's House"},
+]
+_split = cf_mod._split_panel_destinations
+
+# zones picked from the dropdown come back as entity ids
+assert _split(["zone.work", "zone.nana_s_house"], _zone_opts) == ("zone.work\nzone.nana_s_house", "")
+# a typed fixed destination
+assert _split(["Gym | 12 Main St, Springfield"], _zone_opts) == ("", "Gym | 12 Main St, Springfield")
+# everything mixed: "=" and ";" are separators too (as in the coordinator's
+# parser); "-Name" is a zone exclusion; a bare name that IS a zone is a zone; a
+# bare value that isn't (an address typed without a name) is a fixed destination
+assert _split(
+    ["zone.work", "Gym | 12 Main St", "-Nana's House", "Nana's House",
+     "Airport = 1 Terminal Rd", "12 Main St, Springfield", "  ", ""],
+    _zone_opts,
+) == (
+    "zone.work\n-Nana's House\nNana's House",
+    "Gym | 12 Main St\nAirport = 1 Terminal Rd\n12 Main St, Springfield",
+)
+assert _split([], _zone_opts) == ("", "") and _split(None, _zone_opts) == ("", "")
+
+# loading: existing installs show their two old values in the one field
+assert cf_mod._panel_destination_defaults({
+    "zone_entities": "zone.work, Nana's House\n-Old",
+    "static_destinations": "Gym | 12 Main St\nAirport = 1 Terminal Rd\n",
+}) == ["zone.work", "Nana's House", "-Old", "Gym | 12 Main St", "Airport = 1 Terminal Rd"]
+assert cf_mod._panel_destination_defaults({}) == []
+assert cf_mod._panel_destination_defaults(
+    {"zone_entities": "zone.work, zone.work", "static_destinations": "Gym | 1 St\nGym | 1 St"}
+) == ["zone.work", "Gym | 1 St"], "duplicates collapse"
+# ...and saving what was loaded changes nothing
+_orig = {"zone_entities": "zone.work\nNana's House", "static_destinations": "Gym | 12 Main St"}
+assert _split(cf_mod._panel_destination_defaults(_orig), _zone_opts) == (
+    _orig["zone_entities"], _orig["static_destinations"]
+), "load then save must round-trip"
+
+
+class _FakeZone:
+    def __init__(self, entity_id, name=None):
+        self.entity_id = entity_id
+        self.attributes = {"friendly_name": name} if name else {}
+
+
+class _FakeZoneStates:
+    def async_all(self, domain):
+        assert domain == "zone"
+        return [_FakeZone("zone.work", "Work"), _FakeZone("zone.bare"), _FakeZone("zone.nana_s_house", "Nana's House")]
+
+
+assert [o["value"] for o in cf_mod._zone_options(type("H", (), {"states": _FakeZoneStates()})())] == [
+    "zone.nana_s_house", "zone.work", "zone.bare"
+], "sorted by label; a zone with no friendly name is labelled (and sorted) by its entity id"
+assert cf_mod._zone_options(type("H", (), {})()) == [], "no states available -> empty list, not an error"
+
+
+def _run_options_flow(prev_options, user_input, hass_states=None):
+    entry = _fake_entry(
+        "d", "USA:KIA:user@example.com:VIN1",
+        {"username": "user@example.com", "region": "USA", "brand": "KIA", "vin": "VIN1"},
+    )
+    entry.options = dict(prev_options)
+    flow = object.__new__(cf_mod.KiaAccessOptionsFlow)
+    flow._entry = entry
+    flow.flow_id = "test"
+    flow.handler = "kia_access"
+    attrs = {
+        "config_entries": _FakeConfigEntries([entry]),
+        "async_add_executor_job": _FakeHass.async_add_executor_job,
+    }
+    if hass_states is not None:
+        attrs["states"] = hass_states
+    flow.hass = type("H", (), attrs)()
+    orig = cf_mod._discover_vehicles_for_entry
+
+    async def _no_discovery(hass, e):
+        return None
+
+    cf_mod._discover_vehicles_for_entry = _no_discovery
+    try:
+        return asyncio.run(cf_mod.KiaAccessOptionsFlow.async_step_init(flow, user_input))
+    finally:
+        cf_mod._discover_vehicles_for_entry = orig
+
+
+# submitting the combined field stores the two legacy options, and never a
+# "panel_destinations" key of its own
+_res = _run_options_flow(
+    {"zone_entities": "zone.old", "static_destinations": "Old | 1 Old St"},
+    {"vin": "VIN1", "scan_interval": 30,
+     "destinations": {"panel_destinations": ["zone.work", "Gym | 12 Main St"]}},
+    hass_states=_FakeZoneStates(),
+)
+assert _res["type"] == "create_entry"
+assert _res["data"]["zone_entities"] == "zone.work", _res["data"]
+assert _res["data"]["static_destinations"] == "Gym | 12 Main St", _res["data"]
+assert "panel_destinations" not in _res["data"]
+# clearing the field clears both (an empty selection is a real choice, not "missing")
+_res = _run_options_flow(
+    {"zone_entities": "zone.old", "static_destinations": "Old | 1 Old St"},
+    {"vin": "VIN1", "destinations": {"panel_destinations": []}},
+    hass_states=_FakeZoneStates(),
+)
+assert _res["data"]["zone_entities"] == "" and _res["data"]["static_destinations"] == "", _res["data"]
+
+# the form pre-fills the field from the stored options, and its dropdown lists
+# the real zones; the field accepts a mix of picked zones and typed text
+_form = _run_options_flow(
+    {"zone_entities": "zone.work", "static_destinations": "Gym | 12 Main St"}, None,
+    hass_states=_FakeZoneStates(),
+)
+_dest_section = next(v for k, v in _form["data_schema"].schema.items() if str(k) == "destinations")
+_pd_key = next(k for k in _dest_section.schema.schema if str(k) == "panel_destinations")
+assert _pd_key.default() == ["zone.work", "Gym | 12 Main St"], "existing options load into the one field"
+_pd_sel = _dest_section.schema.schema[_pd_key]
+assert [o["value"] for o in _pd_sel.config["options"]] == ["zone.nana_s_house", "zone.work", "zone.bare"]
+assert _pd_sel.config["multiple"] is True and _pd_sel.config["custom_value"] is True
+assert _pd_sel(["zone.work", "Gym | 12 Main St, Springfield"]) == ["zone.work", "Gym | 12 Main St, Springfield"], (
+    "a typed value alongside picked zones must validate"
 )
 
 # Options flow VIN field: prefer the account's own auto-discovered vehicle

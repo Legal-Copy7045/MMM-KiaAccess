@@ -368,6 +368,51 @@ function freshModule(overrides) {
   }
 }
 
+// ---- drivingTimesEl(): zones the user picked in HA's "Fixed destinations &
+// zones" option always get a row, even when calendar events would fill every
+// row. Six calendar events + two picked zones on a six-row panel: both zones
+// show and the two furthest-out events are the ones that drop. ----
+{
+  const prevDocument = global.document;
+  global.document = {
+    createElement: () => ({ className: "", innerHTML: "", style: {} })
+  };
+  try {
+    const mod = freshModule({ visuals: { drivingTimes: { enabled: true, max: 6 } } });
+    mod.destPlanner = require("../core/dest-planner.js");
+    const cal = (n) => ({
+      name: "Event " + n, source: "calendar", km: 10 + n, duration_min: 20 + n, reachable: true,
+      when: "2026-09-22T" + String(8 + n).padStart(2, "0") + ":00:00Z"
+    });
+    const zone = (id, name, km) => ({
+      name, entity_id: "zone." + id, source: "zone", km, duration_min: 15, reachable: true
+    });
+    mod.rangeReach = {
+      pois: [1, 2, 3, 4, 5, 6].map(cal).concat([
+        zone("nana_s_house", "Nana's House", 30), zone("work", "Work", 5), zone("gym", "Gym", 2)
+      ]),
+      // the integration's picked zones, as the sensor's mm_zone_filter sends them
+      mmZones: "zone.work\nzone.nana_s_house"
+    };
+    const html = mod.drivingTimesEl().innerHTML;
+    assert.ok(html.includes("Work") && html.includes("Nana&#39;s House"), (
+      "both picked zones must be shown even though six calendar events would fill the panel: " + html
+    ));
+    assert.ok(!html.includes("Gym"), "a zone that was not picked must not be shown");
+    ["Event 1", "Event 2", "Event 3", "Event 4"].forEach((e) =>
+      assert.ok(html.includes(e), e + " must be shown (the four soonest events)"));
+    ["Event 5", "Event 6"].forEach((e) =>
+      assert.ok(!html.includes(e), e + " must drop: the picked zones take precedence over the furthest-out events"));
+
+    // when the first event concludes and HA stops sending it, the next moves up
+    mod.rangeReach.pois = mod.rangeReach.pois.filter((p) => p.name !== "Event 1");
+    const later = mod.drivingTimesEl().innerHTML;
+    assert.ok(!later.includes("Event 1") && later.includes("Event 5") && !later.includes("Event 6"), later);
+  } finally {
+    global.document = prevDocument;
+  }
+}
+
 // ---- drivingTimesEl(): the arrival-kWh hint's pack-size fallback must be
 // gated on the vehicle actually being an EV9 (see core/sessions.js's
 // isEv9()/resolveCap() for why) -- this method has its OWN separate
