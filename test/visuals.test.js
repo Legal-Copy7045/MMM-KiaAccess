@@ -148,8 +148,10 @@ const V = require("../core/visuals.js");
   const dc = draw({ charging: true, chargeKw: 150 });
   assert.ok(dc.includes(">150kW<"));
   assert.strictEqual(amps(dc), null, "no invented amps for DC fast charging");
-  // ...but a reported current is still shown there
-  assert.strictEqual(amps(draw({ charging: true, chargeKw: 150, chargeAmps: 375 })), "375A");
+  // ...but a current the car DOES report is always shown, DC included
+  const dcReported = draw({ charging: true, chargeKw: 150, chargeAmps: 375 });
+  assert.ok(dcReported.includes(">150kW<"));
+  assert.strictEqual(amps(dcReported), "375A", "a reported current is shown even during DC fast charging");
 
   // a reported 0 A while charging carries no information: fall back to the estimate
   assert.strictEqual(amps(draw({ charging: true, chargeKw: 7.4, chargeAmps: 0 })), "~31A");
