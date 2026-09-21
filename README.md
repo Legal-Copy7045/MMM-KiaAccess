@@ -762,7 +762,11 @@ The car diagram:
   Charging: the port pulses green, particles flow charger → car, and the
   **kW being drawn** (`ev_charging_power`) + **current in amps**
   (`ev_charging_current`) print under the wall box — only while actually
-  charging, and each line only when its value is present. Exporting
+  charging, and each line only when its value is present. Some cars (Kia USA)
+  report kW but never a current; for AC charging (up to 19.2 kW) the amps are
+  then estimated from the kW at 240 V and shown with a `~` (e.g. `~46A`). DC
+  fast charging shows kW only in that case, since the voltage depends on the
+  car's battery and isn't reported. Exporting
   (`ev_v2l_status` / `ev_v2x_status`): the flow reverses in cyan. Plugged but
   idle: a static amber cable, no readout.
 

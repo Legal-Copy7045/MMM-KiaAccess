@@ -110,4 +110,46 @@ const V = require("../core/visuals.js");
   assert.ok(unknown.includes(">—<"), "unknown fuel level must render as an em dash");
 }
 
+// ---- live charge readout: kW AND amps while charging. Kia USA reports
+// realTimePower (kW) only -- hyundai_kia_connect_api's ev_charging_current is
+// "Europe feature only" -- so a Kia USA car never has chargeAmps, and the
+// diagram used to show kW with no amps at all. ----
+{
+  const amps = (svg) => (svg.match(/>(~?\d+A)</) || [])[1] || null;
+  const draw = (state) => V.carDiagram(Object.assign({ locked: true, batteryPct: 50 }, state), { width: 200 });
+
+  // a value the car reports itself is shown as-is, never marked as an estimate
+  const reported = draw({ charging: true, chargeKw: 7.4, chargeAmps: 32 });
+  assert.ok(reported.includes(">7.4kW<"), "kW must be shown");
+  assert.strictEqual(amps(reported), "32A", "a reported current must be shown unmodified, without a ~");
+
+  // AC charging with no reported current (the Kia USA case): estimate from kW at
+  // a nominal 240 V, and mark it as an estimate
+  const ac = draw({ charging: true, chargeKw: 7.4 });
+  assert.ok(ac.includes(">7.4kW<"));
+  assert.strictEqual(amps(ac), "~31A", "7.4 kW / 240 V = 30.8 A");
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 11 })), "~46A", "11 kW / 240 V = 45.8 A");
+
+  // the top of the estimate range is a home Level 2 charger's physical maximum
+  // (80 A x 240 V = 19.2 kW); above that it is DC fast charging
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 19.2 })), "~80A");
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 19.3 })), null,
+    "above the AC range there is no reliable voltage, so no amps are invented");
+
+  // DC fast charging with no reported current: kW only. The voltage depends
+  // on the car's pack and isn't reported, so any figure could be off by 2x.
+  const dc = draw({ charging: true, chargeKw: 150 });
+  assert.ok(dc.includes(">150kW<"));
+  assert.strictEqual(amps(dc), null, "no invented amps for DC fast charging");
+  // ...but a reported current is still shown there
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 150, chargeAmps: 375 })), "375A");
+
+  // a reported 0 A while charging carries no information: fall back to the estimate
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 7.4, chargeAmps: 0 })), "~31A");
+
+  // no power reading -> nothing to estimate from; not charging -> no readout at all
+  assert.strictEqual(amps(draw({ charging: true })), null);
+  assert.strictEqual(amps(draw({ charging: false, chargeKw: 7.4 })), null);
+}
+
 console.log("all visuals tests passed");

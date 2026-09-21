@@ -27,7 +27,9 @@ const GROUPS = [
     ["Unplugged", {}],
     ["Plugged, not charging", { plugged: true }],
     ["Charging (AC)", { charging: true, batteryPct: 64, chargeKw: 7.4, chargeAmps: 32 }],
+    ["Charging (AC, amps estimated)", { charging: true, batteryPct: 64, chargeKw: 11 }],
     ["Charging (DC fast)", { charging: true, batteryPct: 41, chargeKw: 150, chargeAmps: 375 }],
+    ["Charging (DC fast, kW only)", { charging: true, batteryPct: 41, chargeKw: 150 }],
     ["Exporting (V2L / V2X)", { v2l: true, batteryPct: 64 }],
   ]],
   ["Doors, frunk, liftgate", [
