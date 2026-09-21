@@ -130,6 +130,13 @@ const V = require("../core/visuals.js");
   assert.strictEqual(amps(ac), "~31A", "7.4 kW / 240 V = 30.8 A");
   assert.strictEqual(amps(draw({ charging: true, chargeKw: 11 })), "~46A", "11 kW / 240 V = 45.8 A");
 
+  // under 3 kW is a Level 1 (120 V) trickle charge, not a Level 2 one at low power
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 1.4 })), "~12A", "1.4 kW / 120 V = 11.7 A");
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 2.9 })), "~24A", "2.9 kW / 120 V = 24.2 A");
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 3 })), "~13A", "3 kW is the first 240 V value: 12.5 A");
+  assert.strictEqual(amps(draw({ charging: true, chargeKw: 0.05 })), null, "a sub-1 A estimate is noise, not a reading");
+  assert.ok(draw({ charging: true, chargeKw: 1.4 }).includes(">1.4kW<"));
+
   // the top of the estimate range is a home Level 2 charger's physical maximum
   // (80 A x 240 V = 19.2 kW); above that it is DC fast charging
   assert.strictEqual(amps(draw({ charging: true, chargeKw: 19.2 })), "~80A");
