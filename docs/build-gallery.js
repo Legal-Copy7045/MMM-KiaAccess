@@ -30,7 +30,7 @@ const GROUPS = [
     ["Charging (AC, amps estimated)", { charging: true, batteryPct: 64, chargeKw: 11 }],
     ["Charging (120 V, amps estimated)", { charging: true, batteryPct: 64, chargeKw: 1.4 }],
     ["Charging (DC fast)", { charging: true, batteryPct: 41, chargeKw: 150, chargeAmps: 375 }],
-    ["Charging (DC fast, kW only)", { charging: true, batteryPct: 41, chargeKw: 150 }],
+    ["Charging (DC fast, amps not reported)", { charging: true, batteryPct: 41, chargeKw: 150 }],
     ["Exporting (V2L / V2X)", { v2l: true, batteryPct: 64 }],
   ]],
   ["Doors, frunk, liftgate", [

@@ -339,7 +339,8 @@ g.KiaAccessCommands={
   // AC charging current is estimated from kW when the car doesn't report it:
   // 240 V (Level 2), or 120 V (Level 1) below 3 kW. 80 A x 240 V = 19.2 kW is
   // a home Level 2 charger's physical maximum, so anything above is DC fast
-  // charging.
+  // charging -- where amps are never estimated (only shown if the car reports
+  // them).
   var AC_NOMINAL_V = 240;
   var AC_LEVEL1_V = 120;
   var AC_LEVEL1_BELOW_KW = 3;
@@ -1056,12 +1057,12 @@ g.KiaAccessCommands={
       var aNum = Number(s.chargeAmps);
       var amps = null;
       if (isFinite(aNum) && aNum > 0) {
-        amps = Math.round(aNum) + "A";
+        amps = Math.round(aNum) + "A"; // the car's own reading always wins
       } else if (kw && kwNum <= AC_MAX_KW) {
         // Kia USA reports kW only (the library's ev_charging_current is
         // "Europe feature only"), so estimate the current for AC charging and
-        // mark it "~". Not attempted above the AC range: DC voltage depends
-        // on the car's pack and isn't reported, so a figure would be a guess.
+        // mark it "~". DC fast charging (above the AC range) is left as kW
+        // only: amps mean little there and the pack voltage isn't reported.
         var est = Math.round((kwNum * 1000) / (kwNum < AC_LEVEL1_BELOW_KW ? AC_LEVEL1_V : AC_NOMINAL_V));
         if (est >= 1) amps = "~" + est + "A";
       }
