@@ -34,10 +34,9 @@
 
   // HA's mmZones (a live per-vehicle override, newline/comma separated)
   // wins over the static config.visuals.drivingTimes.zones list when
-  // present. Entries are a whitelist unless prefixed "-"/"!" (exclude);
-  // calendar and static rows are never filtered by this (only source
-  // "zone" rows are zone-name-based to begin with).
-  function filterByZone(rows, dt, mmZones) {
+  // present. Entries are a whitelist unless prefixed "-"/"!" (exclude).
+  // Returns the normalised { inc, exc } match keys.
+  function parseZoneFilter(dt, mmZones) {
     const raw = String(mmZones || "");
     const zfRaw = raw.trim()
       ? raw.split(/[\n,]/)
@@ -47,12 +46,23 @@
     zfRaw.map((z) => String(z).trim()).filter(Boolean).forEach((z) => {
       (z[0] === "-" || z[0] === "!" ? exc : inc).push(znorm(z.replace(/^[-!]/, "")));
     });
-    if (!inc.length && !exc.length) return rows;
+    return { inc: inc, exc: exc };
+  }
+
+  function zoneKeys(r) {
+    return [znorm(r.name), znorm(r.entityId)].filter(Boolean);
+  }
+
+  // Calendar and static rows are never filtered by this (only source "zone"
+  // rows are zone-name-based to begin with).
+  function filterByZone(rows, dt, mmZones) {
+    const f = parseZoneFilter(dt, mmZones);
+    if (!f.inc.length && !f.exc.length) return rows;
     return rows.filter((r) => {
       if (r.source !== "zone") return true;
-      const keys = [znorm(r.name), znorm(r.entityId)].filter(Boolean);
-      if (exc.some((e) => keys.includes(e))) return false;
-      return inc.length === 0 || inc.some((k) => keys.includes(k));
+      const keys = zoneKeys(r);
+      if (f.exc.some((e) => keys.includes(e))) return false;
+      return f.inc.length === 0 || f.inc.some((k) => keys.includes(k));
     });
   }
 
@@ -78,14 +88,39 @@
     return sorted;
   }
 
+  // The rows the user explicitly asked to see: static (fixed) destinations, and
+  // zones named in a zone whitelist. With no whitelist every zone is shown
+  // implicitly, so none of them counts as asked for.
+  function isPinned(r, inc) {
+    if (r.source === "static") return true;
+    if (r.source !== "zone" || !inc.length) return false;
+    const keys = zoneKeys(r);
+    return inc.some((k) => keys.includes(k));
+  }
+
   // Filters, sorts and caps the destination list to what drivingTimesEl()
   // should actually render, in render order.
+  //
+  // When there are more rows than `max`, the pinned rows are kept first and
+  // the remaining slots go to everything else in the chosen order -- so with
+  // "grouped" that is the soonest calendar events, and the furthest-out ones
+  // are the ones that drop, until an earlier event ends and frees a slot.
+  // Rows keep their display order either way. If there are more pinned rows
+  // than `max`, the cap still wins.
   function planDestinations(rows, dt, mmZones) {
     dt = dt || {};
     let planned = filterByZone(rows || [], dt, mmZones);
     if (dt.hideUnreachable) planned = planned.filter((r) => r.reachable);
     planned = sortDestinations(planned, dt.order || "grouped");
-    return planned.slice(0, Number(dt.max) || 8);
+    const max = Number(dt.max) || 8;
+    if (planned.length <= max) return planned;
+    const inc = parseZoneFilter(dt, mmZones).inc;
+    const keep = new Set(planned.filter((r) => isPinned(r, inc)).slice(0, max));
+    for (const r of planned) {
+      if (keep.size >= max) break;
+      keep.add(r);
+    }
+    return planned.filter((r) => keep.has(r));
   }
 
   // delayStops: [{ pctOver, color }, ...], unordered and possibly containing
@@ -112,7 +147,9 @@
 
   return {
     znorm: znorm,
+    parseZoneFilter: parseZoneFilter,
     filterByZone: filterByZone,
+    isPinned: isPinned,
     sortDestinations: sortDestinations,
     planDestinations: planDestinations,
     delayColorStops: delayColorStops,

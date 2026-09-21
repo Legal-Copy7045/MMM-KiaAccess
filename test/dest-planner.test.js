@@ -112,6 +112,69 @@ assert.strictEqual(DP.znorm(null), "");
   assert.strictEqual(DP.planDestinations(many, { max: "not a number" }, "").length, 8);
 }
 
+// ---- planDestinations(): places the user explicitly asked for are never
+// crowded out by calendar events. With max 6, six calendar events sort ahead
+// of everything and used to fill every row, silently dropping the two zones
+// named in the HA "zones to show on the MagicMirror panel" option. ----
+{
+  const cal = (n, hh) => dest("Event " + n, "calendar", 10 + n, { when: "2026-09-22T" + hh + ":00:00Z" });
+  const events = [cal(1, "09"), cal(2, "10"), cal(3, "11"), cal(4, "12"), cal(5, "13"), cal(6, "14")];
+  const zones = [dest("Home", "zone", 1, { entityId: "zone.home" }), dest("Work", "zone", 20, { entityId: "zone.work" })];
+  const names = (rows) => rows.map((r) => r.name);
+
+  // the reported case: 2 zones on the whitelist + 6 calendar events, room for 6
+  const planned = DP.planDestinations(events.concat(zones), { max: 6 }, "Home, Work");
+  assert.deepStrictEqual(names(planned), ["Event 1", "Event 2", "Event 3", "Event 4", "Home", "Work"], (
+    "both whitelisted zones shown; the 2 furthest-out calendar events dropped; " +
+    "displayed order is still calendar (soonest first) then zones"
+  ));
+
+  // when the earliest event concludes (HA stops sending it) the next one moves up
+  const later = DP.planDestinations(events.slice(1).concat(zones), { max: 6 }, "Home, Work");
+  assert.deepStrictEqual(names(later), ["Event 2", "Event 3", "Event 4", "Event 5", "Home", "Work"]);
+
+  // the same via the static config.visuals.drivingTimes.zones whitelist
+  assert.deepStrictEqual(
+    names(DP.planDestinations(events.concat(zones), { max: 6, zones: ["zone.home", "Work"] }, "")),
+    ["Event 1", "Event 2", "Event 3", "Event 4", "Home", "Work"]
+  );
+
+  // static destinations are documented as "always shown" -- also guaranteed
+  const stat = [dest("Gym", "static", 5), dest("Office", "static", 7)];
+  assert.deepStrictEqual(
+    names(DP.planDestinations(events.concat(stat), { max: 6 }, "")),
+    ["Event 1", "Event 2", "Event 3", "Event 4", "Gym", "Office"]
+  );
+
+  // no whitelist = every zone is shown implicitly, none is "asked for": they
+  // keep their old lowest priority, so calendar events still fill the rows
+  assert.deepStrictEqual(
+    names(DP.planDestinations(events.concat(zones), { max: 6 }, "")),
+    ["Event 1", "Event 2", "Event 3", "Event 4", "Event 5", "Event 6"]
+  );
+
+  // nothing to trim -> nothing changes
+  assert.deepStrictEqual(names(DP.planDestinations(events.slice(0, 3).concat(zones), { max: 6 }, "Home, Work")),
+    ["Event 1", "Event 2", "Event 3", "Home", "Work"]);
+
+  // more guaranteed places than rows: the cap still wins, in display order
+  const manyStatic = ["S1", "S2", "S3"].map((n, i) => dest(n, "static", i));
+  assert.deepStrictEqual(names(DP.planDestinations(events.concat(manyStatic), { max: 2 }, "")), ["S1", "S2"]);
+
+  // "nearest" ordering: the guaranteed places stay, the rest fill by distance
+  assert.deepStrictEqual(
+    names(DP.planDestinations(events.concat(zones), { max: 3, order: "nearest" }, "Home, Work")),
+    ["Home", "Event 1", "Work"]
+  );
+
+  // hideUnreachable is the user's explicit choice and still applies to them
+  const far = [dest("Home", "zone", 1, { entityId: "zone.home", reachable: false }), zones[1]];
+  assert.deepStrictEqual(
+    names(DP.planDestinations(events.concat(far), { max: 6, hideUnreachable: true }, "Home, Work")),
+    ["Event 1", "Event 2", "Event 3", "Event 4", "Event 5", "Work"]
+  );
+}
+
 // ---- delayColorStops() / delayColorFor(): applies the HIGHEST-threshold
 // stop the row's delayPct still meets, not the first one encountered,
 // regardless of input order ----

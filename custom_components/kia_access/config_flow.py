@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -21,9 +22,24 @@ try:
         NumberSelector,
         NumberSelectorConfig,
         NumberSelectorMode,
+        SelectSelector,
+        SelectSelectorConfig,
+        SelectSelectorMode,
         TextSelector,
         TextSelectorConfig,
     )
+
+    def _panel_destinations(zone_options):
+        # a multi-select dropdown of the existing zones that ALSO accepts a
+        # typed value (a "Name | address" fixed destination)
+        return SelectSelector(
+            SelectSelectorConfig(
+                options=zone_options,
+                multiple=True,
+                custom_value=True,
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
 
     def _number(lo, hi, step):
         return NumberSelector(
@@ -39,6 +55,9 @@ try:
     def _sensor_entity():
         return EntitySelector(EntitySelectorConfig(domain=["sensor", "input_number"]))
 except ImportError:  # pragma: no cover — very old HA
+
+    def _panel_destinations(zone_options):
+        return [str]
 
     def _number(lo, hi, step):
         return vol.All(vol.Coerce(float), vol.Range(min=lo, max=hi))
@@ -79,6 +98,71 @@ BRANDS = ["KIA", "HYUNDAI", "GENESIS"]
 # display order in the form; keep in sync with strings.json/en.json's
 # options.step.init.sections and with async_step_init's data_schema.
 _OPTIONS_SECTIONS = ("battery_and_cost", "polling_advanced", "destinations", "alerts")
+
+
+def _znorm(value) -> str:
+    """Same normalisation as core/dest-planner.js's znorm(): "zone.nana_s" and
+    "Nana's" compare equal."""
+    text = str(value or "").lower()
+    if text.startswith("zone."):
+        text = text[5:]
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def _zone_options(hass) -> list[dict]:
+    """Every zone.* as a dropdown option (entity id as the value, friendly
+    name as the label), so a zone can be picked instead of typed."""
+    states = getattr(hass, "states", None)
+    if states is None:
+        return []
+    options = [
+        {"value": st.entity_id, "label": str(st.attributes.get("friendly_name") or st.entity_id)}
+        for st in states.async_all("zone")
+    ]
+    return sorted(options, key=lambda o: o["label"].lower())
+
+
+def _panel_destination_defaults(opts) -> list[str]:
+    """The combined "fixed destinations & zones" field's current value, built
+    from the two options it replaced (still what is stored, so nothing needs
+    migrating): zone_entities entries, then static_destinations lines."""
+    zones = [z.strip() for z in re.split(r"[\n,]", opts.get("zone_entities") or "")]
+    fixed = [line.strip() for line in (opts.get("static_destinations") or "").splitlines()]
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in zones + fixed:
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _split_panel_destinations(values, zone_options) -> tuple[str, str]:
+    """Split the combined field back into (zone_entities, static_destinations).
+
+    A zone is what the dropdown produces ("zone.work"), a "-Name" exclusion,
+    or a bare name matching an existing zone. Anything with a "|", "=" or ";"
+    separator is a fixed destination ("Name | address"), and so is a bare
+    value that matches no zone (an address typed without a name)."""
+    known: set[str] = set()
+    for option in zone_options:
+        known.add(_znorm(option["value"]))
+        known.add(_znorm(option["label"]))
+    zones: list[str] = []
+    fixed: list[str] = []
+    for raw in values or []:
+        value = str(raw).strip()
+        if not value:
+            continue
+        if value[0] in "-!" or value.lower().startswith("zone."):
+            zones.append(value)
+        elif any(sep in value for sep in "|=;"):
+            fixed.append(value)
+        elif _znorm(value) and _znorm(value) in known:
+            zones.append(value)
+        else:
+            fixed.append(value)
+    return "\n".join(zones), "\n".join(fixed)
 
 def _discovery_job(entry) -> dict:
     d = entry.data
@@ -451,6 +535,18 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                 _nested = user_input.pop(_section_key, None)
                 if isinstance(_nested, dict):
                     user_input.update(_nested)
+            # the combined "fixed destinations & zones" field is stored as the
+            # two options it replaced (zone_entities / static_destinations)
+            # that the coordinator and the MagicMirror panel already read.
+            # Only when it was actually submitted: a section missing from the
+            # submission keeps whatever was saved (see the merge below).
+            if "panel_destinations" in user_input:
+                (
+                    user_input["zone_entities"],
+                    user_input["static_destinations"],
+                ) = _split_panel_destinations(
+                    user_input.pop("panel_destinations"), _zone_options(self.hass)
+                )
             # VIN lives in entry.data (set at initial setup), not
             # entry.options like everything else this flow edits -- pull it
             # out and update entry.data directly instead of letting it land
@@ -531,6 +627,7 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                 return self.async_create_entry(title="", data=merged)
         opts = dict(self._entry.options)
         notif_opts = opts.get("notifications", {}) or {}
+        zone_options = _zone_options(self.hass)
 
         if discovered:
             choices = {
@@ -693,20 +790,17 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                                     "calendar_lookahead_hours",
                                     default=float(opts.get("calendar_lookahead_hours") or 72),
                                 ): _number(6, 336, 1),
+                                # ONE field for what used to be two: fixed
+                                # destinations ("static_destinations") and
+                                # the zones to show on the MagicMirror panel
+                                # ("zone_entities"). Pick zones from the
+                                # dropdown or type a "Name | address"; on
+                                # save it is split back into those two
+                                # options, so stored data is unchanged.
                                 vol.Optional(
-                                    "static_destinations",
-                                    default=opts.get("static_destinations", ""),
-                                    description={
-                                        "suggested_value": opts.get("static_destinations", "")
-                                    },
-                                ): _multiline(),
-                                vol.Optional(
-                                    "zone_entities",
-                                    default=opts.get("zone_entities", ""),
-                                    description={
-                                        "suggested_value": opts.get("zone_entities", "")
-                                    },
-                                ): _multiline(),
+                                    "panel_destinations",
+                                    default=_panel_destination_defaults(opts),
+                                ): _panel_destinations(zone_options),
                                 vol.Optional(
                                     "drive_time_provider",
                                     default=opts.get("drive_time_provider", "estimate"),
