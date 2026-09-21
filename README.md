@@ -764,9 +764,10 @@ The car diagram:
   (`ev_charging_current`) print under the wall box — only while actually
   charging, and each line only when its value is present. Some cars (Kia USA)
   report kW but never a current; for AC charging (up to 19.2 kW) the amps are
-  then estimated from the kW at 240 V and shown with a `~` (e.g. `~46A`). DC
-  fast charging shows kW only in that case, since the voltage depends on the
-  car's battery and isn't reported. Exporting
+  then estimated from the kW at 240 V — or 120 V below 3 kW, a Level 1
+  trickle charge — and shown with a `~` (e.g. `~46A`). DC fast charging shows
+  kW only in that case, since the voltage depends on the car's battery and
+  isn't reported. A current the car does report is always shown as-is. Exporting
   (`ev_v2l_status` / `ev_v2x_status`): the flow reverses in cyan. Plugged but
   idle: a static amber cable, no readout.
 

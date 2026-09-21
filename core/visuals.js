@@ -16,9 +16,12 @@
   "use strict";
 
   // AC charging current is estimated from kW when the car doesn't report it:
-  // 80 A x 240 V = 19.2 kW is a home Level 2 charger's physical maximum, so
-  // anything above is DC fast charging.
+  // 240 V (Level 2), or 120 V (Level 1) below 3 kW. 80 A x 240 V = 19.2 kW is
+  // a home Level 2 charger's physical maximum, so anything above is DC fast
+  // charging.
   var AC_NOMINAL_V = 240;
+  var AC_LEVEL1_V = 120;
+  var AC_LEVEL1_BELOW_KW = 3;
   var AC_MAX_KW = 19.2;
 
   var COL = {
@@ -738,7 +741,8 @@
         // "Europe feature only"), so estimate the current for AC charging and
         // mark it "~". Not attempted above the AC range: DC voltage depends
         // on the car's pack and isn't reported, so a figure would be a guess.
-        amps = "~" + Math.round((kwNum * 1000) / AC_NOMINAL_V) + "A";
+        var est = Math.round((kwNum * 1000) / (kwNum < AC_LEVEL1_BELOW_KW ? AC_LEVEL1_V : AC_NOMINAL_V));
+        if (est >= 1) amps = "~" + est + "A";
       }
       var rows = [];
       if (kw) rows.push([kw, COL.ok, kwBig ? 10 : 11]);
