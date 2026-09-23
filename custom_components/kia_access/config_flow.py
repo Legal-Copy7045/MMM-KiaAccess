@@ -57,10 +57,15 @@ try:
 
     def _charger_status_entity():
         # any HA integration's own charging-status entity (ChargePoint's
-        # binary_sensor.*_charging, Emporia's status sensor, ...) -- kept
-        # generic so this isn't tied to one vendor's domain choice.
+        # binary_sensor.*_charging, Emporia's sensor.*_status ENUM, ...) --
+        # "switch" included too since some integrations only expose a
+        # charging-state switch, even though it's the wrong pick for
+        # ha-emporia-ev specifically (its switch reflects "enabled", not
+        # "currently drawing current" -- see _charger_is_charging's
+        # docstring). Kept generic so this isn't tied to one vendor's
+        # domain choice.
         return EntitySelector(
-            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
+            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean", "switch"])
         )
 except ImportError:  # pragma: no cover — very old HA
 

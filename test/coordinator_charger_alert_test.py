@@ -104,7 +104,15 @@ def test_charger_is_charging_normalizes_common_states():
     assert f(_FakeState("plugged_in")) is False
     assert f(None) is None
     assert f(_FakeState("unavailable")) is None
-    print("-- _charger_is_charging: normalizes on/off/Charging/Not Charging/unknown")
+    # ha-emporia-ev's real sensor.*_status ENUM values (STATUS_OPTIONS in its
+    # const.py: "charging" / "plugged_in_idle" / "not_plugged_in" / "error") --
+    # "charging" already matched above; these are the two real not-charging
+    # values that must resolve to False, not silently fall through to
+    # None/ignored (they don't match "idle" or "plugged_in" alone -- they're
+    # each a single distinct underscore-joined token).
+    assert f(_FakeState("plugged_in_idle")) is False
+    assert f(_FakeState("not_plugged_in")) is False
+    print("-- _charger_is_charging: normalizes on/off/Charging/Not Charging/ha-emporia-ev's status enum/unknown")
 
 
 # ---- start alert ----

@@ -1683,7 +1683,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         """state.state -> True/False/None(unrecognized or unavailable). Covers
         a binary_sensor's on/off, and the "Charging"/"Not Charging"-style
         string states several EVSE integrations (ChargePoint, Emporia) use
-        for a plain sensor instead."""
+        for a plain sensor instead -- including ha-emporia-ev's own
+        sensor.*_status ENUM values ("charging" / "plugged_in_idle" /
+        "not_plugged_in" / "error"), which is the entity this integration's
+        docs point Emporia users at (its switch.*_charging reflects whether
+        charging is ENABLED, not whether current is actually flowing right
+        now, so it can stay "on" for days with nothing plugged in -- wrong
+        signal for a start/stop edge)."""
         if state is None:
             return None
         val = str(state.state).strip().lower().replace(" ", "_")
@@ -1692,6 +1698,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         if val in (
             "off", "false", "0", "no", "not_charging", "idle",
             "plugged_in", "disconnected", "unplugged", "stopped",
+            "plugged_in_idle", "not_plugged_in",
         ):
             return False
         return None  # unknown/unavailable, or a state string we don't recognize
