@@ -266,6 +266,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass, [charger_entity], coordinator._async_charger_state_changed  # noqa: SLF001
             )
         )
+
+    # Optional: refines the stop alert's reported duration/finish time to
+    # when the charger actually stopped drawing current, instead of
+    # whenever charger_status_entity's own session happens to end (see
+    # coordinator._async_charger_power_changed). Purely a passive data
+    # source -- never opens/closes a session or fires an alert itself, so
+    # this is safe to enable even though charger_power_entity can tick
+    # every few seconds while charging.
+    charger_power_entity = (entry.options.get("charger_power_entity") or "").strip()
+    if charger_power_entity:
+        entry.async_on_unload(
+            async_track_state_change_event(
+                hass, [charger_power_entity], coordinator._async_charger_power_changed  # noqa: SLF001
+            )
+        )
     return True
 
 

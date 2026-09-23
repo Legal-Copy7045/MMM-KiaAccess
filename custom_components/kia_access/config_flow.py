@@ -753,6 +753,12 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                                         "suggested_value": opts.get("charger_energy_entity", "")
                                     },
                                 ): _sensor_entity(),
+                                vol.Optional(
+                                    "charger_power_entity",
+                                    description={
+                                        "suggested_value": opts.get("charger_power_entity", "")
+                                    },
+                                ): _sensor_entity(),
                             }
                         ),
                         options={"collapsed": False},

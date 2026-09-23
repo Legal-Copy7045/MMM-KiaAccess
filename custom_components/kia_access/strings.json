@@ -76,6 +76,7 @@
           "away_cost_grace_min": "Away cost grace (minutes)",
           "charger_status_entity": "Home charger status entity (optional)",
           "charger_energy_entity": "Home charger energy sensor (optional)",
+          "charger_power_entity": "Home charger power sensor (optional)",
           "alert_title": "Alert title (blank = the vehicle's own default)",
           "quiet_while_driving": "Suppress non-critical alerts while driving"
         },
@@ -105,6 +106,7 @@
           "away_cost_grace_min": "How long after unplugging the away cost sensor may still update — public networks often bill a few minutes to an hour later.",
           "charger_status_entity": "A home charger's own charging-status entity — e.g. ChargePoint's binary_sensor.<charger>_charging, or Emporia's status sensor (ha-emporia-ev). When set, Kia Access sends a 'Charging started' alert the moment this turns on, and a 'Charging stopped' alert when it turns off, with the energy used and its cost at your configured rate. Works the same regardless of which charger integration the entity comes from.",
           "charger_energy_entity": "The home charger's own energy sensor (kWh) — e.g. ChargePoint's session_energy_kwh or Emporia's usage sensor. Sampled at charge start and stop; the difference is reported as the session's energy in the 'Charging stopped' alert. Leave blank to get the start/stop alerts without an energy or cost figure.",
+          "charger_power_entity": "The home charger's own live power sensor (W) — e.g. Emporia's Power sensor. Some chargers keep reporting \"charging\" on their status entity until a scheduled session end, well after the car actually stopped drawing current; when set, the 'Charging stopped' alert reports the duration and finish time from the last moment power was genuinely flowing, not the status entity's own end time. Purely informational — it never starts, stops, or duplicates an alert on its own, so a brief top-off blip after the battery's full just moves this later, it can't cause an extra start/stop pair.",
           "alert_title": "Shown as the notification title for kia_access_alert events. Blank uses a generic default — set this if you'd like it to name your specific vehicle or brand.",
           "quiet_while_driving": "Hold back warning/info alerts (door open, low 12V, etc.) while the car is moving, and deliver them once it's parked. Critical alerts always fire immediately."
         },
@@ -121,7 +123,8 @@
               "away_cost_entity": "Away charge-cost sensor (optional)",
               "away_cost_grace_min": "Away cost grace (minutes)",
               "charger_status_entity": "Home charger status entity (optional)",
-              "charger_energy_entity": "Home charger energy sensor (optional)"
+              "charger_energy_entity": "Home charger energy sensor (optional)",
+              "charger_power_entity": "Home charger power sensor (optional)"
             }
           },
           "polling_advanced": {
