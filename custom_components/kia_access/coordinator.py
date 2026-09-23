@@ -1747,6 +1747,45 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         v = self.vehicle
         return str(v.get("name") or v.get("model") or brand_display_name(self.entry.data.get(CONF_BRAND)))
 
+    def _month_to_date_totals(self) -> dict:
+        """Charging cost/kWh + miles driven since local midnight on the 1st of
+        this calendar month, for the charger_charging_stopped alert's
+        "this month" figures. Deliberately calendar-month, unlike
+        charge_log["month"]/trip_log["last_30_days"] (both a rolling 30-day
+        window, despite the "month" key name on the former -- see its own
+        docstring) -- those sensors keep their existing rolling-window
+        meaning; this is its own, narrower calculation, Python/HA-only (no
+        core/*.js mirror) since it only ever feeds this HA-only alert."""
+        start_local = dt_util.now().replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        start_ms = dt_util.as_utc(start_local).timestamp() * 1000
+
+        cost = 0.0
+        have_cost = False
+        for s in self._sessions or []:
+            ended = s.get("endedAt") if s else None
+            if ended is None or ended < start_ms:
+                continue
+            if s.get("cost") is not None:
+                cost += s["cost"]
+                have_cost = True
+
+        km = 0.0
+        for t in self._trips or []:
+            ended = t.get("endedAt") if t else None
+            if ended is None or ended < start_ms:
+                continue
+            if t.get("distanceKm") is not None:
+                km += t["distanceKm"]
+        miles = round(km * 0.621371, 1)
+
+        cost_out = round(cost, 2) if have_cost else None
+        cost_per_mile = (
+            round(cost / miles, 3) if have_cost and miles > 0 else None
+        )
+        return {"cost": cost_out, "miles": miles, "costPerMile": cost_per_mile}
+
     async def _async_charger_state_changed(self, event) -> None:
         """entry.async_on_unload(async_track_state_change_event(...)) target
         for `charger_status_entity` -- fires charger_charging_started /
@@ -1837,13 +1876,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 (time.time() * 1000 - started_at) / 60000 if started_at is not None else None
             )
 
-            # month_cost/monthMiles/costPerMile: both charge_log["month"] and
-            # trip_log["last_30_days"] are rolling 30-day windows (not
-            # calendar-month-to-date, despite the "month" key name -- see
-            # charge_log's own docstring) -- close enough to "this month" for
-            # a notification, but won't reset on the 1st.
-            month = self.charge_log.get("month") or {}
-            trip_30d = self.trip_log.get("last_30_days") or {}
+            mtd = self._month_to_date_totals()
 
             currency = str(self.entry.options.get("currency") or "USD").upper()
             parts = ["Charging stopped"]
@@ -1873,9 +1906,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                         "pct": pct,
                         "durationMin": duration_min,
                         "vehicleName": vehicle_name,
-                        "monthCost": month.get("cost"),
-                        "monthMiles": trip_30d.get("distanceMi"),
-                        "costPerMile": trip_30d.get("costPerMi"),
+                        "monthCost": mtd["cost"],
+                        "monthMiles": mtd["miles"],
+                        "costPerMile": mtd["costPerMile"],
                     },
                     "vin": vin,
                 },

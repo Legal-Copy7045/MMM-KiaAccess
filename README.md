@@ -1551,11 +1551,12 @@ Install and setup are **mode A** above. Some details:
     `value.vehicleName`.
   - `charger_charging_stopped`: `value.kwh`, `value.cost`, `value.currency`,
     `value.rateLabel` (the zone/home/away rate used, if any), `value.pct` (battery % at stop),
-    `value.durationMin`, `value.vehicleName`, plus the rolling 30-day
-    `value.monthCost` / `value.monthMiles` / `value.costPerMile` already
-    computed for the `sensor.<vehicle>_last_charge` / `_cost_per_mile`
-    sensors (labelled "month" for the same reason those sensors are — it's a
-    rolling 30-day window, not calendar-month-to-date).
+    `value.durationMin`, `value.vehicleName`, plus `value.monthCost` /
+    `value.monthMiles` / `value.costPerMile` — charging cost, miles driven,
+    and cost per mile since local midnight on the 1st of the current
+    calendar month (distinct from the rolling-30-day figures on
+    `sensor.<vehicle>_last_charge` / `_cost_per_mile`, which keep their own
+    meaning).
   Any field can come back `null` (no `charger_energy_entity` set, no charge
   history yet, the car hasn't reported a %, ...) — templates should handle
   that rather than assume every field is always populated.

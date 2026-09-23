@@ -18,6 +18,8 @@ import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.modules.setdefault("hyundai_kia_connect_api", type(sys)("hyundai_kia_connect_api"))
 
+from homeassistant.util import dt as dt_util  # noqa: E402
+
 from custom_components.kia_access.coordinator import KiaAccessCoordinator  # noqa: E402
 from fake_ha import FakeConfig as _FakeConfig  # noqa: E402
 from fake_ha import FakeStore as _FakeStore  # noqa: E402
@@ -224,14 +226,8 @@ def test_charger_stop_without_energy_entity_reports_no_kwh():
     print("-- charger stop with no charger_energy_entity configured: plain 'Charging stopped', no figures")
 
 
-def test_charger_stop_includes_pct_duration_vehicle_and_rolling_month_totals():
-    """The stop event's value carries everything a notification automation
-    needs without it having to guess this install's entity_id slugs: final
-    battery %, session duration, the vehicle's display name, and the
-    rolling-30-day charge spend / miles driven / cost-per-mile already
-    computed for the last_charge / cost_per_mile sensors."""
+def test_charger_stop_includes_pct_duration_and_vehicle_name():
     states = _FakeStates({"sensor.charger_energy": _FakeState("0")})
-    now_ms = time.time() * 1000
     coord = make_coordinator(
         options={
             "charger_status_entity": "binary_sensor.charger",
@@ -241,14 +237,6 @@ def test_charger_stop_includes_pct_duration_vehicle_and_rolling_month_totals():
         states=states,
         vehicle={"model": "EV9", "name": "MelodEV", "ev_battery_percentage": 100},
     )
-    # a past (unrelated) session/trip, well within the 30-day window, so
-    # monthCost/monthMiles/costPerMile reflect real rolling totals rather
-    # than just this one external-charger session (which sessions.py never
-    # even sees -- see coordinator.py's own note that this is independent
-    # of the car-reported session log).
-    coord._sessions = [{"endedAt": now_ms - 60000, "cost": 30.0, "kwh": 100.0, "location": "home"}]
-    coord._trips = [{"endedAt": now_ms - 60000, "distanceKm": 1000.0, "cost": 20.0}]
-
     _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
     states.set("sensor.charger_energy", "12")
     _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
@@ -257,10 +245,48 @@ def test_charger_stop_includes_pct_duration_vehicle_and_rolling_month_totals():
     assert value["pct"] == 100.0
     assert value["vehicleName"] == "MelodEV"
     assert value["durationMin"] is not None and value["durationMin"] >= 0
-    assert value["monthCost"] == 30.0
-    assert value["monthMiles"] == 621.4  # 1000 km * 0.621371 mi/km, rounded to 0.1
-    assert value["costPerMile"] == 0.032  # $20 / 621.371 mi, rounded to 0.001
-    print("-- charger stop: pct/duration/vehicle name + rolling-30-day month cost/miles/cost-per-mile included")
+    print("-- charger stop: pct/duration/vehicle name included")
+
+
+def test_charger_stop_month_totals_are_calendar_month_not_rolling_30_days():
+    """monthCost/monthMiles/costPerMile are since local midnight on the 1st
+    of THIS calendar month -- a session/trip from one hour before the month
+    started must be excluded even though it's well within any rolling
+    30-day window (the ask this test pins: "this month" means the calendar
+    month, not the last 30 days)."""
+    start_of_month = dt_util.as_utc(
+        dt_util.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    )
+    start_ms = start_of_month.timestamp() * 1000
+    this_month_ms = start_ms + 3600_000  # 1h into this month
+    last_month_ms = start_ms - 3600_000  # 1h before this month started
+
+    states = _FakeStates({"sensor.charger_energy": _FakeState("0")})
+    coord = make_coordinator(
+        options={"charger_status_entity": "binary_sensor.charger", "charger_energy_entity": "sensor.charger_energy"},
+        states=states,
+    )
+    coord._sessions = [
+        {"endedAt": this_month_ms, "cost": 10.0, "kwh": 50.0, "location": "home"},
+        {"endedAt": last_month_ms, "cost": 999.0, "kwh": 999.0, "location": "home"},
+    ]
+    coord._trips = [
+        {"endedAt": this_month_ms, "distanceKm": 100.0, "cost": 5.0},
+        {"endedAt": last_month_ms, "distanceKm": 9999.0, "cost": 9999.0},
+    ]
+
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    states.set("sensor.charger_energy", "5")
+    _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
+
+    value = coord.hass.bus.fired[1][1]["value"]
+    # costPerMile = charging spend this month / miles driven this month --
+    # the trip's own `cost` field (5.0, trip-attributed cost) is a separate
+    # concept and must NOT be the numerator here.
+    assert value["monthCost"] == 10.0, value
+    assert value["monthMiles"] == round(100.0 * 0.621371, 1), value
+    assert value["costPerMile"] == round(10.0 / round(100.0 * 0.621371, 1), 3), value
+    print("-- charger stop: monthCost/monthMiles/costPerMile are calendar-month-to-date, excluding last month")
 
 
 def test_charger_stop_with_negative_delta_ignored():
@@ -289,7 +315,8 @@ ALL_TESTS = [
     test_charger_unknown_state_ignored,
     test_charger_stop_reports_energy_and_cost,
     test_charger_stop_prefers_away_rate_when_not_at_home,
-    test_charger_stop_includes_pct_duration_vehicle_and_rolling_month_totals,
+    test_charger_stop_includes_pct_duration_and_vehicle_name,
+    test_charger_stop_month_totals_are_calendar_month_not_rolling_30_days,
     test_charger_stop_without_energy_entity_reports_no_kwh,
     test_charger_stop_with_negative_delta_ignored,
 ]
