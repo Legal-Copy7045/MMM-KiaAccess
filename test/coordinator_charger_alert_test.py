@@ -80,6 +80,21 @@ def make_coordinator(options=None, states=None, vehicle=None):
     c._timers_store = _FakeStore({})
     c._sessions = []
     c._trips = []
+    c._force_next_refresh = False
+
+    # _async_charger_state_changed() now force-refreshes the vehicle poll
+    # before building the alert (see its own docstring: self.vehicle can
+    # otherwise be up to a scan_interval stale). Real DataUpdateCoordinator
+    # machinery (debouncer, update_interval, ...) isn't set up on this
+    # object.__new__()-built stub, so stand in with a no-op that just
+    # records it was called -- these tests care that the vehicle dict
+    # passed in is used as-is, not about exercising the real poll/debounce
+    # plumbing (that's coordinator_stress_test.py's job).
+    async def _noop_refresh():
+        c.refresh_calls = getattr(c, "refresh_calls", 0) + 1
+
+    c.async_request_refresh = _noop_refresh
+    c.refresh_calls = 0
     return c
 
 
@@ -142,7 +157,12 @@ def test_charger_start_fires_alert_and_opens_session():
     assert data["value"] == {
         "pct": 68.0, "kw": 9.3, "etaMin": 133.0, "vehicleName": "MelodEV",
     }
+    # forces a fresh vehicle poll before reading pct/kw/etaMin, so the alert
+    # never reports leftovers from up to a scan_interval-old cached reading
+    assert coord.refresh_calls == 1
+    assert coord._force_next_refresh is True
     print("-- charger status on with no open session: fires charger_charging_started (with pct/kw/eta/name), opens session")
+    print("-- charger start: forces a live vehicle poll before building the alert, not stale cached data")
 
 
 def test_charger_duplicate_on_does_not_refire():

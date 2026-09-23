@@ -1823,6 +1823,23 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 except (TypeError, ValueError):
                     return None
 
+            # self.vehicle is only as fresh as the last scheduled Kia poll --
+            # up to a full scan_interval old (30 min by default) -- so
+            # without this, a charger-status edge that lands between polls
+            # reports stale leftovers instead of this session's real numbers
+            # (0 kW / a previous session's stale ETA at start; a stale % at
+            # stop). Force a live pull now: the car is actively
+            # charging/just finished, so unlike waking a parked, idle car
+            # this doesn't cost anything charging itself isn't already
+            # covering. Same technique as async_force_refresh() (the manual
+            # "Refresh now" button). Left unguarded -- DataUpdateCoordinator
+            # .async_request_refresh() already swallows a failed poll
+            # internally (last_update_success flips False, self.vehicle
+            # just stays whatever it was), so this never raises out to the
+            # outer except and abort the alert entirely over a bad poll.
+            self._force_next_refresh = True
+            await self.async_request_refresh()
+
             title = self._alert_title()
             vin = kia_client._vehicle_key_dict(self.vehicle) or None  # noqa: SLF001
             vehicle_name = self._vehicle_display_name()
