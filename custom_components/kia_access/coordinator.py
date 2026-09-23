@@ -1738,13 +1738,27 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return away, "away"
         return (home or None), ("home" if home else None)
 
+    def _vehicle_display_name(self) -> str:
+        """Same precedence as entity.py's DeviceInfo.name / sensor.py's
+        vehicle_name attribute (kept as its own copy here for the same
+        reason entity.py's docstring gives for its own duplicate: no shared
+        base those three could hang a common helper off without a bigger
+        refactor than this warrants)."""
+        v = self.vehicle
+        return str(v.get("name") or v.get("model") or brand_display_name(self.entry.data.get(CONF_BRAND)))
+
     async def _async_charger_state_changed(self, event) -> None:
         """entry.async_on_unload(async_track_state_change_event(...)) target
         for `charger_status_entity` -- fires charger_charging_started /
-        _stopped kia_access_alert events on each real on<->off edge, and on
-        stop, folds in the energy consumed (from `charger_energy_entity`, a
-        plain start/stop delta -- see _charger_energy_reading()) and its cost
-        at _charger_rate(). Wrapped in a broad except, same as
+        _stopped kia_access_alert events on each real on<->off edge. The
+        `value` payload is deliberately self-contained (battery %, charge
+        power, ETA, vehicle name on start; energy/cost/duration/month
+        spend-and-miles on stop) so a notification automation can read
+        event.data.value.* directly instead of having to guess this
+        installation's actual entity_id slugs for five different sensors.
+        On stop, folds in the energy consumed (from `charger_energy_entity`,
+        a plain start/stop delta -- see _charger_energy_reading()) and its
+        cost at _charger_rate(). Wrapped in a broad except, same as
         _fire_condition_edges(): a bad reading here must never crash the
         listener and silently stop watching the entity for the rest of the
         HA run."""
@@ -1757,8 +1771,16 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             if charging == was_open:
                 return  # not a real start/stop edge (e.g. a duplicate on->on)
 
+            def _num(x):
+                try:
+                    return None if x is None or x == "" else float(x)
+                except (TypeError, ValueError):
+                    return None
+
             title = self._alert_title()
             vin = kia_client._vehicle_key_dict(self.vehicle) or None  # noqa: SLF001
+            vehicle_name = self._vehicle_display_name()
+            pct = _num(self.vehicle.get("ev_battery_percentage"))
 
             if charging:
                 self._charger_session = {
@@ -1775,7 +1797,18 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                         "active": True,
                         "title": title,
                         "message": "Charging started",
-                        "value": None,
+                        "value": {
+                            "pct": pct,
+                            "kw": _num(self.vehicle.get("ev_charging_power")),
+                            # Kia's own live estimate, in minutes, of time
+                            # remaining to the car's configured charge target
+                            # (100% unless a lower charge limit is set) --
+                            # nothing this integration computes itself.
+                            "etaMin": _num(
+                                self.vehicle.get("ev_estimated_current_charge_duration")
+                            ),
+                            "vehicleName": vehicle_name,
+                        },
                         "vin": vin,
                     },
                 )
@@ -1799,6 +1832,19 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 if rate is not None:
                     cost = round(kwh * rate, 2)
 
+            started_at = _num(session.get("startedAt"))
+            duration_min = (
+                (time.time() * 1000 - started_at) / 60000 if started_at is not None else None
+            )
+
+            # month_cost/monthMiles/costPerMile: both charge_log["month"] and
+            # trip_log["last_30_days"] are rolling 30-day windows (not
+            # calendar-month-to-date, despite the "month" key name -- see
+            # charge_log's own docstring) -- close enough to "this month" for
+            # a notification, but won't reset on the 1st.
+            month = self.charge_log.get("month") or {}
+            trip_30d = self.trip_log.get("last_30_days") or {}
+
             currency = str(self.entry.options.get("currency") or "USD").upper()
             parts = ["Charging stopped"]
             detail = []
@@ -1819,7 +1865,18 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     "active": False,
                     "title": title,
                     "message": message,
-                    "value": {"kwh": kwh, "cost": cost, "rateLabel": rate_label},
+                    "value": {
+                        "kwh": kwh,
+                        "cost": cost,
+                        "rateLabel": rate_label,
+                        "currency": currency,
+                        "pct": pct,
+                        "durationMin": duration_min,
+                        "vehicleName": vehicle_name,
+                        "monthCost": month.get("cost"),
+                        "monthMiles": trip_30d.get("distanceMi"),
+                        "costPerMile": trip_30d.get("costPerMi"),
+                    },
                     "vin": vin,
                 },
             )
