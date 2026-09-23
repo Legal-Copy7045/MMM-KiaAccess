@@ -1541,6 +1541,24 @@ Install and setup are **mode A** above. Some details:
   adjusted.
 - **Alerts in automations.** Trigger on `event_type: kia_access_alert`; the
   `event_data` has `reason`, `level`, `active`, `message`, `vin`, `entry_id`.
+  Most reasons leave `value` as whatever detail conditions.py already carries
+  (or `null`); `charger_charging_started` / `charger_charging_stopped` (see
+  the **Home charger start/stop alerts** section above) fill it in
+  specifically so a notification automation doesn't have to guess this
+  install's own entity_id slugs:
+  - `charger_charging_started`: `value.pct` (battery %), `value.kw` (charge
+    power), `value.etaMin` (Kia's own live minutes-to-target estimate),
+    `value.vehicleName`.
+  - `charger_charging_stopped`: `value.kwh`, `value.cost`, `value.currency`,
+    `value.rateLabel` (the zone/home/away rate used, if any), `value.pct` (battery % at stop),
+    `value.durationMin`, `value.vehicleName`, plus the rolling 30-day
+    `value.monthCost` / `value.monthMiles` / `value.costPerMile` already
+    computed for the `sensor.<vehicle>_last_charge` / `_cost_per_mile`
+    sensors (labelled "month" for the same reason those sensors are — it's a
+    rolling 30-day window, not calendar-month-to-date).
+  Any field can come back `null` (no `charger_energy_entity` set, no charge
+  history yet, the car hasn't reported a %, ...) — templates should handle
+  that rather than assume every field is always populated.
 - **Token / re-auth.** The refresh token lives in the config entry and is
   re-saved when Kia rotates it (nothing is written into the HACS-managed
   folder). If Kia ever forces a new one-time code, HA shows a **"Reconfigure"

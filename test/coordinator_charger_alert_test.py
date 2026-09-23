@@ -76,6 +76,8 @@ def make_coordinator(options=None, states=None, vehicle=None):
     c._moved_since = None
     c._last_parked = None
     c._timers_store = _FakeStore({})
+    c._sessions = []
+    c._trips = []
     return c
 
 
@@ -110,6 +112,11 @@ def test_charger_start_fires_alert_and_opens_session():
     coord = make_coordinator(
         options={"charger_status_entity": "binary_sensor.charger", "charger_energy_entity": "sensor.charger_energy"},
         states=states,
+        vehicle={
+            "model": "EV9", "VIN": "KNDC1", "name": "MelodEV",
+            "ev_battery_percentage": 68, "ev_charging_power": 9.3,
+            "ev_estimated_current_charge_duration": 133,
+        },
     )
     _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
     assert coord._charger_session is not None
@@ -122,7 +129,10 @@ def test_charger_start_fires_alert_and_opens_session():
     assert data["reason"] == "charger_charging_started"
     assert data["active"] is True
     assert data["message"] == "Charging started"
-    print("-- charger status on with no open session: fires charger_charging_started, opens session")
+    assert data["value"] == {
+        "pct": 68.0, "kw": 9.3, "etaMin": 133.0, "vehicleName": "MelodEV",
+    }
+    print("-- charger status on with no open session: fires charger_charging_started (with pct/kw/eta/name), opens session")
 
 
 def test_charger_duplicate_on_does_not_refire():
@@ -174,6 +184,7 @@ def test_charger_stop_reports_energy_and_cost():
     assert data["value"]["cost"] == 2.4  # 12 kWh * 0.20/kWh
     assert "12.0 kWh" in data["message"]
     assert "2.4 GBP" in data["message"]
+    assert data["value"]["currency"] == "GBP"
     print("-- charger stop: 12 kWh delta priced at price_per_kwh, reported in the stop alert")
 
 
@@ -213,6 +224,45 @@ def test_charger_stop_without_energy_entity_reports_no_kwh():
     print("-- charger stop with no charger_energy_entity configured: plain 'Charging stopped', no figures")
 
 
+def test_charger_stop_includes_pct_duration_vehicle_and_rolling_month_totals():
+    """The stop event's value carries everything a notification automation
+    needs without it having to guess this install's entity_id slugs: final
+    battery %, session duration, the vehicle's display name, and the
+    rolling-30-day charge spend / miles driven / cost-per-mile already
+    computed for the last_charge / cost_per_mile sensors."""
+    states = _FakeStates({"sensor.charger_energy": _FakeState("0")})
+    now_ms = time.time() * 1000
+    coord = make_coordinator(
+        options={
+            "charger_status_entity": "binary_sensor.charger",
+            "charger_energy_entity": "sensor.charger_energy",
+            "price_per_kwh": 0.20,
+        },
+        states=states,
+        vehicle={"model": "EV9", "name": "MelodEV", "ev_battery_percentage": 100},
+    )
+    # a past (unrelated) session/trip, well within the 30-day window, so
+    # monthCost/monthMiles/costPerMile reflect real rolling totals rather
+    # than just this one external-charger session (which sessions.py never
+    # even sees -- see coordinator.py's own note that this is independent
+    # of the car-reported session log).
+    coord._sessions = [{"endedAt": now_ms - 60000, "cost": 30.0, "kwh": 100.0, "location": "home"}]
+    coord._trips = [{"endedAt": now_ms - 60000, "distanceKm": 1000.0, "cost": 20.0}]
+
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    states.set("sensor.charger_energy", "12")
+    _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
+
+    value = coord.hass.bus.fired[1][1]["value"]
+    assert value["pct"] == 100.0
+    assert value["vehicleName"] == "MelodEV"
+    assert value["durationMin"] is not None and value["durationMin"] >= 0
+    assert value["monthCost"] == 30.0
+    assert value["monthMiles"] == 621.4  # 1000 km * 0.621371 mi/km, rounded to 0.1
+    assert value["costPerMile"] == 0.032  # $20 / 621.371 mi, rounded to 0.001
+    print("-- charger stop: pct/duration/vehicle name + rolling-30-day month cost/miles/cost-per-mile included")
+
+
 def test_charger_stop_with_negative_delta_ignored():
     """A charger's energy sensor resetting/rolling over between start and stop
     (a reboot, a lifetime-counter reset) must never report a negative or
@@ -239,6 +289,7 @@ ALL_TESTS = [
     test_charger_unknown_state_ignored,
     test_charger_stop_reports_energy_and_cost,
     test_charger_stop_prefers_away_rate_when_not_at_home,
+    test_charger_stop_includes_pct_duration_vehicle_and_rolling_month_totals,
     test_charger_stop_without_energy_entity_reports_no_kwh,
     test_charger_stop_with_negative_delta_ignored,
 ]
