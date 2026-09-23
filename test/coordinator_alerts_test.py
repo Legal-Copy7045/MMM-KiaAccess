@@ -55,6 +55,7 @@ def make_coordinator(vehicle, last_parked=None, entry=None):
     c._last_parked = last_parked
     c._moved_since = None
     c._parked = None
+    c._charger_session = None
     c._was_on = None
     c._awaiting_park_fix = False
     c._timers_store = _FakeStore({})

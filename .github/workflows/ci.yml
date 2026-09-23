@@ -111,6 +111,8 @@ jobs:
         run: python test/coordinator_stale_test.py
       - name: Coordinator alert-splitting suite
         run: python test/coordinator_alerts_test.py
+      - name: Charger-status start/stop alert suite
+        run: python test/coordinator_charger_alert_test.py
       - name: EV-only entity gating (button/number)
         run: python test/entity_gating_test.py
       - name: Domain-service authorization

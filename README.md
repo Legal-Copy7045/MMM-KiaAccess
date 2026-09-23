@@ -280,7 +280,8 @@ API, not from Kia. So:
 The integration's **Configure** dialog holds **Scan interval**, **Poll the car
 directly** (+ **Live wake-up wait**), **Price per kWh** / **Away price per kWh**
 / **Home-charging zone** / **Per-zone charging rates** / **Away charge-cost
-sensor** / **capacity**, **Range
+sensor** / **Home charger status entity** / **Home charger energy sensor** /
+**capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
 (hours)** / **Fixed destinations & zones**, and **Drive-time provider** / **Routing API key** / **Geocoding API
 key** / **Per-destination routes**. Leave **Poll the
@@ -290,6 +291,27 @@ wake the car — with it off, every update sends both `refresh: false` **and**
 the top of this README); turn it on for live readings, bounded by **Live
 wake-up wait**. The rotated refresh token is stored in the config entry —
 nothing is written into the HACS-managed folder.
+
+**Home charger start/stop alerts (optional):** point **Home charger status
+entity** at any HA entity that reports your home charger's own charging
+state — e.g. [mbillow/ha-chargepoint](https://github.com/mbillow/ha-chargepoint)'s
+`binary_sensor.<charger>_charging`, or
+[Eunanibus/ha-emporia-ev](https://github.com/Eunanibus/ha-emporia-ev)'s status
+sensor — and Kia Access fires a `kia_access_alert` the moment it turns on
+(`charger_charging_started`) and another when it turns off
+(`charger_charging_stopped`). Also set **Home charger energy sensor** (the
+charger's own kWh sensor, e.g. ha-chargepoint's `session_energy_kwh` or
+ha-emporia-ev's usage sensor) to have the stop alert report the energy used
+this session and its cost at your configured rate (**Per-zone charging
+rates** if the charger sits in a matching zone, else **Price per kWh** /
+**Away price per kWh**) — leave it blank for the start/stop alerts alone,
+with no energy or cost figure. Works the same for either integration, or any
+other that exposes a charging-status entity: only the entity's on/off state
+and numeric kWh reading are read, nothing charger-brand-specific. This is
+independent of the car-reported **Charging started** / **Charging complete**
+/ **Charging interrupted** alerts below — those watch the vehicle's own
+`ev_battery_is_charging`, which can lag a home charger's real status by a
+poll cycle or more.
 
 **Ownership extras (optional):** [`examples/ha-ownership-package.yaml`](examples/ha-ownership-package.yaml)
 is a drop-in HA package that adds an efficiency proxy, a seasonal-range

@@ -166,6 +166,7 @@ yaml +=
   "      selector:\n        select:\n          custom_value: true\n          options:\n" +
   "            - unlocked\n            - door_open\n            - window_open\n" +
   "            - not_plugged_home\n            - charge_interrupted\n" +
+  "            - charger_charging_started\n            - charger_charging_stopped\n" +
   "            - tyre_pressure\n            - battery_12v_critical\n" +
   "            - unexpected_move\n            - cant_get_home\n" +
   "            - vehicle_fault\n" +

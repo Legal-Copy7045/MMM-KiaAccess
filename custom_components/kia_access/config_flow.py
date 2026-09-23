@@ -54,6 +54,14 @@ try:
 
     def _sensor_entity():
         return EntitySelector(EntitySelectorConfig(domain=["sensor", "input_number"]))
+
+    def _charger_status_entity():
+        # any HA integration's own charging-status entity (ChargePoint's
+        # binary_sensor.*_charging, Emporia's status sensor, ...) -- kept
+        # generic so this isn't tied to one vendor's domain choice.
+        return EntitySelector(
+            EntitySelectorConfig(domain=["binary_sensor", "sensor", "input_boolean"])
+        )
 except ImportError:  # pragma: no cover — very old HA
 
     def _panel_destinations(zone_options):
@@ -66,6 +74,9 @@ except ImportError:  # pragma: no cover — very old HA
         return str
 
     def _sensor_entity():
+        return str
+
+    def _charger_status_entity():
         return str
 
     def _multiline():
@@ -725,6 +736,18 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                                         else opts["away_cost_grace_min"]
                                     ),
                                 ): _number(0, 720, 5),
+                                vol.Optional(
+                                    "charger_status_entity",
+                                    description={
+                                        "suggested_value": opts.get("charger_status_entity", "")
+                                    },
+                                ): _charger_status_entity(),
+                                vol.Optional(
+                                    "charger_energy_entity",
+                                    description={
+                                        "suggested_value": opts.get("charger_energy_entity", "")
+                                    },
+                                ): _sensor_entity(),
                             }
                         ),
                         options={"collapsed": False},
