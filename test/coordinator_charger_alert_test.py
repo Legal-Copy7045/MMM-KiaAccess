@@ -145,7 +145,8 @@ def test_charger_start_fires_alert_and_opens_session():
     )
     _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
     assert coord._charger_session is not None
-    assert coord._charger_session["startEnergy"] == 2.5
+    assert coord._charger_session["lastEnergyReading"] == 2.5
+    assert coord._charger_session["accumulatedKwh"] == 0.0
     assert coord._timers_store._data["charger_session"] == coord._charger_session
     events = coord.hass.bus.fired
     assert len(events) == 1, events
@@ -241,6 +242,36 @@ def test_charger_stop_prefers_away_rate_when_not_at_home():
     data = coord.hass.bus.fired[1][1]
     assert data["value"]["cost"] == 1.0  # 5 kWh * home rate 0.20, not the away rate
     print("-- charger stop: unresolved at-home state falls back to the home rate, not away")
+
+
+def test_charger_stop_zero_away_rate_falls_back_to_home_not_free():
+    """away_price_per_kwh's own documented meaning (strings.json): "0 =
+    fall back to the home rate". An explicit 0 must not price an away
+    session at $0/kWh instead."""
+    zone_state = _FakeState("zoning")
+    zone_state.attributes = {"latitude": 10.0, "longitude": 10.0, "radius": 100}
+    states = _FakeStates({
+        "sensor.charger_energy": _FakeState("0"),
+        "zone.home": zone_state,
+    })
+    coord = make_coordinator(
+        options={
+            "charger_status_entity": "binary_sensor.charger",
+            "charger_energy_entity": "sensor.charger_energy",
+            "price_per_kwh": 0.185,
+            "away_price_per_kwh": 0,  # explicit 0 -- documented as "use home rate"
+            "home_charge_zone": "zone.home",
+        },
+        states=states,
+        vehicle={"location_latitude": 50.0, "location_longitude": 50.0},  # far from home
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    states.set("sensor.charger_energy", "10")
+    _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
+    data = coord.hass.bus.fired[1][1]
+    assert data["value"]["rateLabel"] == "home", data
+    assert data["value"]["cost"] == round(10 * 0.185, 2), data
+    print("-- charger stop: away_price_per_kwh=0 falls back to the home rate, not a free away session")
 
 
 def test_charger_stop_without_energy_entity_reports_no_kwh():
@@ -368,9 +399,11 @@ def test_charger_stop_month_totals_are_calendar_month_not_rolling_30_days():
 
 
 def test_charger_stop_with_negative_delta_ignored():
-    """A charger's energy sensor resetting/rolling over between start and stop
-    (a reboot, a lifetime-counter reset) must never report a negative or
-    nonsensical kWh figure."""
+    """A single decrease with no prior real increase this session (a reboot,
+    a lifetime-counter reset right at start) must never report a negative
+    kWh -- it contributes nothing (not subtracted), leaving the session
+    with zero accumulated energy, reported as kwh: null rather than 0 or a
+    negative number."""
     states = _FakeStates({"sensor.charger_energy": _FakeState("10")})
     coord = make_coordinator(
         options={"charger_status_entity": "binary_sensor.charger", "charger_energy_entity": "sensor.charger_energy",
@@ -383,7 +416,41 @@ def test_charger_stop_with_negative_delta_ignored():
     data = coord.hass.bus.fired[1][1]
     assert data["value"]["kwh"] is None
     assert data["value"]["cost"] is None
-    print("-- charger stop: an energy reading that decreased is treated as unknown, not a negative kWh")
+    print("-- charger stop: a lone decrease (no real usage yet) reports null kWh, not negative")
+
+
+def test_charger_energy_survives_a_mid_session_counter_reset():
+    """The real bug this pins: ha-emporia-ev's "Energy Today" resets at
+    local midnight, unrelated to the charging session's own start/stop. An
+    overnight session spanning that reset must sum the pre-reset and
+    post-reset usage, not just (reading-at-stop minus reading-at-start) --
+    that naive snapshot silently subtracts away the whole pre-reset
+    portion. Modeled on a real session: charging from 11pm, ~5kWh drawn
+    before midnight, counter resets to 0, ~22.9kWh more drawn after --
+    30.06kWh true total (matching what the charger's own dashboard showed
+    live), not the ~17.9kWh (22.9 - 5) a snapshot delta would report."""
+    states = _FakeStates({"sensor.charger_energy": _FakeState("40.0")})  # day's total so far, pre-session
+    coord = make_coordinator(
+        options={
+            "charger_status_entity": "binary_sensor.charger",
+            "charger_energy_entity": "sensor.charger_energy",
+            "price_per_kwh": 0.185,
+        },
+        states=states,
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))  # 11pm, seeds lastEnergyReading=40.0
+    states.set("sensor.charger_energy", "45.0")  # 11:59pm -- +5 kWh before midnight
+    _run(coord._async_charger_energy_changed(_event(_FakeState("45.0"))))
+    states.set("sensor.charger_energy", "0.0")  # midnight reset -- must NOT be subtracted as -45
+    _run(coord._async_charger_energy_changed(_event(_FakeState("0.0"))))
+    states.set("sensor.charger_energy", "22.9")  # 2:15am -- +22.9 kWh since the reset
+    _run(coord._async_charger_energy_changed(_event(_FakeState("22.9"))))
+    _run(coord._async_charger_state_changed(_event(_FakeState("plugged_in_idle"))))  # e.g. 5:55am, scheduled end
+
+    value = coord.hass.bus.fired[1][1]["value"]
+    assert value["kwh"] == 27.9, value  # 5 (pre-midnight) + 22.9 (post-reset), not 22.9 - 40 or -17.1
+    assert value["cost"] == round(27.9 * 0.185, 2), value
+    print("-- charger energy: correctly sums usage across a mid-session counter reset (e.g. a daily-resetting sensor at midnight), instead of undercounting via a naive start/stop snapshot")
 
 
 ALL_TESTS = [
@@ -393,12 +460,14 @@ ALL_TESTS = [
     test_charger_unknown_state_ignored,
     test_charger_stop_reports_energy_and_cost,
     test_charger_stop_prefers_away_rate_when_not_at_home,
+    test_charger_stop_zero_away_rate_falls_back_to_home_not_free,
     test_charger_stop_includes_pct_duration_and_vehicle_name,
     test_charger_power_entity_refines_stop_duration_and_finish_time,
     test_charger_power_changed_ignored_with_no_open_session_or_below_threshold,
     test_charger_stop_month_totals_are_calendar_month_not_rolling_30_days,
     test_charger_stop_without_energy_entity_reports_no_kwh,
     test_charger_stop_with_negative_delta_ignored,
+    test_charger_energy_survives_a_mid_session_counter_reset,
 ]
 
 if __name__ == "__main__":

@@ -304,16 +304,24 @@ nothing plugged in, not whether current is flowing right now) — and Kia
 Access fires a `kia_access_alert` the moment it turns on
 (`charger_charging_started`) and another when it turns off
 (`charger_charging_stopped`). Also set **Home charger energy sensor** to a
-*cumulative* kWh reading (e.g. ha-chargepoint's `session_energy_kwh`) to
-have the stop alert report the energy used this session and its cost at
-your configured rate (**Per-zone charging rates** if the charger sits in a
-matching zone, else **Price per kWh** / **Away price per kWh**) — leave it
-blank for the start/stop alerts alone, with no energy or cost figure.
-ha-emporia-ev doesn't currently expose a cumulative session/lifetime energy
-sensor (only a per-1-minute bucket that resets every minute, unusable for a
-start/stop delta), so on that integration this field is best left blank
-until it adds one, or built yourself via HA's own **Riemann sum integral**
-helper on `sensor.<charger>_power`.
+*cumulative* kWh reading (e.g. ha-chargepoint's `session_energy_kwh`, or
+Emporia Vue's `sensor.<charger>_energy_today`) to have the stop alert
+report the energy used this session and its cost at your configured rate
+(**Per-zone charging rates** if the charger sits in a matching zone, else
+**Price per kWh** / **Away price per kWh**) — leave it blank for the
+start/stop alerts alone, with no energy or cost figure. Every reading is
+accumulated live throughout the session, not just sampled once at start
+and once at stop, so a session correctly sums its usage even if the sensor
+resets partway through for a reason unrelated to the session itself —
+Emporia Vue's own "Energy Today" resets at local midnight, which would
+otherwise silently undercount any overnight session that starts before
+midnight and ends after (confirmed live: a real 30 kWh overnight session
+reported as under 2 kWh before this fix). ha-emporia-ev's own energy
+sensor doesn't currently expose a cumulative session/lifetime reading
+(only a per-1-minute bucket that resets every minute — every "reading"
+would look like a reset), so on that integration this field is best left
+blank until it adds one, or built yourself via HA's own **Riemann sum
+integral** helper on `sensor.<charger>_power`.
 
 **Home charger power sensor** (optional) fixes a different quirk some
 integrations have: their status entity can keep reporting "charging" well
