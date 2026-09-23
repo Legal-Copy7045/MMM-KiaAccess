@@ -9,4 +9,4 @@
 # Python this pin will fail to resolve rather than silently installing an
 # older, untested release — see the "Python version" section of the
 # README (use a venv with python3.12+, or let `npm install` provision one).
-hyundai_kia_connect_api==4.31.0
+hyundai_kia_connect_api==4.33.1
