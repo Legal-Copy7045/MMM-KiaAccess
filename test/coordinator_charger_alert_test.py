@@ -273,7 +273,57 @@ def test_charger_stop_includes_pct_duration_and_vehicle_name():
     assert value["pct"] == 100.0
     assert value["vehicleName"] == "MelodEV"
     assert value["durationMin"] is not None and value["durationMin"] >= 0
-    print("-- charger stop: pct/duration/vehicle name included")
+    assert value["chargingStoppedAt"] is not None
+    print("-- charger stop: pct/duration/vehicle name/chargingStoppedAt included")
+
+
+def test_charger_power_entity_refines_stop_duration_and_finish_time():
+    """charger_power_entity is purely a passive data source: it must never
+    open/close a session or fire an alert on its own -- that would risk
+    exactly the flip-flop a brief post-finish power blip could otherwise
+    cause. It only refines the SINGLE stop alert's duration/finish time to
+    when power was actually last flowing, for chargers (ha-emporia-ev
+    observed) whose status entity keeps reporting "charging" well past the
+    real finish, until a scheduled session end."""
+    states = _FakeStates({"sensor.charger_power": _FakeState("0")})
+    coord = make_coordinator(
+        options={"charger_status_entity": "binary_sensor.charger", "charger_power_entity": "sensor.charger_power"},
+        states=states,
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    started_at = coord._charger_session["startedAt"]
+
+    fired_after_start = len(coord.hass.bus.fired)
+    _run(coord._async_charger_power_changed(_event(_FakeState("7200"))))  # real charging power
+    real_stop_at = coord._charger_session["lastActivePowerAt"]
+    # idle/BMS-balancing draw below the active threshold must NOT push the
+    # "last active" timestamp later, and must not fire anything on its own
+    _run(coord._async_charger_power_changed(_event(_FakeState("5"))))
+    assert coord._charger_session["lastActivePowerAt"] == real_stop_at
+    assert len(coord.hass.bus.fired) == fired_after_start
+
+    # the status entity itself only flips off much later (e.g. a scheduled
+    # session end), same as the real ha-emporia-ev report this is modeled on
+    _run(coord._async_charger_state_changed(_event(_FakeState("plugged_in_idle"))))
+
+    value = coord.hass.bus.fired[1][1]["value"]
+    expected_min = (real_stop_at - started_at) / 60000
+    assert abs(value["durationMin"] - expected_min) < 0.01, value
+    assert value["chargingStoppedAt"] is not None
+    print("-- charger power entity: stop alert's duration/finish time reflect the last real power reading, not the status entity's own later end time")
+
+
+def test_charger_power_changed_ignored_with_no_open_session_or_below_threshold():
+    coord = make_coordinator(options={"charger_status_entity": "binary_sensor.charger"})
+    # no open session yet -- must be a quiet no-op, not an error
+    _run(coord._async_charger_power_changed(_event(_FakeState("7200"))))
+    assert coord._charger_session is None
+
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    _run(coord._async_charger_power_changed(_event(_FakeState("10"))))  # below threshold
+    assert "lastActivePowerAt" not in coord._charger_session
+    assert len(coord.hass.bus.fired) == 1  # only the start alert -- power tracking fired nothing
+    print("-- charger power entity: no-op with no open session, and a below-threshold reading doesn't count as active")
 
 
 def test_charger_stop_month_totals_are_calendar_month_not_rolling_30_days():
@@ -344,6 +394,8 @@ ALL_TESTS = [
     test_charger_stop_reports_energy_and_cost,
     test_charger_stop_prefers_away_rate_when_not_at_home,
     test_charger_stop_includes_pct_duration_and_vehicle_name,
+    test_charger_power_entity_refines_stop_duration_and_finish_time,
+    test_charger_power_changed_ignored_with_no_open_session_or_below_threshold,
     test_charger_stop_month_totals_are_calendar_month_not_rolling_30_days,
     test_charger_stop_without_energy_entity_reports_no_kwh,
     test_charger_stop_with_negative_delta_ignored,

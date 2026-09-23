@@ -45,6 +45,14 @@ from .const import (
 # on any Fahrenheit-range value, so classifying CA as Fahrenheit here broke
 # remote climate start for every Canadian account.
 _FAHRENHEIT_REGIONS = {"USA"}
+
+# Below this, a `charger_power_entity` reading counts as "not really
+# charging" -- BMS balancing / 12V-system idle draw on a plugged-in car can
+# sit in the low tens of watts even once the traction battery itself is
+# done, so this needs to clear that noise floor without being so high it
+# ignores genuine trickle-charging near a full battery.
+CHARGER_POWER_ACTIVE_THRESHOLD_W = 50
+
 from .vehicle_state import build_state
 
 _LOGGER = logging.getLogger(__name__)
@@ -1793,6 +1801,40 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         )
         return {"cost": cost_out, "miles": miles, "costPerMile": cost_per_mile}
 
+    async def _async_charger_power_changed(self, event) -> None:
+        """entry.async_on_unload(async_track_state_change_event(...)) target
+        for the optional `charger_power_entity` -- while a charger session
+        is open (self._charger_session is not None), records the moment of
+        every reading at/above CHARGER_POWER_ACTIVE_THRESHOLD_W as
+        `lastActivePowerAt`. Purely a passive data source: it never opens,
+        closes, or fires an alert for a session itself (that stays entirely
+        driven by `charger_status_entity`, in _async_charger_state_changed)
+        -- so a brief post-finish top-off blip just moves this timestamp
+        later, it can never re-trigger a start/stop alert pair on its own.
+        _async_charger_state_changed reads this back at stop time to report
+        when charging actually finished, instead of whenever the status
+        entity's own session happens to end (some integrations -- ha-
+        emporia-ev observed -- keep a session's status as "charging" until
+        a scheduled end time well after the car stopped drawing current).
+        In-memory only (not persisted every tick, unlike the session's own
+        open/close, to avoid a disk write on every power sample) -- a HA
+        restart mid-session loses only this refinement, not the session
+        itself, falling back to the status-entity edge's own timestamp."""
+        try:
+            if self._charger_session is None:
+                return
+            new_state = event.data.get("new_state")
+            if new_state is None:
+                return
+            try:
+                power = float(new_state.state)
+            except (TypeError, ValueError):
+                return
+            if math.isfinite(power) and power >= CHARGER_POWER_ACTIVE_THRESHOLD_W:
+                self._charger_session["lastActivePowerAt"] = time.time() * 1000
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("charger power tracking failed", exc_info=True)
+
     async def _async_charger_state_changed(self, event) -> None:
         """entry.async_on_unload(async_track_state_change_event(...)) target
         for `charger_status_entity` -- fires charger_charging_started /
@@ -1896,8 +1938,18 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     cost = round(kwh * rate, 2)
 
             started_at = _num(session.get("startedAt"))
+            # charger_power_entity tracks the last moment power was actually
+            # flowing (see _async_charger_power_changed) -- some chargers
+            # (ha-emporia-ev observed) keep reporting "charging" on their
+            # status entity until a scheduled session end, well after the
+            # car stopped actually drawing current. Prefer that real
+            # last-active moment for duration/finish time; fall back to
+            # "now" (the status-entity edge itself) when no power entity is
+            # configured or no activity was ever observed this session --
+            # the exact previous behavior.
+            stopped_at = _num(session.get("lastActivePowerAt")) or (time.time() * 1000)
             duration_min = (
-                (time.time() * 1000 - started_at) / 60000 if started_at is not None else None
+                (stopped_at - started_at) / 60000 if started_at is not None else None
             )
 
             mtd = self._month_to_date_totals()
@@ -1929,6 +1981,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                         "currency": currency,
                         "pct": pct,
                         "durationMin": duration_min,
+                        "chargingStoppedAt": dt_util.utc_from_timestamp(
+                            stopped_at / 1000
+                        ).isoformat(),
                         "vehicleName": vehicle_name,
                         "monthCost": mtd["cost"],
                         "monthMiles": mtd["miles"],

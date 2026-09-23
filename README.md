@@ -281,6 +281,7 @@ The integration's **Configure** dialog holds **Scan interval**, **Poll the car
 directly** (+ **Live wake-up wait**), **Price per kWh** / **Away price per kWh**
 / **Home-charging zone** / **Per-zone charging rates** / **Away charge-cost
 sensor** / **Home charger status entity** / **Home charger energy sensor** /
+**Home charger power sensor** /
 **capacity**, **Range
 reach factor** / **reserve %**, **Calendar entities** / **Calendar look-ahead
 (hours)** / **Fixed destinations & zones**, and **Drive-time provider** / **Routing API key** / **Geocoding API
@@ -312,9 +313,26 @@ ha-emporia-ev doesn't currently expose a cumulative session/lifetime energy
 sensor (only a per-1-minute bucket that resets every minute, unusable for a
 start/stop delta), so on that integration this field is best left blank
 until it adds one, or built yourself via HA's own **Riemann sum integral**
-helper on `sensor.<charger>_power`. Works the same for any integration that
-exposes a genuinely on/off (or enum) charging-status entity and, optionally,
-a real cumulative kWh sensor — nothing charger-brand-specific is read. This
+helper on `sensor.<charger>_power`.
+
+**Home charger power sensor** (optional) fixes a different quirk some
+integrations have: their status entity can keep reporting "charging" well
+after the car actually stopped drawing current — ha-emporia-ev observed
+holding a session "charging" until a scheduled end time, an hour or more
+after real power draw hit zero. Point this at a live power reading in watts
+(e.g. Emporia's own `sensor.<charger>_power`) and the stop alert's
+`durationMin` / finish time reflect the last moment power was genuinely
+≥ 50 W, not whenever the status entity's own session happens to end. This
+is purely a passive data source: it never opens, closes, or fires an alert
+for a session by itself — only `charger_status_entity`'s own edges do that
+— so a brief top-off blip after the battery's already full just moves the
+reported finish time a little later; it can never cause an extra start/stop
+notification pair. Leave it blank to keep using the status entity's own end
+time, exactly as before.
+
+Works the same for any integration that exposes a genuinely on/off (or
+enum) charging-status entity and, optionally, a real cumulative kWh sensor
+and/or a live power sensor — nothing charger-brand-specific is read. This
 is independent of the car-reported **Charging started** / **Charging
 complete** / **Charging interrupted** alerts below — those watch the
 vehicle's own
@@ -1564,7 +1582,11 @@ Install and setup are **mode A** above. Some details:
     `value.vehicleName`.
   - `charger_charging_stopped`: `value.kwh`, `value.cost`, `value.currency`,
     `value.rateLabel` (the zone/home/away rate used, if any), `value.pct` (battery % at stop),
-    `value.durationMin`, `value.vehicleName`, plus `value.monthCost` /
+    `value.durationMin`, `value.chargingStoppedAt` (ISO 8601 timestamp —
+    when `charger_power_entity` is set and saw real activity this session,
+    the last moment power was ≥ 50 W; otherwise the same moment
+    `charger_status_entity` itself stopped reporting "charging"),
+    `value.vehicleName`, plus `value.monthCost` /
     `value.monthMiles` / `value.costPerMile` — charging cost, miles driven,
     and cost per mile since local midnight on the 1st of the current
     calendar month (distinct from the rolling-30-day figures on
