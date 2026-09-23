@@ -319,7 +319,12 @@ is independent of the car-reported **Charging started** / **Charging
 complete** / **Charging interrupted** alerts below — those watch the
 vehicle's own
 `ev_battery_is_charging`, which can lag a home charger's real status by a
-poll cycle or more.
+poll cycle or more. Each start/stop edge forces one live Kia poll before
+building the alert (like the card's own "Refresh now" button) so the
+reported battery %, charge power and ETA reflect this session, not
+whatever the last scheduled poll happened to have cached — without it, an
+edge landing between polls could report leftovers from before charging
+even began.
 
 **Ownership extras (optional):** [`examples/ha-ownership-package.yaml`](examples/ha-ownership-package.yaml)
 is a drop-in HA package that adds an efficiency proxy, a seasonal-range
