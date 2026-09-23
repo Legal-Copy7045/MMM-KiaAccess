@@ -19,7 +19,10 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError, Unauthorized
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 
 from . import kia_client
 from .account_poll import ACCOUNTS_KEY, AccountPoller, account_hash_for
@@ -251,6 +254,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(
         async_track_time_interval(hass, _calendar_tick, timedelta(minutes=1))
     )
+
+    # Charger start/stop alerts (see coordinator._async_charger_state_changed):
+    # an options change reloads the entry (see _async_options_updated below),
+    # so re-reading the option once here at setup is enough -- no separate
+    # listener-rewiring path needed when the user picks/changes the entity.
+    charger_entity = (entry.options.get("charger_status_entity") or "").strip()
+    if charger_entity:
+        entry.async_on_unload(
+            async_track_state_change_event(
+                hass, [charger_entity], coordinator._async_charger_state_changed  # noqa: SLF001
+            )
+        )
     return True
 
 

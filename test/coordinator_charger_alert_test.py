@@ -1,0 +1,249 @@
+"""KiaAccessCoordinator._async_charger_state_changed() -- the charger-agnostic
+"Charging started"/"Charging stopped" alerts (kia_access_alert reasons
+charger_charging_started/charger_charging_stopped) driven by an external
+charger's own status entity (ChargePoint's binary_sensor.*_charging,
+Emporia's status sensor, or any other HA integration's equivalent), not the
+car-reported ev_battery_is_charging conditions.py already alerts on.
+
+Same object.__new__()-plus-duck-typed-attributes approach as
+test/coordinator_alerts_test.py.
+
+Run: pip install homeassistant && python test/coordinator_charger_alert_test.py
+"""
+import os
+import sys
+import time
+import types
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.modules.setdefault("hyundai_kia_connect_api", type(sys)("hyundai_kia_connect_api"))
+
+from custom_components.kia_access.coordinator import KiaAccessCoordinator  # noqa: E402
+from fake_ha import FakeConfig as _FakeConfig  # noqa: E402
+from fake_ha import FakeStore as _FakeStore  # noqa: E402
+
+
+class _FakeState:
+    def __init__(self, state, last_changed=None):
+        self.state = state
+        self.attributes = {}
+        self.last_changed = last_changed
+
+
+class _FakeStates:
+    def __init__(self, data=None):
+        self._data = dict(data or {})
+
+    def get(self, entity_id):
+        return self._data.get(entity_id)
+
+    def set(self, entity_id, state, last_changed=None):
+        self._data[entity_id] = _FakeState(state, last_changed)
+
+    def async_all(self, domain):
+        return []
+
+
+class _FakeBus:
+    def __init__(self):
+        self.fired = []
+
+    def async_fire(self, event, data):
+        self.fired.append((event, data))
+
+
+class _FakeHass:
+    def __init__(self, states=None):
+        self.config = _FakeConfig()
+        self.states = states or _FakeStates()
+        self.bus = _FakeBus()
+
+
+class _FakeEntry:
+    def __init__(self, entry_id="e1", options=None, brand="KIA"):
+        self.entry_id = entry_id
+        self.options = options or {}
+        self.data = {"brand": brand}
+
+
+def make_coordinator(options=None, states=None, vehicle=None):
+    c = object.__new__(KiaAccessCoordinator)
+    c.entry = _FakeEntry(options=options or {})
+    c.hass = _FakeHass(states=states)
+    c.vehicle = vehicle or {"model": "EV9", "VIN": "KNDC1"}
+    c._charger_session = None
+    c._home_unplugged_since = None
+    c._moved_since = None
+    c._last_parked = None
+    c._timers_store = _FakeStore({})
+    return c
+
+
+def _event(new_state):
+    return types.SimpleNamespace(data={"new_state": new_state})
+
+
+def _run(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+# ---- _charger_is_charging normalization ----
+
+def test_charger_is_charging_normalizes_common_states():
+    f = KiaAccessCoordinator._charger_is_charging
+    assert f(_FakeState("on")) is True
+    assert f(_FakeState("Charging")) is True
+    assert f(_FakeState("off")) is False
+    assert f(_FakeState("Not Charging")) is False
+    assert f(_FakeState("plugged_in")) is False
+    assert f(None) is None
+    assert f(_FakeState("unavailable")) is None
+    print("-- _charger_is_charging: normalizes on/off/Charging/Not Charging/unknown")
+
+
+# ---- start alert ----
+
+def test_charger_start_fires_alert_and_opens_session():
+    states = _FakeStates({"sensor.charger_energy": _FakeState("2.5")})
+    coord = make_coordinator(
+        options={"charger_status_entity": "binary_sensor.charger", "charger_energy_entity": "sensor.charger_energy"},
+        states=states,
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    assert coord._charger_session is not None
+    assert coord._charger_session["startEnergy"] == 2.5
+    assert coord._timers_store._data["charger_session"] == coord._charger_session
+    events = coord.hass.bus.fired
+    assert len(events) == 1, events
+    name, data = events[0]
+    assert name == "kia_access_alert"
+    assert data["reason"] == "charger_charging_started"
+    assert data["active"] is True
+    assert data["message"] == "Charging started"
+    print("-- charger status on with no open session: fires charger_charging_started, opens session")
+
+
+def test_charger_duplicate_on_does_not_refire():
+    states = _FakeStates({"sensor.charger_energy": _FakeState("2.5")})
+    coord = make_coordinator(
+        options={"charger_status_entity": "binary_sensor.charger", "charger_energy_entity": "sensor.charger_energy"},
+        states=states,
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    assert len(coord.hass.bus.fired) == 1
+    print("-- a second 'on' with a session already open: no duplicate alert")
+
+
+def test_charger_unknown_state_ignored():
+    coord = make_coordinator(options={"charger_status_entity": "binary_sensor.charger"})
+    _run(coord._async_charger_state_changed(_event(_FakeState("unavailable"))))
+    assert coord._charger_session is None
+    assert coord.hass.bus.fired == []
+    print("-- unavailable/unrecognized state: ignored, no alert, no session opened")
+
+
+# ---- stop alert: energy + cost ----
+
+def test_charger_stop_reports_energy_and_cost():
+    states = _FakeStates({"sensor.charger_energy": _FakeState("2.5")})
+    coord = make_coordinator(
+        options={
+            "charger_status_entity": "binary_sensor.charger",
+            "charger_energy_entity": "sensor.charger_energy",
+            "price_per_kwh": 0.20,
+            "currency": "GBP",
+        },
+        states=states,
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    states.set("sensor.charger_energy", "14.5")  # +12 kWh this session
+    _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
+
+    assert coord._charger_session is None
+    assert coord._timers_store._data["charger_session"] is None
+    events = coord.hass.bus.fired
+    assert len(events) == 2, events
+    name, data = events[1]
+    assert name == "kia_access_alert"
+    assert data["reason"] == "charger_charging_stopped"
+    assert data["active"] is False
+    assert data["value"]["kwh"] == 12.0
+    assert data["value"]["cost"] == 2.4  # 12 kWh * 0.20/kWh
+    assert "12.0 kWh" in data["message"]
+    assert "2.4 GBP" in data["message"]
+    print("-- charger stop: 12 kWh delta priced at price_per_kwh, reported in the stop alert")
+
+
+def test_charger_stop_prefers_away_rate_when_not_at_home():
+    """No home_charge_zone/zone.home configured at all -> _charge_at_home()
+    can't resolve (no GPS/zone data in this fake), so this exercises the
+    "at_home is None -> home rate" branch, not the away rate -- away_price_per_kwh
+    only applies once the car's own location is known to be outside home. This
+    test pins that documented behavior so a future refactor can't silently
+    start guessing 'away' just because the zone lookup came back empty."""
+    states = _FakeStates({"sensor.charger_energy": _FakeState("0")})
+    coord = make_coordinator(
+        options={
+            "charger_status_entity": "binary_sensor.charger",
+            "charger_energy_entity": "sensor.charger_energy",
+            "price_per_kwh": 0.20,
+            "away_price_per_kwh": 0.45,
+        },
+        states=states,
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    states.set("sensor.charger_energy", "5")
+    _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
+    data = coord.hass.bus.fired[1][1]
+    assert data["value"]["cost"] == 1.0  # 5 kWh * home rate 0.20, not the away rate
+    print("-- charger stop: unresolved at-home state falls back to the home rate, not away")
+
+
+def test_charger_stop_without_energy_entity_reports_no_kwh():
+    coord = make_coordinator(options={"charger_status_entity": "binary_sensor.charger"})
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
+    data = coord.hass.bus.fired[1][1]
+    assert data["value"]["kwh"] is None
+    assert data["value"]["cost"] is None
+    assert data["message"] == "Charging stopped"
+    print("-- charger stop with no charger_energy_entity configured: plain 'Charging stopped', no figures")
+
+
+def test_charger_stop_with_negative_delta_ignored():
+    """A charger's energy sensor resetting/rolling over between start and stop
+    (a reboot, a lifetime-counter reset) must never report a negative or
+    nonsensical kWh figure."""
+    states = _FakeStates({"sensor.charger_energy": _FakeState("10")})
+    coord = make_coordinator(
+        options={"charger_status_entity": "binary_sensor.charger", "charger_energy_entity": "sensor.charger_energy",
+                 "price_per_kwh": 0.20},
+        states=states,
+    )
+    _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
+    states.set("sensor.charger_energy", "3")  # went DOWN -- a reset, not real usage
+    _run(coord._async_charger_state_changed(_event(_FakeState("off"))))
+    data = coord.hass.bus.fired[1][1]
+    assert data["value"]["kwh"] is None
+    assert data["value"]["cost"] is None
+    print("-- charger stop: an energy reading that decreased is treated as unknown, not a negative kWh")
+
+
+ALL_TESTS = [
+    test_charger_is_charging_normalizes_common_states,
+    test_charger_start_fires_alert_and_opens_session,
+    test_charger_duplicate_on_does_not_refire,
+    test_charger_unknown_state_ignored,
+    test_charger_stop_reports_energy_and_cost,
+    test_charger_stop_prefers_away_rate_when_not_at_home,
+    test_charger_stop_without_energy_entity_reports_no_kwh,
+    test_charger_stop_with_negative_delta_ignored,
+]
+
+if __name__ == "__main__":
+    for t in ALL_TESTS:
+        t()
+    print(f"\nAll {len(ALL_TESTS)} coordinator_charger_alert_test checks passed.")

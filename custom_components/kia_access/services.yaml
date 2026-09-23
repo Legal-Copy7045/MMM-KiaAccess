@@ -338,6 +338,8 @@ test_alert:
             - window_open
             - not_plugged_home
             - charge_interrupted
+            - charger_charging_started
+            - charger_charging_stopped
             - tyre_pressure
             - battery_12v_critical
             - unexpected_move

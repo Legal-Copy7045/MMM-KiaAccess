@@ -86,6 +86,15 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._last_parked: dict | None = None
         self._moved_since: float | None = None
         self._parked: dict | None = None
+        # in-progress session on the *external* charger_status_entity (Emporia,
+        # ChargePoint, any HA integration exposing a charging-status entity) --
+        # entirely separate from self._open_session (the car-reported session
+        # sessions.py tracks for the cost log): this one exists purely to time
+        # a start/stop pair for the charger_charging_started/_stopped alerts,
+        # so it works the same regardless of which charger brand is plugged
+        # into this option. None when no session is open OR no
+        # charger_status_entity is configured.
+        self._charger_session: dict | None = None
         self._was_on: bool | None = None
         self._awaiting_park_fix: bool = False
         self._calendar_lock = asyncio.Lock()
@@ -212,6 +221,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # detector exists to catch. Restore it the same way as the other
         # two timers.
         self._last_parked = tmdata.get("last_parked")
+        self._charger_session = tmdata.get("charger_session")
 
     async def async_set_pref(self, key: str, value) -> None:
         self.climate_prefs[key] = value
@@ -1607,6 +1617,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         brand = brand_display_name(self.entry.data.get(CONF_BRAND))
         return f"{brand} {model}".strip() if model else brand
 
+    def _alert_title(self) -> str:
+        """The configured notifications.title, or _default_alert_title() when
+        blank -- the one title every kia_access_alert source (condition-driven
+        or the charger-status-entity alerts below) should agree on."""
+        return (
+            self.entry.options.get("notifications", {}) or {}
+        ).get("title") or self._default_alert_title()
+
     async def _emit_alerts(self) -> None:
         """Fire kia_access_alert events on edge-triggered condition changes
         -- see _build_alert_state()/_track_parking()/_fire_condition_edges()
@@ -1624,7 +1642,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # of an actual options-flow save.
         cfg = dict(self.entry.options.get("notifications", {}) or {})
         if not cfg.get("title"):
-            cfg["title"] = self._default_alert_title()
+            cfg["title"] = self._alert_title()
         timers_before = (self._home_unplugged_since, self._moved_since, self._last_parked)
 
         state = self._build_alert_state()
@@ -1635,11 +1653,178 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
         timers_after = (self._home_unplugged_since, self._moved_since, self._last_parked)
         if timers_after != timers_before:
-            await self._timers_store.async_save({
-                "home_unplugged_since": self._home_unplugged_since,
-                "moved_since": self._moved_since,
-                "last_parked": self._last_parked,
-            })
+            await self._save_timers()
+
+    async def _save_timers(self) -> None:
+        """Persist every timer this coordinator keeps in `_timers_store` --
+        shared by _emit_alerts() (the home/moved/parked timers) and
+        _async_charger_state_changed() (charger_session), so neither call
+        site can silently drop the other's field by saving a partial dict."""
+        await self._timers_store.async_save({
+            "home_unplugged_since": self._home_unplugged_since,
+            "moved_since": self._moved_since,
+            "last_parked": self._last_parked,
+            "charger_session": self._charger_session,
+        })
+
+    # ---- external charger (ChargePoint, Emporia, or any other HA
+    # integration exposing a charging-status entity) start/stop alerts.
+    # Independent of the car-reported chargingStarted/chargeComplete
+    # conditions above: those depend on ev_battery_is_charging, which can lag
+    # a home charger's own status by a full poll cycle (or more, with "poll
+    # the car directly" off); this reacts to the status entity's own state
+    # change instead, so it fires as soon as HA sees it, and works the same
+    # for any charger brand -- everything below only ever reads generic HA
+    # entity state (a truthy/falsy status string, a numeric kWh reading), never
+    # anything ChargePoint- or Emporia-specific.
+
+    @staticmethod
+    def _charger_is_charging(state) -> bool | None:
+        """state.state -> True/False/None(unrecognized or unavailable). Covers
+        a binary_sensor's on/off, and the "Charging"/"Not Charging"-style
+        string states several EVSE integrations (ChargePoint, Emporia) use
+        for a plain sensor instead."""
+        if state is None:
+            return None
+        val = str(state.state).strip().lower().replace(" ", "_")
+        if val in ("on", "true", "1", "yes", "charging"):
+            return True
+        if val in (
+            "off", "false", "0", "no", "not_charging", "idle",
+            "plugged_in", "disconnected", "unplugged", "stopped",
+        ):
+            return False
+        return None  # unknown/unavailable, or a state string we don't recognize
+
+    def _charger_energy_reading(self) -> float | None:
+        """Current numeric value of the configured `charger_energy_entity`
+        (any unit the integration reports its own kWh sensor in -- start/stop
+        readings are only ever differenced against each other, so as long as
+        the entity's own unit is consistent between the two samples, this
+        never needs to know what that unit actually is)."""
+        eid = (self.entry.options.get("charger_energy_entity") or "").strip()
+        if not eid:
+            return None
+        st = self.hass.states.get(eid)
+        if st is None:
+            return None
+        try:
+            val = float(st.state)
+        except (TypeError, ValueError):
+            return None
+        return val if math.isfinite(val) else None
+
+    def _charger_rate(self) -> tuple[float | None, str | None]:
+        """Per-kWh rate + location label to cost an external-charger session
+        at -- "the defined rate in the app": the same per-zone `charge_rates`
+        lookup _update_sessions() prices the car-reported sessions with,
+        falling back to the home/away price_per_kwh pair keyed off whether
+        the car itself is currently in the configured home-charging zone."""
+        rate, label = self._charge_rate()
+        if rate is not None:
+            return rate, label
+        home = self.entry.options.get("price_per_kwh") or 0
+        away = self.entry.options.get("away_price_per_kwh")
+        at_home = self._charge_at_home()
+        try:
+            home = float(home)
+        except (TypeError, ValueError):
+            home = 0.0
+        try:
+            away = float(away) if away not in (None, "") else None
+        except (TypeError, ValueError):
+            away = None
+        if at_home is False and away is not None:
+            return away, "away"
+        return (home or None), ("home" if home else None)
+
+    async def _async_charger_state_changed(self, event) -> None:
+        """entry.async_on_unload(async_track_state_change_event(...)) target
+        for `charger_status_entity` -- fires charger_charging_started /
+        _stopped kia_access_alert events on each real on<->off edge, and on
+        stop, folds in the energy consumed (from `charger_energy_entity`, a
+        plain start/stop delta -- see _charger_energy_reading()) and its cost
+        at _charger_rate(). Wrapped in a broad except, same as
+        _fire_condition_edges(): a bad reading here must never crash the
+        listener and silently stop watching the entity for the rest of the
+        HA run."""
+        try:
+            new_state = event.data.get("new_state")
+            charging = self._charger_is_charging(new_state)
+            if charging is None:
+                return
+            was_open = self._charger_session is not None
+            if charging == was_open:
+                return  # not a real start/stop edge (e.g. a duplicate on->on)
+
+            title = self._alert_title()
+            vin = kia_client._vehicle_key_dict(self.vehicle) or None  # noqa: SLF001
+
+            if charging:
+                self._charger_session = {
+                    "startedAt": time.time() * 1000,
+                    "startEnergy": self._charger_energy_reading(),
+                }
+                await self._save_timers()
+                self.hass.bus.async_fire(
+                    EVENT_KIA_ACCESS_ALERT,
+                    {
+                        "entry_id": self.entry.entry_id,
+                        "reason": "charger_charging_started",
+                        "level": "info",
+                        "active": True,
+                        "title": title,
+                        "message": "Charging started",
+                        "value": None,
+                        "vin": vin,
+                    },
+                )
+                return
+
+            session = self._charger_session or {}
+            self._charger_session = None
+            await self._save_timers()
+
+            start_energy = session.get("startEnergy")
+            end_energy = self._charger_energy_reading()
+            kwh = None
+            if start_energy is not None and end_energy is not None:
+                delta = end_energy - start_energy
+                if delta >= 0:
+                    kwh = delta
+
+            cost, rate_label = None, None
+            if kwh is not None and kwh > 0:
+                rate, rate_label = self._charger_rate()
+                if rate is not None:
+                    cost = round(kwh * rate, 2)
+
+            currency = str(self.entry.options.get("currency") or "USD").upper()
+            parts = ["Charging stopped"]
+            detail = []
+            if kwh is not None:
+                detail.append(f"{round(kwh, 1)} kWh")
+            if cost is not None:
+                detail.append(f"{cost} {currency}" + (f" ({rate_label})" if rate_label else ""))
+            if detail:
+                parts.append(" - " + ", ".join(detail))
+            message = "".join(parts)
+
+            self.hass.bus.async_fire(
+                EVENT_KIA_ACCESS_ALERT,
+                {
+                    "entry_id": self.entry.entry_id,
+                    "reason": "charger_charging_stopped",
+                    "level": "info",
+                    "active": False,
+                    "title": title,
+                    "message": message,
+                    "value": {"kwh": kwh, "cost": cost, "rateLabel": rate_label},
+                    "vin": vin,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("charger status alert failed", exc_info=True)
 
     # commands gated by the "block automated climate" option
     _CLIMATE_COMMANDS = frozenset({"start_climate", "stop_climate"})

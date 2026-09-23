@@ -98,6 +98,7 @@ def make_coordinator(entry, hass, poller):
     c._last_parked = None
     c._moved_since = None
     c._parked = None
+    c._charger_session = None
     c._was_on = None
     c._awaiting_park_fix = False
     c._calendar_lock = asyncio.Lock()
