@@ -281,6 +281,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass, [charger_power_entity], coordinator._async_charger_power_changed  # noqa: SLF001
             )
         )
+
+    # Accumulates charger_energy_entity's increases live throughout an open
+    # session (see coordinator._async_charger_energy_changed) instead of a
+    # single reading-at-stop-minus-reading-at-start snapshot, which
+    # silently undercounts a session whose energy entity resets mid-session
+    # for a reason unrelated to the session itself (ha-emporia-ev's
+    # "Energy Today" resets at local midnight -- breaks any ordinary
+    # overnight session).
+    charger_energy_entity = (entry.options.get("charger_energy_entity") or "").strip()
+    if charger_energy_entity:
+        entry.async_on_unload(
+            async_track_state_change_event(
+                hass, [charger_energy_entity], coordinator._async_charger_energy_changed  # noqa: SLF001
+            )
+        )
     return True
 
 

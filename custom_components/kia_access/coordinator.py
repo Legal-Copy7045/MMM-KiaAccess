@@ -1749,7 +1749,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             away = float(away) if away not in (None, "") else None
         except (TypeError, ValueError):
             away = None
-        if at_home is False and away is not None:
+        # away_price_per_kwh's own documented semantics (strings.json):
+        # "0 = fall back to the home rate" -- `away is not None` alone
+        # treats an explicit 0 as a real (free) away rate instead, pricing
+        # any away session at $0/kWh. `if away:` also excludes it, same as
+        # every other 0-means-unset numeric option in this file.
+        if at_home is False and away:
             return away, "away"
         return (home or None), ("home" if home else None)
 
@@ -1835,6 +1840,63 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         except Exception:  # noqa: BLE001
             _LOGGER.debug("charger power tracking failed", exc_info=True)
 
+    @staticmethod
+    def _accumulate_charger_energy(session: dict, reading: float | None) -> None:
+        """Fold one more charger_energy_entity reading into `session`'s
+        running total, in place -- shared by _async_charger_energy_changed
+        (every live state change, against self._charger_session) and
+        _async_charger_state_changed's stop path (one final manual sample
+        against its own local `session` var, taken after
+        self._charger_session has already been cleared -- in case the
+        entity's real last tick of the session landed before that last
+        state-change event reached us, or it ticks slower than the status
+        entity does). A static method, not an instance one, precisely so
+        it can be handed either."""
+        if reading is None or not math.isfinite(reading):
+            return
+        last = session.get("lastEnergyReading")
+        if last is not None:
+            delta = reading - last
+            if delta > 0:
+                session["accumulatedKwh"] = (session.get("accumulatedKwh") or 0.0) + delta
+            # delta <= 0: a reset (or a flat repeat) -- never subtracted,
+            # just re-bases the comparison for next time
+        session["lastEnergyReading"] = reading
+
+    async def _async_charger_energy_changed(self, event) -> None:
+        """entry.async_on_unload(async_track_state_change_event(...)) target
+        for `charger_energy_entity` -- while a session is open, integrates
+        every increase into self._charger_session["accumulatedKwh"] instead
+        of the plain (reading-at-stop minus reading-at-start) delta this
+        replaced. That naive snapshot silently undercounted any session
+        whose energy entity resets mid-session for a reason unrelated to
+        the charging session itself -- confirmed live: ha-emporia-ev's
+        "Energy Today" resets at local midnight, so an ordinary overnight
+        session (started before midnight, ended after) had its whole
+        pre-midnight portion subtracted away by the stop-time snapshot,
+        undercounting both the kWh and its cost. Integrating deltas as they
+        happen is immune to that regardless of WHEN or WHY the entity
+        resets (or which timezone it resets in): a decrease is recognized
+        as a reset and simply re-bases the running comparison rather than
+        being (wrongly) subtracted, so nothing between two real increases
+        is ever lost. A ChargePoint-style entity that already resets to 0
+        at each session's own start behaves identically to the old
+        snapshot approach, so this is a strict improvement, not a
+        trade-off."""
+        try:
+            if self._charger_session is None:
+                return
+            new_state = event.data.get("new_state")
+            if new_state is None:
+                return
+            try:
+                reading = float(new_state.state)
+            except (TypeError, ValueError):
+                return
+            self._accumulate_charger_energy(self._charger_session, reading)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("charger energy tracking failed", exc_info=True)
+
     async def _async_charger_state_changed(self, event) -> None:
         """entry.async_on_unload(async_track_state_change_event(...)) target
         for `charger_status_entity` -- fires charger_charging_started /
@@ -1845,8 +1907,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         event.data.value.* directly instead of having to guess this
         installation's actual entity_id slugs for five different sensors.
         On stop, folds in the energy consumed (from `charger_energy_entity`,
-        a plain start/stop delta -- see _charger_energy_reading()) and its
-        cost at _charger_rate(). Wrapped in a broad except, same as
+        accumulated live throughout the session -- see
+        _accumulate_charger_energy()/_async_charger_energy_changed(), not a
+        plain start/stop snapshot) and its cost at _charger_rate(). Wrapped
+        in a broad except, same as
         _fire_condition_edges(): a bad reading here must never crash the
         listener and silently stop watching the entity for the rest of the
         HA run."""
@@ -1890,7 +1954,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             if charging:
                 self._charger_session = {
                     "startedAt": time.time() * 1000,
-                    "startEnergy": self._charger_energy_reading(),
+                    # seeds the baseline _async_charger_energy_changed
+                    # compares its first live reading against; that
+                    # listener (not this snapshot) does the actual
+                    # accumulation from here on -- see its own docstring
+                    "lastEnergyReading": self._charger_energy_reading(),
+                    "accumulatedKwh": 0.0,
                 }
                 await self._save_timers()
                 self.hass.bus.async_fire(
@@ -1921,15 +1990,18 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
             session = self._charger_session or {}
             self._charger_session = None
+            # one final catch-up sample against the now-detached local
+            # `session` dict -- see _accumulate_charger_energy's own
+            # docstring for why this (not another reading-at-stop-minus-
+            # reading-at-start snapshot) is still correct even across a
+            # mid-session counter reset (ha-emporia-ev's "Energy Today"
+            # resets at local midnight, breaking any plain overnight-session
+            # snapshot delta -- confirmed live).
+            self._accumulate_charger_energy(session, self._charger_energy_reading())
             await self._save_timers()
 
-            start_energy = session.get("startEnergy")
-            end_energy = self._charger_energy_reading()
-            kwh = None
-            if start_energy is not None and end_energy is not None:
-                delta = end_energy - start_energy
-                if delta >= 0:
-                    kwh = delta
+            accumulated = session.get("accumulatedKwh")
+            kwh = accumulated if accumulated and accumulated > 0 else None
 
             cost, rate_label = None, None
             if kwh is not None and kwh > 0:
