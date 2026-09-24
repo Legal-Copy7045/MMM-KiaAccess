@@ -20,9 +20,17 @@ sys.modules.setdefault("hyundai_kia_connect_api", type(sys)("hyundai_kia_connect
 
 from homeassistant.util import dt as dt_util  # noqa: E402
 
+from custom_components.kia_access import coordinator as coordinator_mod  # noqa: E402
 from custom_components.kia_access.coordinator import KiaAccessCoordinator  # noqa: E402
 from fake_ha import FakeConfig as _FakeConfig  # noqa: E402
 from fake_ha import FakeStore as _FakeStore  # noqa: E402
+
+# _async_charger_state_changed() sleeps CHARGER_START_SETTLE_SECONDS before
+# building the start alert (see the constant's own docstring) -- zeroed here
+# so these tests run in milliseconds, not 90 real seconds per start-alert
+# check. It's read from the module namespace at call time, so patching the
+# module attribute (not the KiaAccessCoordinator class) is what takes effect.
+coordinator_mod.CHARGER_START_SETTLE_SECONDS = 0
 
 
 class _FakeState:
@@ -176,6 +184,36 @@ def test_charger_duplicate_on_does_not_refire():
     _run(coord._async_charger_state_changed(_event(_FakeState("on"))))
     assert len(coord.hass.bus.fired) == 1
     print("-- a second 'on' with a session already open: no duplicate alert")
+
+
+def test_charger_start_settle_delay_skips_alert_if_session_changed_during_sleep():
+    """If the session closes (or closes and reopens) while the start
+    alert's settle delay is still asleep, the delayed alert must recognize
+    its own session token is stale and skip firing -- otherwise it would
+    report numbers for a session that's already someone else's, e.g. a
+    very short false start racing a real stop."""
+    import asyncio
+
+    coordinator_mod.CHARGER_START_SETTLE_SECONDS = 0.05
+    try:
+        coord = make_coordinator(options={"charger_status_entity": "binary_sensor.charger"})
+
+        async def _race():
+            start_task = asyncio.ensure_future(
+                coord._async_charger_state_changed(_event(_FakeState("on")))
+            )
+            await asyncio.sleep(0.01)  # let the start branch open the session, then sleep
+            await coord._async_charger_state_changed(_event(_FakeState("plugged_in_idle")))
+            await start_task
+
+        asyncio.run(_race())
+
+        reasons = [data["reason"] for _, data in coord.hass.bus.fired]
+        assert reasons == ["charger_charging_stopped"], reasons
+        assert coord._charger_session is None
+    finally:
+        coordinator_mod.CHARGER_START_SETTLE_SECONDS = 0
+    print("-- charger start settle delay: a session that closes while the delayed start alert is asleep skips it, instead of firing stale numbers")
 
 
 def test_charger_unknown_state_ignored():
@@ -457,6 +495,7 @@ ALL_TESTS = [
     test_charger_is_charging_normalizes_common_states,
     test_charger_start_fires_alert_and_opens_session,
     test_charger_duplicate_on_does_not_refire,
+    test_charger_start_settle_delay_skips_alert_if_session_changed_during_sleep,
     test_charger_unknown_state_ignored,
     test_charger_stop_reports_energy_and_cost,
     test_charger_stop_prefers_away_rate_when_not_at_home,
