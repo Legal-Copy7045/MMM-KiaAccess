@@ -53,6 +53,18 @@ _FAHRENHEIT_REGIONS = {"USA"}
 # ignores genuine trickle-charging near a full battery.
 CHARGER_POWER_ACTIVE_THRESHOLD_W = 50
 
+# How long to wait, after charger_status_entity first reports "charging",
+# before sampling the car for the start alert's pct/kw/etaMin. A charger can
+# flip its own status the instant the contactor closes, well before the car
+# has finished the EVSE handshake and actually started drawing current --
+# confirmed live: even a freshly force-refreshed poll (see
+# _async_charger_state_changed) taken right at that instant still showed
+# "0.0kW" and a "0 minutes" ETA, because the CAR's own telemetry genuinely
+# hadn't ramped up yet, not because the poll was stale. A real Kia/Hyundai
+# EV typically finishes negotiating and starts drawing meaningful power
+# within well under this window.
+CHARGER_START_SETTLE_SECONDS = 90
+
 from .vehicle_state import build_state
 
 _LOGGER = logging.getLogger(__name__)
@@ -1929,31 +1941,32 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 except (TypeError, ValueError):
                     return None
 
-            # self.vehicle is only as fresh as the last scheduled Kia poll --
-            # up to a full scan_interval old (30 min by default) -- so
-            # without this, a charger-status edge that lands between polls
-            # reports stale leftovers instead of this session's real numbers
-            # (0 kW / a previous session's stale ETA at start; a stale % at
-            # stop). Force a live pull now: the car is actively
-            # charging/just finished, so unlike waking a parked, idle car
-            # this doesn't cost anything charging itself isn't already
-            # covering. Same technique as async_force_refresh() (the manual
-            # "Refresh now" button). Left unguarded -- DataUpdateCoordinator
-            # .async_request_refresh() already swallows a failed poll
-            # internally (last_update_success flips False, self.vehicle
-            # just stays whatever it was), so this never raises out to the
-            # outer except and abort the alert entirely over a bad poll.
-            self._force_next_refresh = True
-            await self.async_request_refresh()
-
-            title = self._alert_title()
-            vin = kia_client._vehicle_key_dict(self.vehicle) or None  # noqa: SLF001
-            vehicle_name = self._vehicle_display_name()
-            pct = _num(self.vehicle.get("ev_battery_percentage"))
+            async def _force_refresh() -> None:
+                # self.vehicle is only as fresh as the last scheduled Kia
+                # poll -- up to a full scan_interval old (30 min by
+                # default) -- so without this, a charger-status edge that
+                # lands between polls reports stale leftovers instead of
+                # this session's real numbers. Force a live pull now: the
+                # car is actively charging/just finished, so unlike waking
+                # a parked, idle car this doesn't cost anything charging
+                # itself isn't already covering. Same technique as
+                # async_force_refresh() (the manual "Refresh now" button).
+                # Left unguarded -- DataUpdateCoordinator
+                # .async_request_refresh() already swallows a failed poll
+                # internally (last_update_success flips False, self.vehicle
+                # just stays whatever it was), so this never raises out to
+                # the outer except and abort the alert entirely over a bad
+                # poll.
+                self._force_next_refresh = True
+                await self.async_request_refresh()
 
             if charging:
+                # Open the session -- and start its energy/power tracking
+                # listeners accumulating -- immediately, before the settle
+                # delay below, so nothing that happens during it is missed.
+                session_token = time.time() * 1000
                 self._charger_session = {
-                    "startedAt": time.time() * 1000,
+                    "startedAt": session_token,
                     # seeds the baseline _async_charger_energy_changed
                     # compares its first live reading against; that
                     # listener (not this snapshot) does the actual
@@ -1962,6 +1975,34 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     "accumulatedKwh": 0.0,
                 }
                 await self._save_timers()
+
+                # Give the car a moment to actually finish the EVSE
+                # handshake and ramp up to real power before sampling it --
+                # see CHARGER_START_SETTLE_SECONDS's own comment: a fresh
+                # poll taken right at the instant the charger's status
+                # flips can still genuinely show 0kW / a 0-minute ETA,
+                # because the CAR itself hasn't started yet, not because
+                # the reading was stale.
+                await asyncio.sleep(CHARGER_START_SETTLE_SECONDS)
+
+                # The session may have closed (or even closed and reopened)
+                # while asleep -- e.g. a very short false start, or a flaky
+                # status entity. Only fire for the SAME session opened
+                # above; whatever happened to it since was already handled
+                # by that other edge, and firing here too would report
+                # stale/misleading numbers for a session that isn't this
+                # one anymore.
+                current = self._charger_session
+                if current is None or current.get("startedAt") != session_token:
+                    return
+
+                await _force_refresh()
+
+                title = self._alert_title()
+                vin = kia_client._vehicle_key_dict(self.vehicle) or None  # noqa: SLF001
+                vehicle_name = self._vehicle_display_name()
+                pct = _num(self.vehicle.get("ev_battery_percentage"))
+
                 self.hass.bus.async_fire(
                     EVENT_KIA_ACCESS_ALERT,
                     {
@@ -1987,6 +2028,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     },
                 )
                 return
+
+            # stop: fires immediately, no settle delay -- charging has by
+            # definition already ended, so there's no ramp-up race to wait out
+            await _force_refresh()
+            title = self._alert_title()
+            vin = kia_client._vehicle_key_dict(self.vehicle) or None  # noqa: SLF001
+            vehicle_name = self._vehicle_display_name()
+            pct = _num(self.vehicle.get("ev_battery_percentage"))
 
             session = self._charger_session or {}
             self._charger_session = None

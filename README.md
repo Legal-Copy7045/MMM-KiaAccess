@@ -350,7 +350,14 @@ building the alert (like the card's own "Refresh now" button) so the
 reported battery %, charge power and ETA reflect this session, not
 whatever the last scheduled poll happened to have cached — without it, an
 edge landing between polls could report leftovers from before charging
-even began.
+even began. The **start** alert additionally waits ~90 seconds after the
+charger first reports "charging" before sampling and firing — a charger
+can flip its own status the instant its contactor closes, before the car
+has actually finished the EVSE handshake and started drawing current, so
+even a freshly force-refreshed poll taken right at that instant can
+genuinely show 0 kW and a 0-minute ETA (confirmed live). If the session
+ends again before that wait is up (a very short false start), the delayed
+alert recognizes it and skips firing rather than reporting stale numbers.
 
 **Ownership extras (optional):** [`examples/ha-ownership-package.yaml`](examples/ha-ownership-package.yaml)
 is a drop-in HA package that adds an efficiency proxy, a seasonal-range
