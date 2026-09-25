@@ -1028,6 +1028,22 @@ the ETA by. A **Geoapify** key is also used to geocode calendar / static
 locations even when the provider is `estimate` — HA's built-in Nominatim
 geocoder is increasingly blocked.
 
+**Call budget.** Live drive times are only fetched **while the car is at
+home**, and only for the destinations the mirror's panel shows (your fixed
+destinations and picked zones, then calendar events soonest first, up to
+**Destinations to route**, default 8). Other rows, and every row while the
+car is away, stay straight-line estimates (`~`). Refreshes run at most
+every **15 min** from 6am to 11pm and **hourly** overnight (both in
+**Configure**), plus once straight away when the car gets home. Each routed
+destination costs one call per refresh, counted against **Routing calls
+per month** (default 18,000; what's left is spread evenly over the
+remaining days). A 401/403 (bad key, or TomTom's `InsufficientFunds`)
+pauses routing for 6 h instead of retrying. With `tomtom`, per-destination
+routes are used instead of a matrix, because TomTom bills a 1 x N matrix as
+N transactions from its much smaller free matrix allowance (2,500 a month,
+compared with 20,000 routing calls). `drive_time_status.budget` on the
+range-reach sensor shows the month's usage.
+
 **Reachable-area map.** A map of how far you can drive, shaded, with your saved
 places pinned. Two providers, both free:
 

@@ -321,6 +321,7 @@ class _FakePrefsCoord:
         self._prefs_store = _FakeStore({})
         self._geo_store = _FakeStore({"geo": {}})
         self._timers_store = _FakeStore(timers_data)
+        self._route_store = _FakeStore({})
 
 
 _lp = {"lat": 40.71, "lon": -79.75, "odo": 12345.0}
