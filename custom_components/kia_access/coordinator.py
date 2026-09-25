@@ -19,6 +19,7 @@ from . import account_poll
 from . import analytics as observed_analytics
 from . import kia_client
 from . import range as drive_range
+from . import route_budget
 from . import routing as drive_routing
 from . import sessions as charge_sessions
 from . import trips as drive_trips
@@ -161,6 +162,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._route_at: float = 0.0
         self._route_origin: tuple | None = None
         self._route_status: dict = {}
+        # routing calls spent this month/day + any auth-error pause (persisted,
+        # so a restart doesn't hand the month a fresh allowance)
+        self._route_budget: dict = {}
+        self._route_store = Store(hass, 1, f"{DOMAIN}_routebudget_{entry.entry_id}")
         self._sessions: list[dict] = []
         self._open_session: dict | None = None
         self._ext_pending: dict | None = None  # away session awaiting a public cost
@@ -228,6 +233,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         }
         if len(self._geo_cache) != len(raw):
             await self._geo_store.async_save({"geo": self._geo_cache})
+        self._route_budget = await self._route_store.async_load() or {}
         tmdata = await self._timers_store.async_load() or {}
         self._home_unplugged_since = tmdata.get("home_unplugged_since")
         self._moved_since = tmdata.get("moved_since")
@@ -856,12 +862,17 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         cal_when = {c["name"]: c.get("when") for c in self._cal_pois}
         zone_id = {z["name"]: z.get("entity_id") for z in self._zone_pois()}
         reach_km = out.get("reachKm")
+        # routes only hold while the car is still where they were routed from
+        # (routing only runs at home -- away, the list falls back to estimates)
+        origin = self._route_origin
+        routes = self._route_out if origin and (
+            self._haversine_km(lat, lon, origin[0], origin[1]) or 0.0) <= 1.0 else {}
         for p in out.get("pois") or []:
             if p["name"] in zone_id:
                 p["zone_id"] = zone_id[p["name"]]
             if p["name"] in cal_when and cal_when[p["name"]]:
                 p["when"] = cal_when[p["name"]]
-            rt = self._route_out.get(self._poi_key(p["lat"], p["lon"]))
+            rt = routes.get(self._poi_key(p["lat"], p["lon"]))
             if not rt:
                 continue
             p["km"] = rt["distanceKm"]
@@ -886,15 +897,21 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
     async def _refresh_drive_times(self) -> None:
         """Ask the configured routing provider for real car -> POI drive times.
 
-        Throttled to 10 min, but also re-runs whenever the car has moved > 1 km
-        since the last matrix so the ETAs track the drive.
+        Budgeted (see route_budget.py) so a free tier lasts the month: only
+        while the car is at home, only for the destinations the MagicMirror
+        panel shows, at most every drive_time_interval_min by day and
+        drive_time_night_interval_min overnight (straight away once when the
+        car arrives), and never past routing_monthly_budget. A 401/403 (bad
+        key, or TomTom's InsufficientFunds) pauses routing for 6 h rather
+        than retrying on every pass.
         """
-        provider = (self.entry.options.get("drive_time_provider") or "estimate").strip()
-        key = (self.entry.options.get("routing_api_key") or "").strip()
-        self._route_status = {"provider": provider, "targets": 0, "routed": 0,
-                              "at": None, "error": None}
+        opts = self.entry.options
+        provider = (opts.get("drive_time_provider") or "estimate").strip()
+        key = (opts.get("routing_api_key") or "").strip()
         if provider not in drive_routing.PROVIDERS or not key:
             self._route_out = {}
+            self._route_status = {"provider": provider, "targets": 0, "routed": 0,
+                                  "at": None, "error": None}
             return
 
         def _n(x):
@@ -907,9 +924,13 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         lon = _n(self.vehicle.get("location_longitude"))
         if lat is None or lon is None:
             return
-        pois = self._reach_pois()
-        if not pois:
-            self._route_out = {}
+        self._route_status["provider"] = provider
+        self._route_status.pop("skipped", None)
+        if not self._at_home({"locationLat": lat, "locationLon": lon}):
+            self._route_status["skipped"] = "car not at home"
+            return
+        if self._route_budget.get("paused_until", 0) > time.time():
+            self._route_status["skipped"] = "paused after an auth/credit error"
             return
 
         moved = (
@@ -917,44 +938,87 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             or self._haversine_km(lat, lon, self._route_origin[0], self._route_origin[1])
             > 1.0
         )
-        if not moved and time.monotonic() - self._route_at < 600:
+        now = dt_util.now()
+        gap = route_budget.interval_seconds(
+            now, opts.get("drive_time_interval_min"),
+            opts.get("drive_time_night_interval_min"),
+        )
+        if not moved and time.monotonic() - self._route_at < gap:
+            return
+        for k in ("error", "route_errors", "route_error"):
+            self._route_status.pop(k, None)
+
+        # the mirror panel's rows, measured from the car's current spot
+        cands: list[dict] = []
+        seen: set = set()
+        for src, group in (("zone", self._zone_pois()), ("static", self._static_pois),
+                           ("calendar", self._cal_pois)):
+            for p in group:
+                if p["name"] in seen:
+                    continue
+                seen.add(p["name"])
+                km = self._haversine_km(lat, lon, p["lat"], p["lon"])
+                cands.append({**p, "source": src, "km": km or 0.0})
+        pois = [
+            p for p in route_budget.select_routed(
+                cands, opts.get("zone_entities") or opts.get("mm_zone_entities"),
+                opts.get("drive_time_max_routed"),
+            )
+            if p["km"] > route_budget.SKIP_NEAR_ORIGIN_KM
+        ]
+
+        budget = opts.get("routing_monthly_budget")
+        state = route_budget.roll(self._route_budget, now)
+        self._route_budget = state
+        self._route_status.update({
+            "targets": len(pois),
+            "budget": {
+                "used_month": state["used"],
+                "used_today": state["used_today"],
+                "allowance_today": round(route_budget.daily_allowance(state, now, budget)),
+            },
+        })
+        self._route_at = time.monotonic()
+        if not pois:
+            self._route_out = {}
+            self._route_origin = (lat, lon)
+            return
+        if not route_budget.can_spend(state, now, len(pois), budget):
+            self._route_status["skipped"] = "today's share of the monthly budget is used"
             return
 
-        self._route_status["targets"] = len(pois)
         origin = {"lat": lat, "lon": lon}
         out: dict = {}
-
-        # 1) one matrix call for a fast baseline (time + distance for all)
-        req = drive_routing.matrix_request(
-            provider, origin, [{"lat": p["lat"], "lon": p["lon"]} for p in pois],
-            key, {"traffic": True},
-        )
-        if req:
-            try:
-                data = await self._http_json(req)
-                for p, row in zip(
-                    pois, drive_routing.parse_matrix(provider, data, len(pois))
-                ):
-                    if row:
-                        out[self._poi_key(p["lat"], p["lon"])] = dict(row)
-            except Exception as err:  # noqa: BLE001
-                self._route_status["error"] = f"matrix: {err}"
-                _LOGGER.warning("Kia Access: drive-time matrix (%s) failed: %s",
-                                provider, err)
-
-        # 2) per-destination route calls enrich with the road breakdown + the
-        #    free-flow time (for the traffic-delay colouring). TomTom only, and
-        #    only when `drive_time_routes` isn't turned off.
-        do_routes = (
-            provider == "tomtom"
-            and self.entry.options.get("drive_time_routes", True)
-        )
+        calls = 0
+        error: Exception | None = None
+        # TomTom: one route call per destination (live traffic + "via" roads)
+        # instead of a matrix -- TomTom bills a 1 x N matrix as N transactions
+        # from a far smaller free allowance than calculateRoute's. Geoapify,
+        # or TomTom with routes off: one matrix call (N credits).
+        do_routes = provider == "tomtom" and opts.get("drive_time_routes", True)
         self._route_status["routes_enabled"] = do_routes
         n_routed = 0
         route_errs: dict = {}
-        if do_routes:
+        if not do_routes:
+            req = drive_routing.matrix_request(
+                provider, origin, [{"lat": p["lat"], "lon": p["lon"]} for p in pois],
+                key, {"traffic": True},
+            )
             if req:
-                await asyncio.sleep(0.5)  # gap after the matrix call
+                calls += len(pois)
+                try:
+                    data = await self._http_json(req)
+                    for p, row in zip(
+                        pois, drive_routing.parse_matrix(provider, data, len(pois))
+                    ):
+                        if row:
+                            out[self._poi_key(p["lat"], p["lon"])] = dict(row)
+                except Exception as err:  # noqa: BLE001
+                    error = err
+                    self._route_status["error"] = f"matrix: {err}"
+                    _LOGGER.warning("Kia Access: drive-time matrix (%s) failed: %s",
+                                    provider, err)
+        else:
             for i, p in enumerate(pois):
                 if i:
                     await asyncio.sleep(0.5)  # some TomTom keys cap at ~1-2 req/s
@@ -966,6 +1030,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     continue
                 parsed = None
                 for attempt in (1, 2):
+                    calls += 1
                     try:
                         rdata = await self._http_json(rreq)
                         parsed = drive_routing.parse_route(provider, rdata)
@@ -974,29 +1039,49 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                         break
                     except Exception as err:  # noqa: BLE001
                         msg = str(err)[:160]
-                        if attempt == 1 and ("429" in msg or "403" in msg):
+                        if attempt == 1 and "429" in msg:
                             await asyncio.sleep(1.5)  # back off once on a rate limit
                             continue
+                        error = err
                         route_errs[p["name"]] = msg
                         _LOGGER.warning("Kia Access: route call for %r failed: %s",
                                         p["name"], err)
                         break
                 if parsed:
-                    out.setdefault(self._poi_key(p["lat"], p["lon"]), {}).update(parsed)
+                    out[self._poi_key(p["lat"], p["lon"])] = parsed
                     n_routed += 1
+                if error is not None and route_budget.is_auth_error(error):
+                    break  # the rest would be refused the same way
         if route_errs:
             self._route_status["route_errors"] = route_errs
             self._route_status["route_error"] = next(iter(route_errs.values()))
 
-        self._route_out = out
+        state = route_budget.spend(state, calls)
+        if error is not None and route_budget.is_auth_error(error):
+            state["paused_until"] = time.time() + route_budget.AUTH_PAUSE_SECONDS
+            _LOGGER.warning(
+                "Kia Access: %s refused the routing key (%s) -- pausing drive-time "
+                "routing for %d h", provider, str(error)[:80],
+                route_budget.AUTH_PAUSE_SECONDS // 3600,
+            )
+        self._route_budget = state
+        try:
+            await self._route_store.async_save(state)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("could not persist routing budget", exc_info=True)
+
+        # a failed pass from the same spot keeps the last good times
+        if out or moved:
+            self._route_out = out
         self._route_origin = (lat, lon)
-        self._route_at = time.monotonic()
         self._route_status["routed"] = len(out)
         self._route_status["with_roads"] = n_routed
+        self._route_status["budget"].update(
+            used_month=state["used"], used_today=state["used_today"])
         self._route_status["at"] = dt_util.utcnow().isoformat()
         _LOGGER.info(
-            "Kia Access drive times (%s): %s/%s routed, %s with road detail",
-            provider, len(out), len(pois), n_routed,
+            "Kia Access drive times (%s): %s/%s routed, %s call(s), %s used this month",
+            provider, len(out), len(pois), calls, state["used"],
         )
 
     async def _http_json(self, req: dict):
