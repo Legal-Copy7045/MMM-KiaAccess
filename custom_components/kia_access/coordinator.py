@@ -928,6 +928,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         self._route_status.pop("skipped", None)
         if not self._at_home({"locationLat": lat, "locationLon": lon}):
             self._route_status["skipped"] = "car not at home"
+            # forget where we last routed from, so getting home re-routes at
+            # once rather than waiting out the rest of the interval
+            self._route_origin = None
             return
         if self._route_budget.get("paused_until", 0) > time.time():
             self._route_status["skipped"] = "paused after an auth/credit error"

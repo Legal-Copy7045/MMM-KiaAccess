@@ -149,6 +149,14 @@ async def main():
     await c._refresh_drive_times()
     assert len(c.calls) == 8  # and no routing while away
 
+    # ---- back home inside the interval: arrival re-routes straight away ----
+    c._route_at = time.monotonic()
+    c.vehicle.update(location_latitude=HOME[0], location_longitude=HOME[1])
+    await c._refresh_drive_times()
+    assert len(c.calls) == 12, c.calls
+    rows = {p["name"]: p for p in c.range_reach["pois"]}
+    assert rows["Nana's"]["routed"]
+
     # ---- 403 (TomTom out of credits): no retry, stop the pass, pause ----
     c = make(TOMTOM)
     c.reply = lambda req: RuntimeError('HTTP 403: {"code":"InsufficientFunds"}')
