@@ -85,6 +85,8 @@ jobs:
         run: python test/range_test.py
       - name: routing parity
         run: python test/routing_test.py
+      - name: routing call budget
+        run: python test/route_budget_test.py
       - name: trips parity
         run: python test/trips_test.py
       - name: analytics parity
@@ -119,6 +121,8 @@ jobs:
         run: python test/service_authorization_test.py
       - name: Range-map key wiring
         run: python test/map_keys_test.py
+      - name: Coordinator routing budget
+        run: python test/coordinator_routing_budget_test.py
 
   hacs:
     runs-on: ubuntu-latest
