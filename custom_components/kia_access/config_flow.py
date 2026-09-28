@@ -857,6 +857,24 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                                     "drive_time_routes",
                                     default=opts.get("drive_time_routes", True),
                                 ): bool,
+                                vol.Optional(
+                                    "drive_time_interval_min",
+                                    default=float(opts.get("drive_time_interval_min") or 15),
+                                ): _number(5, 240, 1),
+                                vol.Optional(
+                                    "drive_time_night_interval_min",
+                                    default=float(
+                                        opts.get("drive_time_night_interval_min") or 60
+                                    ),
+                                ): _number(15, 720, 1),
+                                vol.Optional(
+                                    "drive_time_max_routed",
+                                    default=float(opts.get("drive_time_max_routed") or 8),
+                                ): _number(1, 30, 1),
+                                vol.Optional(
+                                    "routing_monthly_budget",
+                                    default=float(opts.get("routing_monthly_budget") or 18000),
+                                ): _number(100, 1000000, 100),
                             }
                         ),
                         options={"collapsed": True},

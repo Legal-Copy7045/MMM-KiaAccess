@@ -31,6 +31,7 @@ const CORE_TESTS = [
   "test/sessions_test.py",
   "test/range_test.py",
   "test/routing_test.py",
+  "test/route_budget_test.py",
   "test/trips_test.py",
   "test/analytics_test.py",
   "test/account_poll_test.py"
@@ -47,7 +48,8 @@ const HASS_TESTS = [
   "test/coordinator_charger_alert_test.py",
   "test/entity_gating_test.py",
   "test/service_authorization_test.py",
-  "test/map_keys_test.py"
+  "test/map_keys_test.py",
+  "test/coordinator_routing_budget_test.py"
 ];
 
 function run(file) {
