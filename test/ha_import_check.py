@@ -859,7 +859,7 @@ for _f in ("icon.png", "icon@2x.png"):
 s = json.load(open(os.path.join(ROOT, "custom_components/kia_access/strings.json"), encoding="utf-8"))
 e = json.load(open(os.path.join(ROOT, "custom_components/kia_access/translations/en.json"), encoding="utf-8"))
 assert s == e, "strings.json and translations/en.json differ"
-assert {"user", "otp", "vehicle", "reauth_confirm"} <= set(s["config"]["step"])
+assert {"user", "otp", "vehicle", "reauth_confirm", "reconfigure"} <= set(s["config"]["step"])
 assert "vin" not in s["config"]["step"]["user"]["data"], (
     "VIN must not be collected on the initial form -- it's only knowable "
     "after login, from the account's own vehicle list (async_step_vehicle)"
@@ -1880,5 +1880,85 @@ assert _entry.data["token"] == {"access_token": "fresh", "refresh_token": "rm"}
 assert _entry.data["password"] == "new"
 assert _reloads == ["e1"]
 print("reauth with a one-time code: updates the existing entry and reloads it")
+
+
+# --- Reconfigure: renew the login ahead of its ~30-day expiry, from the
+# integration's own menu, via the same update-in-place path as reauth. ---
+def _make_reconfig_flow(try_login):
+    entry = type("E", (), {"entry_id": "e1", "data": {
+        "username": "user@example.com", "password": "old", "pin": "1234",
+        "region": "USA", "brand": "KIA", "vin": "VIN1", "token": {"stale": True},
+    }})()
+    reloads = []
+
+    class _CE:
+        def async_get_entry(self, entry_id):
+            return entry if entry_id == "e1" else None
+
+        def async_update_entry(self, e, data=None):
+            e.data = data
+
+        async def async_reload(self, entry_id):
+            reloads.append(entry_id)
+
+        def async_entries(self, domain):
+            return [entry]
+
+    hass = type("H", (), {"config_entries": _CE()})()
+    hass.async_add_executor_job = lambda fn, *a: _asyncio_done(fn(*a))
+    hass.async_create_task = lambda coro: asyncio.get_event_loop().create_task(coro)
+
+    flow = object.__new__(cf_mod.KiaAccessConfigFlow)
+    flow.hass = hass
+    flow.context = {"entry_id": "e1"}
+    flow._reauth_entry = None
+    flow._try_login = try_login
+    flow._vm = type("VM", (), {"vehicles": {"1": _FakeVehicle("VIN1")}})()
+    flow._verify_otp = lambda code: {"access_token": "after-otp"}
+    flow.async_abort = lambda reason: {"type": "abort", "reason": reason}
+    flow.async_show_form = lambda **kw: {"type": "form", **kw}
+    return flow, entry, reloads
+
+
+def _need_otp():
+    raise cf_mod._NeedOtp()
+
+
+async def _reconfig_steps(flow, *inputs):
+    out = []
+    step = cf_mod.KiaAccessConfigFlow.async_step_reconfigure
+    for i, user_input in enumerate(inputs):
+        if user_input is not None and i > 0 and isinstance(user_input, dict) and "code" in user_input:
+            step = cf_mod.KiaAccessConfigFlow.async_step_otp
+        out.append(await step(flow, user_input))
+    await asyncio.sleep(0)  # let the scheduled reload task run
+    return out
+
+
+# 1. opening it just shows the form, pre-filled, password optional
+_f, _e, _r = _make_reconfig_flow(lambda: {"access_token": "x"})
+_form = asyncio.run(_reconfig_steps(_f, None))[0]
+assert _form["type"] == "form" and _form["step_id"] == "reconfigure", _form
+assert _form["description_placeholders"] == {"username": "user@example.com"}
+_keys = {str(k): k for k in _form["data_schema"].schema}
+assert _keys["password"].default() == "" and _keys["pin"].default() == "1234"
+
+# 2. no code needed: blank password keeps the saved one, new token stored, reload
+_f, _e, _r = _make_reconfig_flow(lambda: {"access_token": "renewed"})
+_res = asyncio.run(_reconfig_steps(_f, {"password": "", "pin": "1234"}))[0]
+assert _res == {"type": "abort", "reason": "reconfigure_successful"}, _res
+assert _e.data["password"] == "old" and _e.data["token"] == {"access_token": "renewed"}
+assert _r == ["e1"]
+
+# 3. code needed (the normal case): password -> code -> renewed in place, a NEW
+#    password is saved, and it never takes the add-a-new-account path
+_f, _e, _r = _make_reconfig_flow(_need_otp)
+_f._otp_dest = "+1 ***-**42"
+_res = asyncio.run(_reconfig_steps(_f, {"password": "new", "pin": "1234"}, {"code": "123456"}))
+assert _res[0]["step_id"] == "otp", _res[0]
+assert _res[1] == {"type": "abort", "reason": "reconfigure_successful"}, _res[1]
+assert _e.data["password"] == "new" and _e.data["token"] == {"access_token": "after-otp"}
+assert _r == ["e1"]
+print("reconfigure: renews the login in place (form, no-code and code paths)")
 
 print("ha_import_check: ok")

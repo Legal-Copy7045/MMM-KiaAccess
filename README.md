@@ -1494,6 +1494,16 @@ enroll.py"** once you're within `otpWarnDays` of `otpLifetimeDays` (both
 configurable; the 30-day default is an estimate — tune it to what you observe).
 The `otpExpiring` notification check fires the same warning to other modules.
 
+**Home Assistant — renew ahead of expiry:** the long-lived login lasts about
+30 days and then Kia demands a fresh code; if you wait, the entry shows
+*"Failed to set up: Kia needs re-enrollment"* until you **Re-authenticate** it.
+To avoid that, open **Settings → Devices & Services → Kia Access**, use the
+entry's **⋮ menu → Reconfigure**, and step through password (leave it blank to
+keep the saved one) and the code Kia sends. It replaces the stored token in
+place and reloads the entry — no need to delete and re-add anything, and your
+history, options and entity IDs are untouched. Do it any time once the
+`otp_expiring` alert (7 days out by default) fires.
+
 `hyundai_kia_connect_api` ≥ 4.25.3 auto-recovers a Kia USA session that the
 server expires (error 1003 / 1005) without a fresh OTP, so re-enrollment is
 needed much less often than it used to be — `npm install` keeps the library

@@ -34,6 +34,14 @@
           "password": "Password",
           "pin": "PIN"
         }
+      },
+      "reconfigure": {
+        "title": "Kia Access — renew sign-in",
+        "description": "Renew the login for {username} before it expires. The manufacturer's long-lived login lasts about 30 days and can only be renewed with a one-time code, which will be sent to your phone or email on the next step. Leave the password blank to keep the saved one.",
+        "data": {
+          "password": "New password (optional)",
+          "pin": "PIN"
+        }
       }
     },
     "error": {
@@ -42,7 +50,8 @@
     },
     "abort": {
       "already_configured": "This account is already set up.",
-      "reauth_successful": "Signed in again."
+      "reauth_successful": "Signed in again.",
+      "reconfigure_successful": "Sign-in renewed."
     }
   },
   "options": {

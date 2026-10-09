@@ -344,6 +344,45 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"username": self._job.get("username", "")},
         )
 
+    async def async_step_reconfigure(self, user_input: dict | None = None) -> FlowResult:
+        """Renew the login ahead of its ~30-day expiry, from the integration's
+        own menu -- without waiting for Kia to reject the old one and the
+        entry to land in "Failed to set up". Same machinery as reauth: a
+        login with no saved token always makes Kia send a fresh one-time
+        code and issue a new remember-me token, which _finish() then stores
+        on the existing entry (the OTP step routes there for any flow with
+        _reauth_entry set). Leaving the password blank keeps the saved one."""
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        self._reauth_entry = entry
+        self._reconfiguring = True
+        self._job = dict(entry.data)
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get("password"):
+                self._job["password"] = user_input["password"]
+            self._job[CONF_PIN] = user_input.get(CONF_PIN, self._job.get(CONF_PIN, ""))
+            try:
+                result = await self.hass.async_add_executor_job(self._try_login)
+            except _NeedOtp:
+                return await self.async_step_otp()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Kia reconfigure failed: %s", type(err).__name__)
+                errors["base"] = "auth"
+            else:
+                return self._finish(result)
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("password", default=""): str,
+                    vol.Optional(CONF_PIN, default=self._job.get(CONF_PIN, "")): str,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"username": self._job.get("username", "")},
+        )
+
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -512,7 +551,11 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.hass.async_create_task(
                 self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
             )
-            return self.async_abort(reason="reauth_successful")
+            return self.async_abort(
+                reason="reconfigure_successful"
+                if getattr(self, "_reconfiguring", False)
+                else "reauth_successful"
+            )
 
         data = {
             "username": self._job["username"],
