@@ -7,7 +7,7 @@ from datetime import timedelta
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL, EntityCategory, UnitOfLength
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
@@ -431,6 +431,11 @@ class KiaAccessChargeSessionSensor(KiaAccessEntity, SensorEntity):
             self._unsub()
             self._unsub = None
 
+    # @callback is load-bearing: async_track_time_interval runs a plain def
+    # in an executor thread, and async_write_ha_state() must run on the
+    # event loop (HA logs "calls async_write_ha_state from a thread other
+    # than the event loop" -- observed 300+ times in one night's charge).
+    @callback
     def _tick(self, _now) -> None:
         if self.coordinator._open_session is not None:  # noqa: SLF001
             self.async_write_ha_state()
