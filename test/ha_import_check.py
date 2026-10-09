@@ -1798,4 +1798,18 @@ assert r3.get("type") == "create_entry"
 r4 = _run_finish_with_uid("", 0, [legacy_blank_entry])
 assert r4.get("type") == "create_entry"
 
+# The charge-session sensor's 60s timer callback calls async_write_ha_state().
+# async_track_time_interval runs a plain `def` in an executor thread, so
+# without @callback HA flags a thread-safety violation on every tick (303
+# warnings in one charging night, observed live).
+from homeassistant.core import HassJobType, HassJob, is_callback  # noqa: E402
+from custom_components.kia_access.sensor import KiaAccessChargeSessionSensor  # noqa: E402
+
+assert is_callback(KiaAccessChargeSessionSensor._tick), (
+    "KiaAccessChargeSessionSensor._tick must be a @callback so HA runs it "
+    "on the event loop, not an executor thread"
+)
+assert HassJob(KiaAccessChargeSessionSensor._tick).job_type is HassJobType.Callback
+print("charge-session tick: runs on the event loop (@callback)")
+
 print("ha_import_check: ok")
