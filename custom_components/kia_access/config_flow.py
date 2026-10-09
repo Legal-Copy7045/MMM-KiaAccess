@@ -395,6 +395,14 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         vehicle account is auto-picked and never sees a vehicle step at
         all; only a genuine multi-vehicle account is asked to choose."""
         self._token = token
+        # Reauth of an EXISTING entry: the new token just replaces the old
+        # one in place (_finish). Falling through to _finish_with_uid() is
+        # the add-a-new-account path -- it sets the unique id and aborts
+        # "already_configured" because that very entry exists, so a reauth
+        # that needed a one-time code could never complete (only the no-code
+        # path in async_step_reauth_confirm ever reached _finish).
+        if self._reauth_entry is not None:
+            return self._finish(token)
         vehicles = await self.hass.async_add_executor_job(self._list_vehicles)
         self._vehicle_count = len(vehicles)
         if len(vehicles) <= 1:

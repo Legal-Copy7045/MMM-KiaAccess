@@ -1812,4 +1812,73 @@ assert is_callback(KiaAccessChargeSessionSensor._tick), (
 assert HassJob(KiaAccessChargeSessionSensor._tick).job_type is HassJobType.Callback
 print("charge-session tick: runs on the event loop (@callback)")
 
+
+# --- reauth that needs a one-time code must UPDATE the existing entry, not
+# fall into the add-a-new-account path (which aborts "already_configured"
+# because that very entry exists). Regression for: password -> SMS code ->
+# "this account is already set up" on the HA "re-enroll" prompt. ---
+def _run_reauth_with_otp():
+    entry = type("E", (), {"entry_id": "e1", "data": {
+        "username": "user@example.com", "password": "old", "pin": "1234",
+        "region": "USA", "brand": "KIA", "vin": "VIN1", "token": {"stale": True},
+    }})()
+    updates, reloads = [], []
+
+    class _CE:
+        def async_update_entry(self, e, data=None):
+            updates.append(data)
+            e.data = data
+
+        async def async_reload(self, entry_id):
+            reloads.append(entry_id)
+
+        def async_entries(self, domain):
+            return [entry]
+
+    hass = type("H", (), {"config_entries": _CE()})()
+    hass.async_add_executor_job = lambda fn, *a: _asyncio_done(fn(*a))
+    hass.async_create_task = lambda coro: asyncio.get_event_loop().create_task(coro)
+
+    flow = object.__new__(cf_mod.KiaAccessConfigFlow)
+    flow.hass = hass
+    flow._reauth_entry = entry
+    flow._job = dict(entry.data, password="new", pin="1234")
+    flow._vehicle_count = None
+    flow._vm = type("VM", (), {"vehicles": {"1": _FakeVehicle("VIN1")}})()
+    def _real_style_abort():
+        # what HA does when the unique id matches an existing entry -- i.e.
+        # exactly the entry being reauthenticated
+        from homeassistant.data_entry_flow import AbortFlow
+        raise AbortFlow("already_configured")
+
+    flow._abort_if_unique_id_configured = _real_style_abort
+    flow._verify_otp = lambda code: {"access_token": "fresh", "refresh_token": "rm"}
+    flow.async_abort = lambda reason: {"type": "abort", "reason": reason}
+    called = {"uid": False}
+
+    async def _no_new_account(uid):
+        called["uid"] = True
+
+    flow.async_set_unique_id = _no_new_account
+
+    async def _go():
+        res = await cf_mod.KiaAccessConfigFlow.async_step_otp(flow, {"code": "123456"})
+        await asyncio.sleep(0)  # let the scheduled reload task run
+        return res
+
+    return asyncio.run(_go()), entry, updates, reloads, called
+
+
+async def _asyncio_done(v):
+    return v
+
+
+_res, _entry, _updates, _reloads, _called = _run_reauth_with_otp()
+assert _res == {"type": "abort", "reason": "reauth_successful"}, _res
+assert _called["uid"] is False, "reauth must not take the add-a-new-account path"
+assert _entry.data["token"] == {"access_token": "fresh", "refresh_token": "rm"}
+assert _entry.data["password"] == "new"
+assert _reloads == ["e1"]
+print("reauth with a one-time code: updates the existing entry and reloads it")
+
 print("ha_import_check: ok")
