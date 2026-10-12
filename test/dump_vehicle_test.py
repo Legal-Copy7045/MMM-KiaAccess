@@ -673,4 +673,14 @@ try:
 except kia_client.ClientError:
     pass
 
+# a step-limited int (V2L limit, steps of 10) off the grid is refused
+try:
+    _run_rec({"command": "set_v2l_limit", "region": "EU", "options": {"limit": 25}})
+    raise AssertionError("limit 25 is off the 10% grid")
+except kia_client.ClientError as e:
+    assert "multiple of 10" in str(e)
+# departure days in every documented form
+assert kia_client.parse_days("d", "mon,tue") == [1, 2]
+assert kia_client.parse_days("d", ["Monday", "friday", 0]) == [0, 1, 5]
+
 print("dump_vehicle tests passed")

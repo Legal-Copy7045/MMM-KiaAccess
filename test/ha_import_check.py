@@ -10,6 +10,9 @@ import json
 import os
 import sys
 
+import voluptuous as vol
+from homeassistant.helpers import config_validation as cv
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
@@ -276,6 +279,8 @@ class _FakeCoord:
     _wake_allowed = co.KiaAccessCoordinator._wake_allowed
     _in_quiet_hours = co.KiaAccessCoordinator._in_quiet_hours
     data_age_seconds = None  # car hasn't reported yet
+    _retry_from_cache = False
+    _last_wake_at = None
 
     def __init__(self, opts):
         self.entry = type(
@@ -810,6 +815,17 @@ assert set(_diag_result["versions"]) == {"integration", "hyundai_kia_connect_api
 assert _diag_result["polling"]["is_stale"] is None  # no coordinator in this fake
 _diag_entry.data = {"username": "d@e.com"}
 assert asyncio.run(diag.async_get_config_entry_diagnostics(_diag_hass, _diag_entry))["auth"] == {"token_saved": False}
+# the library's unset valid_until (datetime.min) must not break the
+# download in a timezone east of UTC
+_orig_tz = _dt_util.DEFAULT_TIME_ZONE
+_dt_util.set_default_time_zone(_dt_util.get_time_zone("Europe/Berlin"))
+try:
+    _diag_entry.data = {"username": "d@e.com", "token": {
+        "valid_until": "0001-01-01T00:00:00", "enrolled_at": "garbage"}}
+    _auth = asyncio.run(diag.async_get_config_entry_diagnostics(_diag_hass, _diag_entry))["auth"]
+    assert _auth["access_token_valid_until"] is None and _auth["enrolled_at"] is None, _auth
+finally:
+    _dt_util.set_default_time_zone(_orig_tz)
 
 init = importlib.import_module(pkg)
 assert hasattr(init, "_register_frontend")
@@ -1989,4 +2005,28 @@ assert _e.data["password"] == "new" and _e.data["token"] == {"access_token": "af
 assert _r == ["e1"]
 print("reconfigure: renews the login in place (form, no-code and code paths)")
 
+
+
+# service schema helpers: days in every documented form, steps enforced,
+# and a malformed time rejected by the schema (before any Kia login)
+_svc_days = init._days
+assert _svc_days(["mon", "TUE"]) == [1, 2] and _svc_days("mon,fri") == [1, 5] and _svc_days([0, 6]) == [0, 6]
+try:
+    _svc_days(["funday"])
+    raise AssertionError("an unknown day must be refused")
+except vol.Invalid:
+    pass
+_step = init._on_step(20, 10)
+assert _step(30) == 30
+try:
+    _step(25)
+    raise AssertionError("25 is off the 10% grid")
+except vol.Invalid:
+    pass
+try:
+    cv.time("7.30")
+    raise AssertionError("cv.time must reject 7.30")
+except vol.Invalid:
+    pass
+print("service schema helpers: days / step / time validated up front")
 print("ha_import_check: ok")

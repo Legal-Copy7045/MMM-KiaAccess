@@ -27,6 +27,7 @@ function mockFetch(routes) {
       attributes: {
         kia_access_raw: true,
         friendly_name: "Kia EV9 Status",
+        account: "USA:KIA:someone@example.com",
         ev_battery_percentage: 63,
         is_locked: "true",
         note: "cached"
@@ -48,6 +49,7 @@ function mockFetch(routes) {
   assert.strictEqual(out.rangeReach.driveTimeSource, "tomtom", "range_reach attached");
   assert.strictEqual(out.rangeReach.pois[0].name, "Work");
   assert.ok(!("friendly_name" in out.vehicle), "cosmetic attrs stripped");
+  assert.ok(!("account" in out.vehicle), "the Kia login (account attr) must never reach the payload / MQTT");
   assert.ok(!("kia_access_raw" in out.vehicle));
   assert.strictEqual(out._meta.source, "homeassistant");
   assert.strictEqual(out._meta.haEntity, "sensor.kia_ev9_status");

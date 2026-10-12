@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, ENTITIES
+from .vehicle_state import to_bool
 from .entity import KiaAccessEntity
 
 _TRUE = {True, "true", "True", 1, "1", "on", "yes"}
@@ -56,7 +57,10 @@ class KiaAccessBinarySensor(KiaAccessEntity, BinarySensorEntity):
         elif val in _FALSE:
             state = False
         else:
-            return None
+            # numeric codes (the EV9's plugged-in connector type, e.g. 4)
+            state = to_bool(val)
+            if state is None:
+                return None
         return (not state) if self._invert else state
 
 

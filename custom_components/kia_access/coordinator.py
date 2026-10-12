@@ -70,7 +70,7 @@ CHARGER_START_SETTLE_SECONDS = 90
 # of after a whole scan_interval -- see _update_failed().
 QUICK_RETRY_SECONDS = 60
 
-from .vehicle_state import build_state
+from .vehicle_state import build_state, to_bool
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,9 +78,11 @@ _LOGGER = logging.getLogger(__name__)
 class KiaAccessCoordinator(DataUpdateCoordinator):
     """Polls the Kia cloud via the shared kia_client and caches the last state."""
 
-    # see _update_failed() -- class default too, for instances built
-    # without __init__ (the coordinator test harnesses)
+    # see _update_failed() / _wake_allowed() -- class defaults too, for
+    # instances built without __init__ (the coordinator test harnesses)
     _quick_retry_used = False
+    _retry_from_cache = False
+    _last_wake_at: datetime | None = None
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         minutes = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES)
@@ -314,8 +316,10 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             self._open_session,
             {
                 "t": time.time() * 1000,
-                "charging": v.get("ev_battery_is_charging"),
-                "plugged": v.get("ev_battery_is_plugged_in"),
+                # sessions.update() wants strict True/False/None -- the raw
+                # values can be ints (0/1, or the EV9's connector code 4)
+                "charging": to_bool(v.get("ev_battery_is_charging")),
+                "plugged": to_bool(v.get("ev_battery_is_plugged_in")),
                 "batteryPct": _num(v.get("ev_battery_percentage")),
                 "chargeKw": _num(v.get("ev_charging_power")),
                 "atHome": self._charge_at_home(),
@@ -1210,6 +1214,9 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         polled at the normal pace, not hammered every minute."""
         if not self._quick_retry_used:
             self._quick_retry_used = True
+            # the retry reads Kia's cache: if this poll woke the car and the
+            # car didn't answer, waking it again a minute later won't help
+            self._retry_from_cache = True
             try:
                 return UpdateFailed(
                     f"{msg} (retrying in {QUICK_RETRY_SECONDS}s)",
@@ -1251,8 +1258,17 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         except (TypeError, ValueError):
             interval_min = 0.0
         if interval_min > 0:
+            limit = interval_min * 60
             age = self.data_age_seconds
-            if age is not None and age < interval_min * 60:
+            if age is not None and age < limit:
+                return False
+            # ...nor within the interval of our own last attempt: a wake the
+            # car never answered (no signal, weak 12V) leaves its report
+            # old, which alone would allow a wake on every poll -- exactly
+            # the drain this option is for
+            if self._last_wake_at is not None and (
+                dt_util.utcnow() - self._last_wake_at
+            ).total_seconds() < limit:
                 return False
         return True
 
@@ -1260,9 +1276,21 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         d = self.entry.data
         # async_force_refresh() sets this for exactly one call to make a manual
         # "Refresh now" wake the car even when "poll car directly" is off.
-        forced = self._force_next_refresh
-        self._force_next_refresh = False
-        poll_now = forced or (self._poll_car_directly() and self._wake_allowed())
+        # The one-shot flags below belong to the scheduled/forced poll only.
+        # A command job (extra carries `command`) must leave them alone --
+        # a command run while a "Refresh now" is still queued used to clear
+        # the flag, so that refresh read the cache instead of waking the car.
+        is_poll = "command" not in extra
+        forced = self._force_next_refresh if is_poll else False
+        retry_from_cache = self._retry_from_cache if is_poll else False
+        if is_poll:
+            self._force_next_refresh = False
+            self._retry_from_cache = False
+        poll_now = forced or (
+            not retry_from_cache
+            and self._poll_car_directly()
+            and self._wake_allowed()
+        )
         timeout = (
             self.entry.options.get(
                 "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
@@ -1336,6 +1364,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict:
         async with self._update_lock:
             job = self._job()
+            if job.get("refresh"):
+                self._last_wake_at = dt_util.utcnow()
             fetch_err: Exception | None = None
             otp_required = False
             try:

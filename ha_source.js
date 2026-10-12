@@ -19,6 +19,9 @@
 const SKIP_ATTRS = new Set([
   "kia_access_raw",
   "entry_id",
+  // region:brand:username -- the Kia login email; MQTT would publish it
+  // as a retained topic any subscriber can read
+  "account",
   "vehicle_name",
   "note",
   "friendly_name",

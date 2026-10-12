@@ -122,6 +122,45 @@ def test_quick_retry_once_per_outage():
     print("-- first failure after a success retries in 60s, the next waits the normal interval")
 
 
+def test_unanswered_wake_still_spaced():
+    """A wake the car never answers leaves its own report old -- the
+    interval must still hold, going by our last attempt."""
+    c = _coord({"poll_car_directly": True, "wake_interval_min": 240}, reported_minutes_ago=600)
+    assert c._job()["refresh"] is True
+    c._last_wake_at = dt_util.utcnow() - timedelta(minutes=30)
+    assert c._job()["refresh"] is False, "30 min after an unanswered wake: no new wake"
+    c._last_wake_at = dt_util.utcnow() - timedelta(minutes=241)
+    assert c._job()["refresh"] is True
+    print("-- wake interval holds even when the car never answered")
+
+
+def test_quick_retry_reads_cache():
+    def failing(job):
+        raise RuntimeError("force refresh timed out")
+
+    account_poll.kia_client.fetch = failing
+    c = _coord({"poll_car_directly": True}, reported_minutes_ago=600)
+    c.account_poller = account_poll.AccountPoller(_FakeHass(), "acct-retry-cache")
+    try:
+        asyncio.run(c._async_update_data())
+    except UpdateFailed as err:
+        assert err.retry_after == 60
+    assert c._last_wake_at is not None, "the failed poll did try to wake"
+    job = c._job()
+    assert job["refresh"] is False, "the 60s retry must read the cache, not wake again"
+    assert c._job()["refresh"] is True, "...and only that one retry"
+    print("-- the quick retry after a failed wake reads the cache")
+
+
+def test_command_leaves_refresh_flag():
+    c = _coord({"poll_car_directly": False})
+    c._force_next_refresh = True
+    assert c._job(command="lock", options={})["refresh"] is False
+    assert c._force_next_refresh is True, "a command must not eat a queued Refresh now"
+    assert c._job()["refresh"] is True
+    print("-- a command doesn't consume a queued Refresh now")
+
+
 if __name__ == "__main__":
     test_default_is_unchanged()
     test_quiet_hours_overnight()
@@ -129,4 +168,7 @@ if __name__ == "__main__":
     test_manual_refresh_ignores_quiet_hours_and_interval()
     test_wake_interval_uses_cars_own_report()
     test_quick_retry_once_per_outage()
+    test_unanswered_wake_still_spaced()
+    test_quick_retry_reads_cache()
+    test_command_leaves_refresh_flag()
     print("all coordinator wake/retry tests passed")

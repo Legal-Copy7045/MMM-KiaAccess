@@ -70,7 +70,7 @@ g.KiaAccessEntities={
     { "key": "front_right_window_is_open", "domain": "binary_sensor", "name": "Front-right window", "device_class": "window" },
     { "key": "back_left_window_is_open", "domain": "binary_sensor", "name": "Rear-left window", "device_class": "window" },
     { "key": "back_right_window_is_open", "domain": "binary_sensor", "name": "Rear-right window", "device_class": "window" },
-    { "key": "ev_charge_port_door_is_open", "domain": "binary_sensor", "name": "Charge port door", "device_class": "door" },
+    { "key": "ev_charge_port_door_is_open", "domain": "binary_sensor", "name": "Charge port door", "device_class": "door", "enabled_default": false },
     { "key": "engine_is_running", "domain": "binary_sensor", "name": "Engine running", "device_class": "running" },
     { "key": "oil_level_warning_is_on", "domain": "binary_sensor", "name": "Oil level low", "device_class": "problem", "category": "diagnostic", "enabled_default": false },
     { "key": "ev_v2l_status", "domain": "binary_sensor", "name": "V2L active", "device_class": "running", "enabled_default": false }
@@ -1887,7 +1887,15 @@ g.KiaAccessCommands={
       }
     }
 
-    return { conditions: out, meta: { charging: triState(s.charging) } };
+    // An unknown charging sample (API hiccup) carries the last known state
+    // forward instead of erasing it -- otherwise true, null, false never
+    // sees the stop (no charge_complete / charge_interrupted) and true,
+    // null, true fires a second "Charging started" mid-session.
+    var chargingNow = triState(s.charging);
+    if (chargingNow === null && (prev._charging === true || prev._charging === false)) {
+      chargingNow = prev._charging;
+    }
+    return { conditions: out, meta: { charging: chargingNow } };
   }
 
   return { evaluate: evaluate, CHECK_DEFAULTS: CHECK_DEFAULTS, DEFAULTS: DEFAULTS };
