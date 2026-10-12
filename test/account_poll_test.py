@@ -248,4 +248,16 @@ assert poller.refcount == 1, "unloading one entry must not drop the other's refe
 poller.refcount -= 1
 assert poller.refcount == 0, "unloading the last entry must leave nothing referencing it"
 
+# a live wake asks kia_client to wake only this coordinator's own car,
+# even though every car on the account is read back
+_seen = []
+account_poll.kia_client.fetch = lambda j: (_seen.append(dict(j)), _fake_fetch(j))[1]
+wake_poller = account_poll.AccountPoller(_FakeHass(), "acct-wake-own")
+asyncio.run(wake_poller.async_fetch({**job, "vin": "CARB", "refresh": True, "forceRefreshTimeout": 30}))
+assert _seen[-1]["wakeVin"] == "CARB" and _seen[-1]["allVehicles"] is True and _seen[-1]["vin"] == ""
+wake_poller._last_fetched_at -= account_poll.DEDUP_WINDOW_SEC + 1
+asyncio.run(wake_poller.async_fetch({**job, "vin": "CARB", "refresh": False}))
+assert _seen[-1]["wakeVin"] == "", "a cache read wakes nobody"
+account_poll.kia_client.fetch = _fake_fetch
+
 print("account_poll_test: ok")

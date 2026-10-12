@@ -796,8 +796,9 @@ module.exports = NodeHelper.create({
     const cLon = numOrNull(vehicle.location_longitude);
     if (cl.homeLat != null && cl.homeLon != null && cLat != null && cLon != null) {
       const homeRadiusKm = Number(cl.homeRadiusKm);
-      atHome = drange.haversineKm(cLat, cLon, Number(cl.homeLat), Number(cl.homeLon))
-        <= (isFinite(homeRadiusKm) ? homeRadiusKm : 0.2);
+      const homeKm = drange.haversineKm(cLat, cLon, Number(cl.homeLat), Number(cl.homeLon));
+      // null (a bad homeLat/homeLon) = unknown, not "at home"
+      if (homeKm != null) atHome = homeKm <= (isFinite(homeRadiusKm) ? homeRadiusKm : 0.2);
     }
     // per-zone rates: first matching zone wins; its rate + label override the
     // home/away rate for this session
@@ -807,7 +808,7 @@ module.exports = NodeHelper.create({
       for (const z of cl.zoneRates) {
         if (!z || z.lat == null || z.lon == null || z.pricePerKwh == null) continue;
         const km = drange.haversineKm(cLat, cLon, Number(z.lat), Number(z.lon));
-        if (km <= (Number(z.radiusKm) || 0.2)) {
+        if (km != null && km <= (Number(z.radiusKm) || 0.2)) {
           zoneRate = Number(z.pricePerKwh);
           zoneLabel = z.name || null;
           break;
@@ -1110,8 +1111,10 @@ module.exports = NodeHelper.create({
       const markers = [{ lat, lon, color: "#4ea1ff", always: true }].concat(
         (rm.pois || [])
           .map((p) => ({ lat: Number(p.lat), lon: Number(p.lon), color: "#e53935", text: p.name }))
-          .filter((p) => isFinite(p.lat) && isFinite(p.lon) &&
-            drange.haversineKm(lat, lon, p.lat, p.lon) <= far)
+          .filter((p) => {
+            const km = drange.haversineKm(lat, lon, p.lat, p.lon);
+            return km != null && km <= far;
+          })
           .slice(0, 6)
       );
       const smap = (ring) => ring && isoline.staticMapUrl({

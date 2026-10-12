@@ -683,4 +683,41 @@ except kia_client.ClientError as e:
 assert kia_client.parse_days("d", "mon,tue") == [1, 2]
 assert kia_client.parse_days("d", ["Monday", "friday", 0]) == [0, 1, 5]
 
+# --- fetch(): wakeVin wakes only that car; the empty-state warning names
+# the car(s) it's about ---
+class _WakeVM(_CmdVM):
+    def __init__(self, vehicles):
+        super().__init__(vehicles)
+        self.woken = []
+
+    def force_refresh_vehicle_state(self, vid):
+        self.woken.append(vid)
+
+    def force_refresh_all_vehicles_states(self):
+        self.woken.append("ALL")
+
+
+def _fetch_with(vm, job):
+    orig = kia_client.connect
+    kia_client.connect = lambda *a, **k: (vm, None)
+    try:
+        return kia_client.fetch(job)
+    finally:
+        kia_client.connect = orig
+
+
+wvm = _WakeVM([_CmdVeh("VINA", last_updated_at="2026-01-01T00:00:00"), _CmdVeh("VINB")])
+res = _fetch_with(wvm, {"allVehicles": True, "wakeVin": "VINB", "refresh": True, "forceRefreshTimeout": 5})
+assert wvm.woken == ["VINB"], wvm.woken
+assert "VINB" in res["meta"]["warning"] and "VINA" not in res["meta"]["warning"], res["meta"]
+assert res["meta"]["emptyVehicles"] == ["VINB"]
+wvm2 = _WakeVM([_CmdVeh("VINA"), _CmdVeh("VINB")])
+_fetch_with(wvm2, {"allVehicles": True, "refresh": True, "forceRefreshTimeout": 5})
+assert wvm2.woken == ["ALL"], "no wakeVin: whole account, as before"
+
+# battery temperatures get the same °F -> °C treatment as the others
+bt = kia_client.dump_vehicle(_Veh(ev_battery_temperature_min=77.0,
+                                  _ev_battery_temperature_min_unit="°F"))
+assert approx(bt["ev_battery_temperature_min"], 25.0), bt["ev_battery_temperature_min"]
+
 print("dump_vehicle tests passed")

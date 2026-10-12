@@ -1570,6 +1570,22 @@ g.KiaAccessCommands={
    * @param {object} prev   { <reason>: bool, _charging: bool|null } from last tick
    * @returns {{conditions: Array, meta: {charging: (bool|null)}}}
    */
+  /** afterHour..beforeHour (local hours, before exclusive). after > before
+   * wraps midnight (20 -> 7 = evenings and overnight); either null = open. */
+  function inHourWindow(hr, after, before) {
+    if (after == null && before == null) return true;
+    if (after == null) return hr < before;
+    if (before == null) return hr >= after;
+    if (after <= before) return hr >= after && hr < before;
+    return hr >= after || hr < before;
+  }
+
+  function distText(km, units) {
+    return units === "metric"
+      ? Math.round(km) + " km"
+      : Math.round(km * 0.621371) + " mi";
+  }
+
   function evaluate(s, cfg, prev) {
     s = s || {};
     cfg = Object.assign({}, DEFAULTS, cfg || {});
@@ -1816,10 +1832,7 @@ g.KiaAccessCommands={
     if (cHP.enabled && canPlugIn) {
       var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
       var homeMin = num(s.homeUnpluggedMin);
-      var hr = new Date().getHours();
-      var inWindow =
-        (cHP.afterHour == null || hr >= num(cHP.afterHour)) &&
-        (cHP.beforeHour == null || hr < num(cHP.beforeHour));
+      var inWindow = inHourWindow(new Date().getHours(), num(cHP.afterHour), num(cHP.beforeHour));
       var hpActive;
       if (s.plugged === true || s.atHome !== true) hpActive = false;
       else if (homeMin != null && homeMin >= grace && inWindow) hpActive = true;
@@ -1880,9 +1893,9 @@ g.KiaAccessCommands={
         else ghActive = prev.cant_get_home === true;
         emit("cant_get_home", slack < 0 ? "critical" : "warning", ghActive,
           slack < 0
-            ? "Not enough range to get home — need ~" + Math.round(need) +
-              " km, ~" + Math.round(usable) + " km usable"
-            : "Range getting tight for the drive home — ~" + Math.round(slack) + " km slack",
+            ? "Not enough range to get home — need ~" + distText(need, s.units) +
+              ", ~" + distText(usable, s.units) + " usable"
+            : "Range getting tight for the drive home — ~" + distText(slack, s.units) + " slack",
           { homeKm: Math.round(dHome), usableKm: Math.round(usable), needKm: Math.round(need) });
       }
     }
@@ -1898,7 +1911,10 @@ g.KiaAccessCommands={
     return { conditions: out, meta: { charging: chargingNow } };
   }
 
-  return { evaluate: evaluate, CHECK_DEFAULTS: CHECK_DEFAULTS, DEFAULTS: DEFAULTS };
+  return {
+    evaluate: evaluate, inHourWindow: inHourWindow,
+    CHECK_DEFAULTS: CHECK_DEFAULTS, DEFAULTS: DEFAULTS
+  };
 });
 
 /* Drive-range reachability — shared by the MagicMirror module and the HA
@@ -1947,19 +1963,16 @@ g.KiaAccessCommands={
 
   /** great-circle distance in km */
   function haversineKm(lat1, lon1, lat2, lon2) {
-    // NaN/Infinity are real numbers that would otherwise reach the trig
-    // math below, and an out-of-range-but-finite value would produce a
-    // geometrically nonsensical distance. Every current caller does direct
-    // arithmetic/comparison on this return value with no null-handling, so
-    // (unlike trips.js's haversineKm) this can't safely return null here --
-    // 0 ("distance unknown, don't treat it as huge or throw") is the
-    // non-crashing fallback that keeps every existing caller working
-    // unchanged.
+    // NaN/Infinity/non-numbers and out-of-range coordinates give null
+    // ("distance unknown"), the same as trips.js's copy -- NOT 0, which
+    // every caller read as "right here": a bad home lat/lon made the car
+    // always "at home", a bad zone matched every session. Callers must
+    // treat null as unknown (beware `null <= x` is true in JS).
     if (typeof lat1 !== "number" || typeof lon1 !== "number" ||
-        typeof lat2 !== "number" || typeof lon2 !== "number") return 0;
-    if (!isFinite(lat1) || !isFinite(lon1) || !isFinite(lat2) || !isFinite(lon2)) return 0;
-    if (lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90) return 0;
-    if (lon1 < -180 || lon1 > 180 || lon2 < -180 || lon2 > 180) return 0;
+        typeof lat2 !== "number" || typeof lon2 !== "number") return null;
+    if (!isFinite(lat1) || !isFinite(lon1) || !isFinite(lat2) || !isFinite(lon2)) return null;
+    if (lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90) return null;
+    if (lon1 < -180 || lon1 > 180 || lon2 < -180 || lon2 > 180) return null;
     var dLat = (lat2 - lat1) * D2R;
     var dLon = (lon2 - lon1) * D2R;
     var a =
@@ -2003,6 +2016,7 @@ g.KiaAccessCommands={
       var pla = Number(p.lat), plo = Number(p.lon);
       if (!isFinite(pla) || !isFinite(plo)) return;
       var km = haversineKm(lat, lon, pla, plo);
+      if (km == null) return;
       var arrivalPct = null;
       if (canArrive) {
         arrivalPct = Math.round(Math.max(0, pct * (1 - (km * road) / rng)));
@@ -2533,25 +2547,32 @@ g.KiaAccessCommands={
   /** totals over the last `days` (default 30) of a trip list */
   function summary(trips, days) {
     var cutoff = Date.now() - (days || 30) * 864e5;
+    // the ratios divide like by like: kWh only over the distance of trips
+    // that have a kWh figure (a charged-during trip has none), cost only
+    // over trips that have a cost -- dividing ALL distance by a partial
+    // kWh / cost total inflated mi/kWh and deflated cost per mile
     var km = 0, kwh = 0, cost = 0, n = 0, haveCost = false, haveKwh = false;
+    var kmKwh = 0, kmCost = 0;
     (trips || []).forEach(function (tr) {
       if (!tr || num(tr.endedAt) == null || tr.endedAt < cutoff) return;
       n += 1;
-      if (tr.distanceKm != null) km += tr.distanceKm;
-      if (tr.kwh != null) { kwh += tr.kwh; haveKwh = true; }
-      if (tr.cost != null) { cost += tr.cost; haveCost = true; }
+      var d = tr.distanceKm != null ? tr.distanceKm : null;
+      if (d != null) km += d;
+      if (tr.kwh != null) { kwh += tr.kwh; haveKwh = true; if (d != null) kmKwh += d; }
+      if (tr.cost != null) { cost += tr.cost; haveCost = true; if (d != null) kmCost += d; }
     });
     var mi = km * MI_PER_KM;
+    var miKwh = kmKwh * MI_PER_KM, miCost = kmCost * MI_PER_KM;
     return {
       count: n,
       distanceKm: round(km, 1),
       distanceMi: round(mi, 1),
       kwh: haveKwh ? round(kwh, 1) : null,
       cost: haveCost ? round(cost, 2) : null,
-      miPerKwh: (haveKwh && kwh > 0) ? round(mi / kwh, 2) : null,
-      costPerMi: (haveCost && mi > 0) ? round(cost / mi, 3) : null,
-      kmPerKwh: (haveKwh && kwh > 0) ? round(km / kwh, 2) : null,
-      costPerKm: (haveCost && km > 0) ? round(cost / km, 3) : null
+      miPerKwh: (haveKwh && kwh > 0) ? round(miKwh / kwh, 2) : null,
+      costPerMi: (haveCost && miCost > 0) ? round(cost / miCost, 3) : null,
+      kmPerKwh: (haveKwh && kwh > 0) ? round(kmKwh / kwh, 2) : null,
+      costPerKm: (haveCost && kmCost > 0) ? round(cost / kmCost, 3) : null
     };
   }
 
@@ -3229,7 +3250,7 @@ g.KiaAccessCommands={
           .map(function (p) {
             return { p: p, km: RNG.haversineKm(inp.lat, inp.lon, p.lat, p.lon) };
           })
-          .filter(function (z) { return z.km <= far; })
+          .filter(function (z) { return z.km != null && z.km <= far; })
           .sort(function (a, b) { return a.km - b.km; })
           .slice(0, 6);
         var markers = [{ lat: inp.lat, lon: inp.lon, color: "#4ea1ff", always: true }].concat(
@@ -3503,12 +3524,32 @@ g.KiaAccessCommands={
       }
     }
 
+    // Alert hysteresis (_prevCond) and the home-unplugged / moved-while-
+    // parked timers are per VEHICLE: the selector switching cars must
+    // park one car's state and pick up the other's, or car B inherits
+    // car A's dead-band state (a low-battery warning B never crossed into).
+    _swapVehicleCtx(entId) {
+      if (this._ctxEntity === entId) return;
+      var FIELDS = ["_prevCond", "_homeUnpluggedSince", "_movedSince", "_lastParked"];
+      this._vehicleCtx = this._vehicleCtx || {};
+      var self = this;
+      if (this._ctxEntity !== undefined) {
+        var saved = {};
+        FIELDS.forEach(function (f) { saved[f] = self[f]; });
+        this._vehicleCtx[this._ctxEntity] = saved;
+      }
+      var next = this._vehicleCtx[entId] || {};
+      FIELDS.forEach(function (f) { self[f] = next[f] !== undefined ? next[f] : null; });
+      this._ctxEntity = entId;
+    }
+
     _render() {
       var hass = this._hass;
       var root = this._root;
       if (!hass || !root) return;
 
       var entId = this._activeEntityId(hass);
+      this._swapVehicleCtx(entId);
       if (!entId || !hass.states[entId]) {
         var msg = this._multiAccount
           ? "Kia Access: more than one Kia Access account is set up on this " +
@@ -4114,7 +4155,7 @@ g.KiaAccessCommands={
               km: z.km != null ? z.km : RNG.haversineKm(inp.lat, inp.lon, z.lat, z.lon)
             };
           })
-          .filter(function (x) { return x.km <= far; })
+          .filter(function (x) { return x.km != null && x.km <= far; })
           .sort(function (a, b) { return a.km - b.km; })
           .slice(0, 12);
         near.forEach(function (x) {

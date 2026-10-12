@@ -6,6 +6,7 @@ Kept line-for-line with the JS; both are exercised in CI
 """
 from __future__ import annotations
 
+import math
 import re
 import time
 
@@ -54,7 +55,9 @@ def _num(v):
 
 def _round(n, dp=2):
     f = 10 ** dp
-    return round(n * f) / f
+    # Math.round's half-up, not Python's round-half-to-even -- the JS and
+    # Python ports must agree to the cent (0.125 -> 0.13 on both)
+    return math.floor(n * f + 0.5) / f
 
 
 def _tri(v):
@@ -66,6 +69,12 @@ def _rate_for(at_home, opts):
     home = _num(opts.get("pricePerKwh")) or 0
     away = _num(opts.get("awayPricePerKwh"))
     return away if (at_home is False and away is not None) else home
+
+
+def _is_priced(open_s, opts, rate):
+    """An explicitly configured 0 is a real (free) price -- see sessions.js."""
+    return (rate > 0 or open_s.get("rate") is not None
+            or (open_s.get("atHome") is False and _num(opts.get("awayPricePerKwh")) is not None))
 
 
 def update(open_s, cur, opts=None):
@@ -149,6 +158,7 @@ def update(open_s, cur, opts=None):
     mins = max(0, round((open_s.get("lastChargingAt", t) - open_s["startedAt"]) / 60000))
     active_mins = max(0, round((open_s.get("activeMs") or 0) / 60000))
     rate = open_s["rate"] if open_s.get("rate") is not None else _rate_for(open_s.get("atHome"), opts)
+    priced = _is_priced(open_s, opts, rate)
     # atHome True/False -> a confirmed bucket; atHome left None (no home
     # zone configured, or no GPS fix ever came in this session) is
     # genuinely UNKNOWN, not "assume home" -- _rate_for() above still
@@ -173,7 +183,7 @@ def update(open_s, cur, opts=None):
         "endPct": end_pct,
         "gainedPct": _round(gained, 1) if gained is not None else None,
         "kwh": _round(kwh, 2) if kwh is not None else None,
-        "cost": _round(kwh * rate, 2) if (kwh is not None and rate > 0) else None,
+        "cost": _round(kwh * rate, 2) if (kwh is not None and priced) else None,
         "peakKw": _round(open_s["peakKw"], 1),
         # kWh delivered over the WHOLE session span, pauses included -- "if
         # I leave it plugged in for a session shaped like this, what rate
@@ -184,9 +194,9 @@ def update(open_s, cur, opts=None):
         # charger's real rate. Differs from avgKw whenever a session had a
         # scheduled-charging pause or a long standby/taper.
         "activeAvgKw": _round(kwh / (active_mins / 60), 1) if (kwh is not None and active_mins > 0) else None,
-        "pricePerKwh": rate or None,
+        "pricePerKwh": rate if priced else None,
         "location": where,
-        "costSource": "rate" if (kwh is not None and rate > 0) else None,
+        "costSource": "rate" if (kwh is not None and priced) else None,
     }
     closed = s if (s["kwh"] is not None and s["kwh"] >= min_kwh) else None
     return {"open": None, "closed": closed}
@@ -230,7 +240,7 @@ def progress(open_s, cur, opts=None):
     kwh = kwh_soc + (kw * (drift_ms / 3600000) if cur.get("charging") is True else 0)
     return {
         "kwh": _round(kwh, 2),
-        "cost": _round(kwh * price, 2) if price > 0 else None,
+        "cost": _round(kwh * price, 2) if _is_priced(open_s, opts, price) else None,
         "gainedPct": (
             _round(last_pct - start_pct, 1)
             if (start_pct is not None and last_pct is not None) else None

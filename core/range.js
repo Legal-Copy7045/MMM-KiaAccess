@@ -44,19 +44,16 @@
 
   /** great-circle distance in km */
   function haversineKm(lat1, lon1, lat2, lon2) {
-    // NaN/Infinity are real numbers that would otherwise reach the trig
-    // math below, and an out-of-range-but-finite value would produce a
-    // geometrically nonsensical distance. Every current caller does direct
-    // arithmetic/comparison on this return value with no null-handling, so
-    // (unlike trips.js's haversineKm) this can't safely return null here --
-    // 0 ("distance unknown, don't treat it as huge or throw") is the
-    // non-crashing fallback that keeps every existing caller working
-    // unchanged.
+    // NaN/Infinity/non-numbers and out-of-range coordinates give null
+    // ("distance unknown"), the same as trips.js's copy -- NOT 0, which
+    // every caller read as "right here": a bad home lat/lon made the car
+    // always "at home", a bad zone matched every session. Callers must
+    // treat null as unknown (beware `null <= x` is true in JS).
     if (typeof lat1 !== "number" || typeof lon1 !== "number" ||
-        typeof lat2 !== "number" || typeof lon2 !== "number") return 0;
-    if (!isFinite(lat1) || !isFinite(lon1) || !isFinite(lat2) || !isFinite(lon2)) return 0;
-    if (lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90) return 0;
-    if (lon1 < -180 || lon1 > 180 || lon2 < -180 || lon2 > 180) return 0;
+        typeof lat2 !== "number" || typeof lon2 !== "number") return null;
+    if (!isFinite(lat1) || !isFinite(lon1) || !isFinite(lat2) || !isFinite(lon2)) return null;
+    if (lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90) return null;
+    if (lon1 < -180 || lon1 > 180 || lon2 < -180 || lon2 > 180) return null;
     var dLat = (lat2 - lat1) * D2R;
     var dLon = (lon2 - lon1) * D2R;
     var a =
@@ -100,6 +97,7 @@
       var pla = Number(p.lat), plo = Number(p.lon);
       if (!isFinite(pla) || !isFinite(plo)) return;
       var km = haversineKm(lat, lon, pla, plo);
+      if (km == null) return;
       var arrivalPct = null;
       if (canArrive) {
         arrivalPct = Math.round(Math.max(0, pct * (1 - (km * road) / rng)));

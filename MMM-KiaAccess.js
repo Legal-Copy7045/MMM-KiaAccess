@@ -658,14 +658,22 @@ Module.register("MMM-KiaAccess", {
     // PREVIOUS car on screen last had, under the new car's name and stats.
     this.rangeMap = (cached && cached.rangeMap) || null;
     this.rangeReach = (cached && cached.rangeReach) || null;
-    if (cached) {
-      this.history = cached.history || [];
-      this.sessions = cached.sessions || [];
-      this.openSession = cached.openSession || null;
-      this.trips = cached.trips || [];
-      this.openTrip = cached.openTrip || null;
-      this.analytics = cached.analytics || null;
-    }
+    // always replace (see rangeMap above): a car with nothing cached yet
+    // shows nothing, not the previous car's history / sessions / trips
+    this.history = (cached && cached.history) || [];
+    this.sessions = (cached && cached.sessions) || [];
+    this.openSession = (cached && cached.openSession) || null;
+    this.trips = (cached && cached.trips) || [];
+    this.openTrip = (cached && cached.openTrip) || null;
+    this.analytics = (cached && cached.analytics) || null;
+    // ...and its own freshness: the stale strip and "updated" time belong
+    // to the car on screen, set the same way the KIA_DATA handler does
+    const m = (cached && cached._meta) || {};
+    this.stale = !!m.stale;
+    this.staleNote = m.note || null;
+    this.lastUpdated = cached
+      ? new Date(m.stale ? m.cachedAt || m.fetchedAt : m.fetchedAt || Date.now())
+      : null;
     this.errorMessage = (vin && this.vehicleErrors[vin]) || null;
     this.liveChargeTimer();
     this.rebuildView();
@@ -890,6 +898,10 @@ Module.register("MMM-KiaAccess", {
   rebuildView() {
     if (!this.utils || !this.rawPayload) {
       this.viewData = [];
+      // no payload = no flat map either: processConditions() would
+      // otherwise evaluate the PREVIOUS vehicle's data under this one's
+      // condition state (rotate mode, onto a car with no data yet)
+      this.flatMap = null;
       return;
     }
     const flat = this.utils.flatten(this.rawPayload);

@@ -46,6 +46,14 @@ def _ok(pt):
     )
 
 
+def is_valid_point(p):
+    """True if p ({lat, lon} / (lat, lon)) would be kept by matrix_request().
+    A caller zipping parse_matrix() rows back onto its own targets must
+    drop the same points first, or every row after a dropped one shifts
+    onto the wrong target."""
+    return _ok(_pt(p))
+
+
 def matrix_request(provider, origin, targets, api_key, o=None):
     """One origin -> many targets. Returns a request dict or None.
 

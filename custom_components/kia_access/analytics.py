@@ -43,7 +43,9 @@ def _round(n, dp=2):
     if n is None or not math.isfinite(n):
         return None
     f = 10 ** dp
-    return round(n * f) / f
+    # Math.round's half-up, not Python's round-half-to-even -- the JS and
+    # Python ports must agree to the cent (0.125 -> 0.13 on both)
+    return math.floor(n * f + 0.5) / f
 
 
 def _avg(nums):

@@ -1197,9 +1197,10 @@ only.
 
 - a **`warning`** shows as a corner growl that auto-dismisses after
   `alertSeconds` (15 s);
-- a **`critical`** shows as a **centre popup that stays until the condition
-  clears** — set `criticalAlertSeconds` > 0 to make it a timed corner growl
-  instead.
+- a **`critical`** stays in the module's own banner until the condition
+  clears, with a brief corner growl as it fires. Set `criticalPopup: true` to
+  throw the centre-screen popup instead (it dims the whole mirror, so it's
+  opt-in); `criticalAlertSeconds` > 0 sets how long the growl stays.
 
 Override any check's level — `checks: { doorOpen: { level: "critical" } }` — to
 promote it to a persistent critical.
@@ -1217,13 +1218,13 @@ promote it to a persistent critical.
 | `battery12vDrain` | warning | 12V fell `dropPct` over `overHours` while parked — the "won't start on a cold morning" one |
 | `unlocked` | warning | vehicle unlocked (muted while driving) |
 | `doorOpen` / `hoodOpen` / `liftgateOpen` | warning | that part is open |
-| `windowOpen` / `sunroofOpen` | info | *(info = no `alert` popup)* |
+| `windowOpen` / `sunroofOpen` | warning | that window / the sunroof is open |
 | `chargeComplete` | info | charging finished at target (one-shot) |
 | `chargeInterrupted` | warning | charging stopped early (one-shot) |
 | `chargingStarted` | info | charging just began — a "it plugged in OK" nudge (one-shot) |
 | `serviceDue` | warning | `next_service_distance` ≤ `belowKm` (800 ≈ 500 mi) |
-| `notPluggedInHome` | warning | car is home + unplugged for `graceMin` (20). Needs a home point — MM: `visuals.location.homeLat/homeLon`; HA: `zone.home`. Optional `afterHour` / `beforeHour` to only nag in an evening window |
-| `unexpectedMove` | **critical** | GPS moved ≥ `thresholdKm` (0.5) for ≥ `sustainedMin` (3) while the odometer stayed put and the car was off — a tow or theft. Needs a home point / GPS. Can false-positive on a bad GPS fix; disable with `unexpectedMove: false` |
+| `notPluggedInHome` | warning | car is home + unplugged for `graceMin` (20). Needs a home point — MM: `visuals.location.homeLat/homeLon`; HA: `zone.home`. Optional `afterHour` / `beforeHour` to only nag in a window — `afterHour: 20, beforeHour: 7` spans midnight |
+| `unexpectedMove` | **critical** | GPS moved ≥ `thresholdKm` (0.3048 = 1000 ft) for ≥ `sustainedMin` (3) while the odometer stayed put and the car was off — a tow or theft. Needs a home point / GPS. Can false-positive on a bad GPS fix; disable with `unexpectedMove: false` |
 | `cantGetHome` | warning → **critical** | you're away from home and the reachable range (after `reservePct` 15) is below the drive home (straight-line × `roadFactor` 1.3). Warning while there's slack, critical once you can't make it. Needs a home point + `ev_driving_range` |
 | `otpExpiring` | warning | OTP within `otpWarnDays` of expiry (mode B) |
 

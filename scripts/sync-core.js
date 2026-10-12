@@ -107,7 +107,7 @@ for (const c of commands) {
     yaml += `      name: ${JSON.stringify(name.replace(/_/g, " ").replace(/^./, (m) => m.toUpperCase()))}\n`;
     if (o.metric) {
       yaml += `      description: ${JSON.stringify(
-        "°F for USA/Canada vehicles, °C otherwise (matches this vehicle's region) — omit to use its region's default."
+        "°F for USA vehicles, °C everywhere else (Canada included) — omit to use the vehicle's region default."
       )}\n`;
     }
     yaml += `      required: ${o.required ? "true" : "false"}\n`;

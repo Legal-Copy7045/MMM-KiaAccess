@@ -260,4 +260,17 @@ assert.strictEqual(find(r, "not_plugged_home").active, true, "PHEV (hybrid, canP
   assert.strictEqual(run([null])[0].meta.charging, null, "nothing known yet stays unknown");
 }
 
+// --- hour windows wrap midnight; range-home text follows units ---
+{
+  const w = C.inHourWindow;
+  assert.ok(w(21, 20, 7) && w(3, 20, 7) && !w(12, 20, 7) && !w(7, 20, 7), "20 -> 7 wraps");
+  assert.ok(w(10, 9, 17) && !w(17, 9, 17), "same-day window, end exclusive");
+  assert.ok(w(5, null, null) && w(5, null, 6) && !w(6, null, 6) && w(23, 22, null));
+  const home = { atHome: false, homeDistanceKm: 80, rangeKm: 60 };
+  const imp = find(C.evaluate(Object.assign({ units: "imperial" }, home), {}, {}), "cant_get_home");
+  assert.ok(/ mi/.test(imp.message) && !/ km/.test(imp.message), imp.message);
+  const met = find(C.evaluate(Object.assign({ units: "metric" }, home), {}, {}), "cant_get_home");
+  assert.ok(/ km/.test(met.message), met.message);
+}
+
 console.log("all conditions tests passed");

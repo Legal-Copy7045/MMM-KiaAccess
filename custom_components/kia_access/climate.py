@@ -51,7 +51,7 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "climate")
 
-    # ---- units / bounds (region-aware: USA & Canada send °F) ----
+    # ---- units / bounds (region-aware: USA sends °F, Canada °C) ----
     @property
     def temperature_unit(self) -> str:
         return self.coordinator.climate_temp_unit()

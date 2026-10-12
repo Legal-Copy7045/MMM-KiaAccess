@@ -663,7 +663,7 @@
           .map(function (p) {
             return { p: p, km: RNG.haversineKm(inp.lat, inp.lon, p.lat, p.lon) };
           })
-          .filter(function (z) { return z.km <= far; })
+          .filter(function (z) { return z.km != null && z.km <= far; })
           .sort(function (a, b) { return a.km - b.km; })
           .slice(0, 6);
         var markers = [{ lat: inp.lat, lon: inp.lon, color: "#4ea1ff", always: true }].concat(
@@ -937,12 +937,32 @@
       }
     }
 
+    // Alert hysteresis (_prevCond) and the home-unplugged / moved-while-
+    // parked timers are per VEHICLE: the selector switching cars must
+    // park one car's state and pick up the other's, or car B inherits
+    // car A's dead-band state (a low-battery warning B never crossed into).
+    _swapVehicleCtx(entId) {
+      if (this._ctxEntity === entId) return;
+      var FIELDS = ["_prevCond", "_homeUnpluggedSince", "_movedSince", "_lastParked"];
+      this._vehicleCtx = this._vehicleCtx || {};
+      var self = this;
+      if (this._ctxEntity !== undefined) {
+        var saved = {};
+        FIELDS.forEach(function (f) { saved[f] = self[f]; });
+        this._vehicleCtx[this._ctxEntity] = saved;
+      }
+      var next = this._vehicleCtx[entId] || {};
+      FIELDS.forEach(function (f) { self[f] = next[f] !== undefined ? next[f] : null; });
+      this._ctxEntity = entId;
+    }
+
     _render() {
       var hass = this._hass;
       var root = this._root;
       if (!hass || !root) return;
 
       var entId = this._activeEntityId(hass);
+      this._swapVehicleCtx(entId);
       if (!entId || !hass.states[entId]) {
         var msg = this._multiAccount
           ? "Kia Access: more than one Kia Access account is set up on this " +

@@ -30,7 +30,9 @@ def _round(n, dp=2):
     if n is None:
         return None
     f = 10 ** dp
-    return round(n * f) / f
+    # Math.round's half-up, not Python's round-half-to-even -- the JS and
+    # Python ports must agree to the cent (0.125 -> 0.13 on both)
+    return math.floor(n * f + 0.5) / f
 
 
 # See core/sessions.js's resolveCap()/isEv9() (and sessions.py's mirror) for
@@ -247,30 +249,38 @@ def update(open_t, cur, opts=None):
 
 def summary(trips, days=30):
     cutoff = (time.time() * 1000) - days * 864e5
-    km = kwh = cost = 0.0
+    # ratios divide like by like -- see trips.js summary()
+    km = kwh = cost = km_kwh = km_cost = 0.0
     n = 0
     have_cost = have_kwh = False
     for tr in trips or []:
         if not tr or _num(tr.get("endedAt")) is None or tr["endedAt"] < cutoff:
             continue
         n += 1
-        if tr.get("distanceKm") is not None:
-            km += tr["distanceKm"]
+        d = tr.get("distanceKm")
+        if d is not None:
+            km += d
         if tr.get("kwh") is not None:
             kwh += tr["kwh"]
             have_kwh = True
+            if d is not None:
+                km_kwh += d
         if tr.get("cost") is not None:
             cost += tr["cost"]
             have_cost = True
+            if d is not None:
+                km_cost += d
     mi = km * MI_PER_KM
+    mi_kwh = km_kwh * MI_PER_KM
+    mi_cost = km_cost * MI_PER_KM
     return {
         "count": n,
         "distanceKm": _round(km, 1),
         "distanceMi": _round(mi, 1),
         "kwh": _round(kwh, 1) if have_kwh else None,
         "cost": _round(cost, 2) if have_cost else None,
-        "miPerKwh": _round(mi / kwh, 2) if (have_kwh and kwh > 0) else None,
-        "costPerMi": _round(cost / mi, 3) if (have_cost and mi > 0) else None,
-        "kmPerKwh": _round(km / kwh, 2) if (have_kwh and kwh > 0) else None,
-        "costPerKm": _round(cost / km, 3) if (have_cost and km > 0) else None,
+        "miPerKwh": _round(mi_kwh / kwh, 2) if (have_kwh and kwh > 0) else None,
+        "costPerMi": _round(cost / mi_cost, 3) if (have_cost and mi_cost > 0) else None,
+        "kmPerKwh": _round(km_kwh / kwh, 2) if (have_kwh and kwh > 0) else None,
+        "costPerKm": _round(cost / km_cost, 3) if (have_cost and km_cost > 0) else None,
     }

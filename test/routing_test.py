@@ -147,4 +147,13 @@ assert gpr["durationMin"] == 10
 assert gpr["typicalMin"] is None
 assert gpr["via"] == "Main St"
 
+# is_valid_point mirrors matrix_request()'s own filter
+assert R.is_valid_point({"lat": 40.0, "lon": -75.0})
+assert not R.is_valid_point({"lat": 500, "lon": 0})
+assert not R.is_valid_point({"lat": None, "lon": 0})
+_req = R.matrix_request("geoapify", {"lat": 40, "lon": -75},
+                        [{"lat": 41, "lon": -75}, {"lat": 500, "lon": 0}, {"lat": 42, "lon": -75}], "k")
+import json as _j  # noqa: E402
+assert len(_j.loads(_req["body"])["targets"]) == 2, "the invalid target is dropped"
+
 print("all routing tests passed")

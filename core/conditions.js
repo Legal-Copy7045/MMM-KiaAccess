@@ -95,6 +95,22 @@
    * @param {object} prev   { <reason>: bool, _charging: bool|null } from last tick
    * @returns {{conditions: Array, meta: {charging: (bool|null)}}}
    */
+  /** afterHour..beforeHour (local hours, before exclusive). after > before
+   * wraps midnight (20 -> 7 = evenings and overnight); either null = open. */
+  function inHourWindow(hr, after, before) {
+    if (after == null && before == null) return true;
+    if (after == null) return hr < before;
+    if (before == null) return hr >= after;
+    if (after <= before) return hr >= after && hr < before;
+    return hr >= after || hr < before;
+  }
+
+  function distText(km, units) {
+    return units === "metric"
+      ? Math.round(km) + " km"
+      : Math.round(km * 0.621371) + " mi";
+  }
+
   function evaluate(s, cfg, prev) {
     s = s || {};
     cfg = Object.assign({}, DEFAULTS, cfg || {});
@@ -341,10 +357,7 @@
     if (cHP.enabled && canPlugIn) {
       var grace = num(cHP.graceMin) != null ? num(cHP.graceMin) : 20;
       var homeMin = num(s.homeUnpluggedMin);
-      var hr = new Date().getHours();
-      var inWindow =
-        (cHP.afterHour == null || hr >= num(cHP.afterHour)) &&
-        (cHP.beforeHour == null || hr < num(cHP.beforeHour));
+      var inWindow = inHourWindow(new Date().getHours(), num(cHP.afterHour), num(cHP.beforeHour));
       var hpActive;
       if (s.plugged === true || s.atHome !== true) hpActive = false;
       else if (homeMin != null && homeMin >= grace && inWindow) hpActive = true;
@@ -405,9 +418,9 @@
         else ghActive = prev.cant_get_home === true;
         emit("cant_get_home", slack < 0 ? "critical" : "warning", ghActive,
           slack < 0
-            ? "Not enough range to get home — need ~" + Math.round(need) +
-              " km, ~" + Math.round(usable) + " km usable"
-            : "Range getting tight for the drive home — ~" + Math.round(slack) + " km slack",
+            ? "Not enough range to get home — need ~" + distText(need, s.units) +
+              ", ~" + distText(usable, s.units) + " usable"
+            : "Range getting tight for the drive home — ~" + distText(slack, s.units) + " slack",
           { homeKm: Math.round(dHome), usableKm: Math.round(usable), needKm: Math.round(need) });
       }
     }
@@ -423,5 +436,8 @@
     return { conditions: out, meta: { charging: chargingNow } };
   }
 
-  return { evaluate: evaluate, CHECK_DEFAULTS: CHECK_DEFAULTS, DEFAULTS: DEFAULTS };
+  return {
+    evaluate: evaluate, inHourWindow: inHourWindow,
+    CHECK_DEFAULTS: CHECK_DEFAULTS, DEFAULTS: DEFAULTS
+  };
 });

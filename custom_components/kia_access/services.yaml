@@ -85,7 +85,7 @@ start_climate:
           integration: kia_access
     set_temp:
       name: "Set temp"
-      description: "°F for USA/Canada vehicles, °C otherwise (matches this vehicle's region) — omit to use its region's default."
+      description: "°F for USA vehicles, °C everywhere else (Canada included) — omit to use the vehicle's region default."
       required: false
       selector:
         number:

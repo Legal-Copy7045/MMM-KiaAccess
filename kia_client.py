@@ -283,7 +283,7 @@ def dump_vehicle(vehicle, region=None):
         pass
 
     # The library pairs each temperature / distance with the account's local
-    # unit (°F + miles for USA & Canada) but stores the raw value — while every
+    # unit (°F + miles for USA; Canada is metric) but stores the raw value — while every
     # downstream formatter (state.js, visuals.js, the HA sensors' device classes)
     # assumes °C / km. Normalise here, the one place both surfaces share.
     #
@@ -303,7 +303,8 @@ def dump_vehicle(vehicle, region=None):
             return imperial_unit
         return str(unit).strip().upper()
 
-    for base in ("air_temperature", "outside_temperature"):
+    for base in ("air_temperature", "outside_temperature",
+                 "ev_battery_temperature_min", "ev_battery_temperature_max"):
         val = out.get(base)
         if isinstance(val, (int, float)) and not isinstance(val, bool) and \
                 _unit(base, "F") in _F:
@@ -709,9 +710,19 @@ def fetch(job, token_file=None):
     if job.get("refresh", True) and timeout > 0:
         err = {}
 
+        # wakeVin: wake only that vehicle even though every vehicle is read
+        # back (HA's AccountPoller reads the whole account in one call, but
+        # one car's "poll directly" must not wake a sibling car that's in
+        # its own quiet hours / wake interval)
+        wake_vin = str(job.get("wakeVin") or "")
+
         def _do_refresh():
             try:
-                vm.force_refresh_all_vehicles_states()
+                if wake_vin:
+                    for v in _select_vehicles(vm, wake_vin):
+                        vm.force_refresh_vehicle_state(v.id)
+                else:
+                    vm.force_refresh_all_vehicles_states()
             except Exception as exc:
                 err["e"] = exc
 
@@ -772,12 +783,20 @@ def fetch(job, token_file=None):
     tok = token_dict(vm, enrolled_at)
     if tok:
         meta["token"] = tok
-    first = vehicles[0]
-    if not first.get("last_updated_at") and not (first.get("data") or {}):
+    # judged per vehicle: with allVehicles this one meta goes to every
+    # vehicle's consumer, so it must name which car(s) came back empty
+    empty = [v for v in vehicles
+             if not v.get("last_updated_at") and not (v.get("data") or {})]
+    if empty:
+        which = (
+            "this vehicle" if len(vehicles) == 1
+            else ", ".join(str(v.get("VIN") or v.get("id") or "?") for v in empty)
+        )
         meta["warning"] = (
-            "Kia returned an empty state for this vehicle. Open the Kia app "
+            f"Kia returned an empty state for {which}. Open the Kia app "
             "once to force a sync, or try again shortly."
         )
+        meta["emptyVehicles"] = [str(v.get("VIN") or v.get("id") or "") for v in empty]
     return {"ok": True, "vehicles": vehicles, "meta": meta}
 
 

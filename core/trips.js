@@ -236,25 +236,32 @@
   /** totals over the last `days` (default 30) of a trip list */
   function summary(trips, days) {
     var cutoff = Date.now() - (days || 30) * 864e5;
+    // the ratios divide like by like: kWh only over the distance of trips
+    // that have a kWh figure (a charged-during trip has none), cost only
+    // over trips that have a cost -- dividing ALL distance by a partial
+    // kWh / cost total inflated mi/kWh and deflated cost per mile
     var km = 0, kwh = 0, cost = 0, n = 0, haveCost = false, haveKwh = false;
+    var kmKwh = 0, kmCost = 0;
     (trips || []).forEach(function (tr) {
       if (!tr || num(tr.endedAt) == null || tr.endedAt < cutoff) return;
       n += 1;
-      if (tr.distanceKm != null) km += tr.distanceKm;
-      if (tr.kwh != null) { kwh += tr.kwh; haveKwh = true; }
-      if (tr.cost != null) { cost += tr.cost; haveCost = true; }
+      var d = tr.distanceKm != null ? tr.distanceKm : null;
+      if (d != null) km += d;
+      if (tr.kwh != null) { kwh += tr.kwh; haveKwh = true; if (d != null) kmKwh += d; }
+      if (tr.cost != null) { cost += tr.cost; haveCost = true; if (d != null) kmCost += d; }
     });
     var mi = km * MI_PER_KM;
+    var miKwh = kmKwh * MI_PER_KM, miCost = kmCost * MI_PER_KM;
     return {
       count: n,
       distanceKm: round(km, 1),
       distanceMi: round(mi, 1),
       kwh: haveKwh ? round(kwh, 1) : null,
       cost: haveCost ? round(cost, 2) : null,
-      miPerKwh: (haveKwh && kwh > 0) ? round(mi / kwh, 2) : null,
-      costPerMi: (haveCost && mi > 0) ? round(cost / mi, 3) : null,
-      kmPerKwh: (haveKwh && kwh > 0) ? round(km / kwh, 2) : null,
-      costPerKm: (haveCost && km > 0) ? round(cost / km, 3) : null
+      miPerKwh: (haveKwh && kwh > 0) ? round(miKwh / kwh, 2) : null,
+      costPerMi: (haveCost && miCost > 0) ? round(cost / miCost, 3) : null,
+      kmPerKwh: (haveKwh && kwh > 0) ? round(kmKwh / kwh, 2) : null,
+      costPerKm: (haveCost && kmCost > 0) ? round(cost / kmCost, 3) : null
     };
   }
 
