@@ -27,14 +27,13 @@ b = R.bearing_deg(40.7539, -79.8103, 40.4406, -79.9959)
 assert 180 < b < 260, b
 
 # haversine_km must never raise or propagate NaN/Infinity/out-of-range --
-# every current caller does direct arithmetic on its return value with no
-# None-handling, so it degrades to 0.0 (not None, not a crash) instead
-assert R.haversine_km(float("nan"), -79.8, 40.4, -79.9) == 0.0
-assert R.haversine_km(float("inf"), -79.8, 40.4, -79.9) == 0.0
-assert R.haversine_km(500, -79.8, 40.4, -79.9) == 0.0, "out-of-range latitude"
-assert R.haversine_km(40.7, -200, 40.4, -79.9) == 0.0, "out-of-range longitude"
-assert R.haversine_km(None, -79.8, 40.4, -79.9) == 0.0
-assert R.haversine_km(True, -79.8, 40.4, -79.9) == 0.0, "bool must not pass as a coordinate"
+# invalid input is None ("unknown"), never 0.0 ("right here")
+assert R.haversine_km(float("nan"), -79.8, 40.4, -79.9) is None
+assert R.haversine_km(float("inf"), -79.8, 40.4, -79.9) is None
+assert R.haversine_km(500, -79.8, 40.4, -79.9) is None, "out-of-range latitude"
+assert R.haversine_km(40.7, -200, 40.4, -79.9) is None, "out-of-range longitude"
+assert R.haversine_km(None, -79.8, 40.4, -79.9) is None
+assert R.haversine_km(True, -79.8, 40.4, -79.9) is None, "bool must not pass as a coordinate"
 
 # poi_status
 car = (40.7539, -79.8103)

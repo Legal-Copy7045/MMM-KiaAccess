@@ -140,4 +140,23 @@ assert.strictEqual(KiaAccessCard._hidePowertrainRow("odometer", "ICE"), false);
   assert.ok(!unknown.includes("data-cmd='start_valet_mode'"), "unknown region: region-limited hidden");
 }
 
+// ---- _swapVehicleCtx(): the vehicle selector parks one car's alert
+// hysteresis / timers and restores the other's ----
+{
+  const ctx = {};
+  const swap = KiaAccessCard.prototype._swapVehicleCtx;
+  swap.call(ctx, "sensor.car_a");
+  ctx._prevCond = { ev_battery_low: true };
+  ctx._homeUnpluggedSince = 123;
+  swap.call(ctx, "sensor.car_b");
+  assert.strictEqual(ctx._prevCond, null, "car B starts clean, not with A's dead-band state");
+  assert.strictEqual(ctx._homeUnpluggedSince, null);
+  ctx._prevCond = { door_open: true };
+  swap.call(ctx, "sensor.car_a");
+  assert.deepStrictEqual(ctx._prevCond, { ev_battery_low: true }, "A's state comes back");
+  assert.strictEqual(ctx._homeUnpluggedSince, 123);
+  swap.call(ctx, "sensor.car_b");
+  assert.deepStrictEqual(ctx._prevCond, { door_open: true });
+}
+
 console.log("all card-powertrain-rows tests passed");

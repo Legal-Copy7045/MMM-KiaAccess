@@ -248,4 +248,22 @@ assert.strictEqual(S.isEv9("EV9 GT-Line"), true, "a real EV9 trim name must stil
 assert.strictEqual(S.isEv9("ev9x"), true, "a non-digit suffix is still presumed an EV9 variant");
 assert.strictEqual(S.isEv9("EV-9"), true, "a hyphenated model string must also match -- Kia's own API-reported model isn't guaranteed one exact format");
 
+// a free zone (rate 0) is a real price: cost 0, not unknown
+{
+  let o = S.update(null, { t: 0, charging: true, plugged: true, batteryPct: 40,
+    atHome: false, rate: 0, rateLabel: "Work" }, opts).open;
+  o = S.update(o, { t: 3600e3, charging: true, plugged: true, batteryPct: 60 }, opts).open;
+  const live = S.progress(o, { t: 3600e3, charging: true, batteryPct: 60 }, opts);
+  assert.strictEqual(live.cost, 0, "live cost at a free zone is 0");
+  const done = S.update(o, { t: 2 * 3600e3, charging: false, plugged: false, batteryPct: 60 }, opts).closed;
+  assert.strictEqual(done.cost, 0);
+  assert.strictEqual(done.pricePerKwh, 0);
+  assert.strictEqual(done.costSource, "rate");
+  // no price configured at all is still unknown
+  let u = S.update(null, { t: 0, charging: true, plugged: true, batteryPct: 40, atHome: true }, { capacityKwh: 100 }).open;
+  u = S.update(u, { t: 3600e3, charging: true, plugged: true, batteryPct: 60 }, { capacityKwh: 100 }).open;
+  const ud = S.update(u, { t: 2 * 3600e3, charging: false, plugged: false, batteryPct: 60 }, { capacityKwh: 100 }).closed;
+  assert.strictEqual(ud.cost, null);
+}
+
 console.log("all sessions tests passed");

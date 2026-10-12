@@ -120,6 +120,9 @@ class AccountPoller:
                 if self._last_error is not None and (now - self._last_error_at) < DEDUP_WINDOW_SEC:
                     raise self._last_error
             call_job = dict(job)
+            # a live wake is THIS coordinator's own (its quiet hours / wake
+            # interval allowed it) -- don't wake sibling cars on the account
+            call_job["wakeVin"] = job.get("vin", "") if forced else ""
             call_job["vin"] = ""
             call_job["allVehicles"] = True
             try:

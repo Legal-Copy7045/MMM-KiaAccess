@@ -70,6 +70,10 @@ CHARGER_START_SETTLE_SECONDS = 90
 # of after a whole scan_interval -- see _update_failed().
 QUICK_RETRY_SECONDS = 60
 
+# 12V samples kept for the battery_12v_drain check (its overHours window
+# defaults to 12; this leaves room for a longer configured one)
+V12_HISTORY_HOURS = 48
+
 from .vehicle_state import build_state, to_bool
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,6 +87,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
     _quick_retry_used = False
     _retry_from_cache = False
     _last_wake_at: datetime | None = None
+    _v12_history: list = []  # replaced (never mutated) -- see _record_12v()
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         minutes = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES)
@@ -1017,16 +1022,19 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         n_routed = 0
         route_errs: dict = {}
         if not do_routes:
+            # matrix_request() drops invalid points -- drop them here too,
+            # so the result rows zip back onto the right destinations
+            mpois = [p for p in pois if drive_routing.is_valid_point(p)]
             req = drive_routing.matrix_request(
-                provider, origin, [{"lat": p["lat"], "lon": p["lon"]} for p in pois],
+                provider, origin, [{"lat": p["lat"], "lon": p["lon"]} for p in mpois],
                 key, {"traffic": True},
             )
             if req:
-                calls += len(pois)
+                calls += len(mpois)
                 try:
                     data = await self._http_json(req)
                     for p, row in zip(
-                        pois, drive_routing.parse_matrix(provider, data, len(pois))
+                        mpois, drive_routing.parse_matrix(provider, data, len(mpois))
                     ):
                         if row:
                             out[self._poi_key(p["lat"], p["lon"])] = dict(row)
@@ -1204,6 +1212,26 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             return float(opts.get("force_refresh_timeout", 0) or 0) > 0
         except (TypeError, ValueError):
             return False
+
+    def _record_12v(self) -> None:
+        """One {t, v12} sample per new car report, kept for V12_HISTORY_HOURS
+        -- what conditions.py's battery_12v_drain check compares across (it
+        always got an empty history in HA, so it could never fire). Keyed on
+        the car's own report time, so repeated polls of an unchanged cached
+        reading don't pile up identical samples."""
+        reported = self.vehicle_reported_at
+        try:
+            v12 = float(self.vehicle.get("car_battery_percentage"))
+        except (TypeError, ValueError):
+            return
+        if reported is None or v12 != v12:
+            return
+        t = reported.timestamp() * 1000
+        if self._v12_history and self._v12_history[-1]["t"] >= t:
+            return
+        cutoff = time.time() * 1000 - V12_HISTORY_HOURS * 3600e3
+        self._v12_history = [h for h in self._v12_history if h["t"] >= cutoff]
+        self._v12_history.append({"t": t, "v12": v12})
 
     def _update_failed(self, msg: str) -> UpdateFailed:
         """UpdateFailed for a failed poll. The first failure after a success
@@ -1410,6 +1438,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 self.vehicle = vehicle
                 self.last_successful_update = dt_util.utcnow()
                 self._quick_retry_used = False
+                self._record_12v()
                 await self._update_sessions()
                 await self._update_trips()
 
@@ -1653,7 +1682,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         if self.meta.get("tokenEnrolledAt"):
             flat["_meta.tokenEnrolledAt"] = self.meta["tokenEnrolledAt"]
         units = "metric" if self.hass.config.units is METRIC_SYSTEM else "imperial"
-        state = build_state(flat, {"units": units})
+        state = build_state(flat, {"units": units, "history": list(self._v12_history)})
 
         # home / not-plugged-in context. time.time() (wall clock), not
         # time.monotonic() -- this measures "how long has this been
@@ -2301,15 +2330,28 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         except Exception:  # noqa: BLE001
             _LOGGER.debug("charger status alert failed", exc_info=True)
 
-    # commands gated by the "block automated climate" option
-    _CLIMATE_COMMANDS = frozenset({"start_climate", "stop_climate"})
+    # commands gated by the "block automated climate" option: the climate
+    # commands themselves, venting / opening windows, and a schedule call
+    # that touches the departure climate
+    _CLIMATE_COMMANDS = frozenset({"start_climate", "stop_climate", "vent_windows"})
+    _SCHEDULE_CLIMATE_KEYS = frozenset({"climate_enabled", "temperature", "defrost"})
 
-    def _climate_blocked(self, command: str, context) -> bool:
+    def _is_climate_command(self, command: str, options: dict | None) -> bool:
+        options = options or {}
+        if command in self._CLIMATE_COMMANDS:
+            return True
+        if command == "set_windows":
+            return any(v not in (None, "", "closed") for v in options.values())
+        if command == "schedule_charging_and_climate":
+            return any(options.get(k) is not None for k in self._SCHEDULE_CLIMATE_KEYS)
+        return False
+
+    def _climate_blocked(self, command: str, context, options: dict | None = None) -> bool:
         """True when this is an automated climate call and the user has asked
         for climate to be manual-only. A direct UI / Developer-Tools / card
         action carries a user_id in its context; an automation/script/scene
         does not."""
-        if command not in self._CLIMATE_COMMANDS:
+        if not self._is_climate_command(command, options):
             return False
         if not self.entry.options.get("block_automated_climate"):
             return False
@@ -2318,7 +2360,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
     async def async_run_command(
         self, command: str, options: dict | None = None, context=None
     ) -> None:
-        if self._climate_blocked(command, context):
+        if self._climate_blocked(command, context, options):
             from homeassistant.exceptions import HomeAssistantError
 
             raise HomeAssistantError(

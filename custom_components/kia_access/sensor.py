@@ -329,7 +329,7 @@ class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
             str(d.get("username", "")).lower(),
         ])
         # lets the Lovelace card pick the right climate set_temp unit/bounds
-        # for THIS vehicle instead of assuming USA/Canada Fahrenheit
+        # for THIS vehicle instead of assuming USA Fahrenheit
         # (climate_temp_unit() is the same source the native climate entity uses)
         out["region"] = self.coordinator.region
         for key, val in v.items():

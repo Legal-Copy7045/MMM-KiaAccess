@@ -161,6 +161,26 @@ def test_command_leaves_refresh_flag():
     print("-- a command doesn't consume a queued Refresh now")
 
 
+def test_12v_history_feeds_drain_check():
+    """HA records one 12V sample per new car report, and the drain check
+    sees it -- it used to get an empty history and could never fire."""
+    from custom_components.kia_access.conditions import evaluate
+    from custom_components.kia_access.vehicle_state import build_state
+
+    c = _coord({})
+    now = dt_util.utcnow()
+    for hours_ago, pct in ((10, 90), (10, 90), (5, 85), (1, 80)):
+        c.vehicle = _v("CAR1", car_battery_percentage=pct, last_updated_at=_iso(
+            now - timedelta(hours=hours_ago)))
+        c._record_12v()
+    assert [h["v12"] for h in c._v12_history] == [90, 85, 80], "unchanged report not re-recorded"
+    state = build_state({"vehicle.car_battery_percentage": 80}, {"history": c._v12_history})
+    res = evaluate(state, {}, {})
+    drain = next(x for x in res["conditions"] if x["reason"] == "battery_12v_drain")
+    assert drain["active"] is True, drain
+    print("-- 12V history recorded per car report; the drain check can fire")
+
+
 if __name__ == "__main__":
     test_default_is_unchanged()
     test_quiet_hours_overnight()
@@ -171,4 +191,5 @@ if __name__ == "__main__":
     test_unanswered_wake_still_spaced()
     test_quick_retry_reads_cache()
     test_command_leaves_refresh_flag()
+    test_12v_history_feeds_drain_check()
     print("all coordinator wake/retry tests passed")

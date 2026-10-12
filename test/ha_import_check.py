@@ -675,12 +675,22 @@ _ctx = lambda uid: type("Ctx", (), {"user_id": uid})()
 _bc = lambda opts: type("C", (), {
     "entry": type("E", (), {"options": opts})(),
     "_CLIMATE_COMMANDS": co.KiaAccessCoordinator._CLIMATE_COMMANDS,
+    "_SCHEDULE_CLIMATE_KEYS": co.KiaAccessCoordinator._SCHEDULE_CLIMATE_KEYS,
+    "_is_climate_command": co.KiaAccessCoordinator._is_climate_command,
 })()
 assert _cb(_bc({}), "start_climate", _ctx(None)) is False, "off by default"
 assert _cb(_bc({"block_automated_climate": True}), "start_climate", _ctx(None)) is True
 assert _cb(_bc({"block_automated_climate": True}), "start_climate", _ctx("abc")) is False
 assert _cb(_bc({"block_automated_climate": True}), "lock", _ctx(None)) is False, "non-climate"
 assert _cb(_bc({"block_automated_climate": True}), "stop_climate", None) is True
+# ...and the climate-affecting commands added with the EU-style set
+_on = _bc({"block_automated_climate": True})
+assert _cb(_on, "vent_windows", _ctx(None)) is True
+assert _cb(_on, "close_windows", _ctx(None)) is False, "closing windows isn't climate"
+assert _cb(_on, "set_windows", _ctx(None), {"front_left": "open"}) is True
+assert _cb(_on, "set_windows", _ctx(None), {"front_left": "closed"}) is False
+assert _cb(_on, "schedule_charging_and_climate", _ctx(None), {"climate_enabled": True}) is True
+assert _cb(_on, "schedule_charging_and_climate", _ctx(None), {"charging_enabled": True}) is False
 assert co.KiaAccessCoordinator._poi_key(40.712345, -79.754321) == "40.7123,-79.7543"
 
 # async_run_command() must serialize concurrent calls -- a hostile-review
@@ -719,7 +729,7 @@ _cmd_self = _CmdSelf()
 _cmd_self._command_lock = asyncio.Lock()
 _cmd_self._unconfirmed_commands = {}
 _cmd_self.last_action = {}
-_cmd_self._climate_blocked = lambda command, context: False
+_cmd_self._climate_blocked = lambda command, context, options=None: False
 _cmd_self._job = lambda **kw: {"command": kw["command"]}
 _cmd_self.hass = type("H", (), {"async_add_executor_job": staticmethod(_fake_executor_job)})()
 _cmd_self.async_update_listeners = lambda: None
@@ -857,7 +867,7 @@ class _FakeServices:
 _fake_services_hass = type("H", (), {"services": _FakeServices()})()
 init._register_services(_fake_services_hass)
 _climate_schema = _fake_services_hass.services.registered["start_climate"]
-_climate_schema({"set_temp": 70})  # USA/Canada value must still pass
+_climate_schema({"set_temp": 70})  # a USA (°F) value must still pass
 _climate_schema({"set_temp": 21})  # a real EU/Celsius value must not be rejected
 try:
     _climate_schema({"set_temp": 200})

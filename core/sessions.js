@@ -62,6 +62,13 @@
     return atHome === false && away != null ? away : home;
   }
   function tri(v) { return v === true || v === false ? v : null; }
+  // An explicitly configured 0 (a free charging zone, away price 0) is a
+  // real price -- the session cost 0, not "unknown". Only the unset home
+  // price's 0 fallback means no price at all.
+  function isPriced(open, opts, rate) {
+    return rate > 0 || open.rate != null ||
+      (open.atHome === false && num(opts.awayPricePerKwh) != null);
+  }
 
   /**
    * Fold one state sample into session tracking.
@@ -155,6 +162,7 @@
     var mins = Math.max(0, Math.round((open.lastChargingAt - open.startedAt) / 60000));
     var activeMins = Math.max(0, Math.round((open.activeMs || 0) / 60000));
     var rate = open.rate != null ? open.rate : rateFor(open.atHome, opts);
+    var priced = isPriced(open, opts, rate);
     // atHome === true/false -> a confirmed bucket; atHome left null (no
     // home zone configured, or no GPS fix ever came in this session) is
     // genuinely UNKNOWN, not "assume home" -- rateFor() above still prices
@@ -178,7 +186,7 @@
       endPct: endPct,
       gainedPct: gained != null ? round(gained, 1) : null,
       kwh: kwh != null ? round(kwh, 2) : null,
-      cost: (kwh != null && rate > 0) ? round(kwh * rate, 2) : null,
+      cost: (kwh != null && priced) ? round(kwh * rate, 2) : null,
       peakKw: round(open.peakKw, 1),
       // kWh delivered over the WHOLE session span, pauses included -- "if
       // I leave it plugged in for a session shaped like this, what rate
@@ -190,9 +198,9 @@
       // is the charger's real rate; the two will differ whenever a
       // session had a scheduled-charging pause or a long standby/taper.
       activeAvgKw: (kwh != null && activeMins > 0) ? round(kwh / (activeMins / 60), 1) : null,
-      pricePerKwh: rate || null,
+      pricePerKwh: priced ? rate : null,
       location: where,
-      costSource: (kwh != null && rate > 0) ? "rate" : null
+      costSource: (kwh != null && priced) ? "rate" : null
     };
     return { open: null, closed: (s.kwh != null && s.kwh >= minKwh) ? s : null };
   }
@@ -239,7 +247,7 @@
     var kwh = kwhSoc + (cur.charging === true ? kw * (driftMs / 3600000) : 0);
     return {
       kwh: round(kwh, 2),
-      cost: price > 0 ? round(kwh * price, 2) : null,
+      cost: isPriced(open, opts, price) ? round(kwh * price, 2) : null,
       gainedPct: (open.startPct != null && lastPct != null)
         ? round(lastPct - open.startPct, 1) : null,
       minutes: Math.max(0, Math.round((t - open.startedAt) / 60000))

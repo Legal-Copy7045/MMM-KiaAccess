@@ -663,4 +663,37 @@ function freshModule(overrides) {
   }
 }
 
+// ---- showActiveVehicle(): rotating onto a car with nothing cached yet
+// must not carry the previous car's data, stale strip or "updated" time ----
+{
+  const mod = freshModule({
+    region: "USA", brand: "KIA", username: "u@e.com",
+    vehicles: [{ vin: "VIN_A" }, { vin: "VIN_B" }]
+  });
+  mod.flatMap = { "vehicle.is_locked": false };
+  mod.stale = true;
+  mod.staleNote = "paused — 30 requests/hour cap";
+  mod.lastUpdated = new Date(0);
+  mod.history = [{ t: 1, ev: 50 }];
+  mod.activeVehicleIndex = 1; // VIN_B, nothing cached
+  let evaluatedWith = "not called";
+  mod.processConditions = function () { evaluatedWith = this.flatMap; };
+  mod.showActiveVehicle();
+  assert.strictEqual(mod.flatMap, null, "no payload -> no flat map");
+  assert.strictEqual(evaluatedWith, null, "conditions must not see car A's data under car B");
+  assert.strictEqual(mod.stale, false);
+  assert.strictEqual(mod.staleNote, null);
+  assert.strictEqual(mod.lastUpdated, null);
+  assert.deepStrictEqual(mod.history, []);
+
+  // ...and a car WITH cached data gets its own freshness back
+  mod.vehiclePayloads.VIN_A = { vehicle: { VIN: "VIN_A" },
+    _meta: { stale: true, note: "cap", fetchedAt: "2026-01-01T00:00:00Z", cachedAt: "2025-12-31T00:00:00Z" } };
+  mod.activeVehicleIndex = 0;
+  mod.showActiveVehicle();
+  assert.strictEqual(mod.stale, true);
+  assert.strictEqual(mod.staleNote, "cap");
+  assert.strictEqual(mod.lastUpdated.toISOString(), "2025-12-31T00:00:00.000Z");
+}
+
 console.log("all mmm-kiaaccess tests passed");

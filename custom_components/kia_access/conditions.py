@@ -100,6 +100,28 @@ def _now_ms():
     return time.time() * 1000.0
 
 
+def in_hour_window(hr, after, before):
+    """afterHour..beforeHour (local, before exclusive); after > before wraps
+    midnight (20 -> 7 = evenings and overnight). See conditions.js."""
+    if after is None and before is None:
+        return True
+    if after is None:
+        return hr < before
+    if before is None:
+        return hr >= after
+    if after <= before:
+        return after <= hr < before
+    return hr >= after or hr < before
+
+
+def _js_round(x):
+    return math.floor(x + 0.5)
+
+
+def _dist_text(km, units):
+    return f"{_js_round(km)} km" if units == "metric" else f"{_js_round(km * 0.621371)} mi"
+
+
 def evaluate(s, cfg, prev):
     s = s or {}
     cfg = {**DEFAULTS, **(cfg or {})}
@@ -322,10 +344,8 @@ def evaluate(s, cfg, prev):
     if c_hp.get("enabled") and can_plug_in:
         grace = _num(c_hp.get("graceMin")) if c_hp.get("graceMin") is not None else 20
         home_min = _num(s.get("homeUnpluggedMin"))
-        hr = time.localtime().tm_hour
-        after = _num(c_hp.get("afterHour"))
-        before = _num(c_hp.get("beforeHour"))
-        in_window = (after is None or hr >= after) and (before is None or hr < before)
+        in_window = in_hour_window(time.localtime().tm_hour,
+                                   _num(c_hp.get("afterHour")), _num(c_hp.get("beforeHour")))
         if s.get("plugged") is True or s.get("atHome") is not True:
             hp_active = False
         elif home_min is not None and home_min >= grace and in_window:
@@ -385,10 +405,10 @@ def evaluate(s, cfg, prev):
             else:
                 gh_active = prev.get("cant_get_home") is True
             emit("cant_get_home", "critical" if slack < 0 else "warning", gh_active,
-                 (f"Not enough range to get home — need ~{round(need)} km, "
-                  f"~{round(usable)} km usable")
+                 (f"Not enough range to get home — need ~{_dist_text(need, s.get('units'))}, "
+                  f"~{_dist_text(usable, s.get('units'))} usable")
                  if slack < 0 else
-                 f"Range getting tight for the drive home — ~{round(slack)} km slack",
+                 f"Range getting tight for the drive home — ~{_dist_text(slack, s.get('units'))} slack",
                  {"homeKm": round(d_home), "usableKm": round(usable), "needKm": round(need)})
 
     # An unknown charging sample carries the last known state forward

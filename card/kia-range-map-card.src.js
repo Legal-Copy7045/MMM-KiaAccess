@@ -400,7 +400,7 @@
               km: z.km != null ? z.km : RNG.haversineKm(inp.lat, inp.lon, z.lat, z.lon)
             };
           })
-          .filter(function (x) { return x.km <= far; })
+          .filter(function (x) { return x.km != null && x.km <= far; })
           .sort(function (a, b) { return a.km - b.km; })
           .slice(0, 12);
         near.forEach(function (x) {

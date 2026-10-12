@@ -52,22 +52,15 @@ D2R = math.pi / 180
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
-    # NaN/Infinity are real floats that would otherwise reach the trig math
-    # below (risking a "math domain error" from math.sqrt on a pathological
-    # input) and an out-of-range-but-finite value would produce a
-    # geometrically nonsensical distance. Every current caller does direct
-    # arithmetic/comparison on this return value with no None-handling, so
-    # (unlike trips.py's / coordinator.py's haversine_km) this can't safely
-    # return None here -- 0.0 ("distance unknown, don't treat it as huge or
-    # crash") is the non-crashing fallback that keeps every existing caller
-    # working unchanged.
+    # invalid / out-of-range input -> None ("distance unknown"), matching
+    # range.js -- never 0.0, which callers read as "right here"
     for v in (lat1, lon1, lat2, lon2):
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
-            return 0.0
+            return None
     if not (-90 <= lat1 <= 90 and -90 <= lat2 <= 90):
-        return 0.0
+        return None
     if not (-180 <= lon1 <= 180 and -180 <= lon2 <= 180):
-        return 0.0
+        return None
     d_lat = (lat2 - lat1) * D2R
     d_lon = (lon2 - lon1) * D2R
     a = (
@@ -103,8 +96,10 @@ def poi_status(lat, lon, pois, reach_km, trip=None):
         if not p or _num(p.get("lat")) is None or _num(p.get("lon")) is None:
             continue
         km = haversine_km(lat, lon, float(p["lat"]), float(p["lon"]))
+        if km is None:
+            continue
         arrival_pct = (
-            round(max(0, pct * (1 - (km * road) / rng))) if can_arrive else None
+            math.floor(max(0, pct * (1 - (km * road) / rng)) + 0.5) if can_arrive else None
         )
         out.append(
             {
