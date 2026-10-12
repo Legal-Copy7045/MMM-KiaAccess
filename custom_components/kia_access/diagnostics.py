@@ -40,10 +40,19 @@ _REDACT = {
 
 
 def _parse(raw) -> Any:
+    """ISO string -> aware UTC datetime, or None. The library's unset
+    valid_until is datetime.min ("0001-01-01T00:00:00"): converting that
+    from a timezone east of UTC overflows, which used to break the whole
+    diagnostics download -- treat it, and anything unparseable, as unset."""
     if not raw:
         return None
-    parsed = dt_util.parse_datetime(str(raw))
-    return dt_util.as_utc(parsed) if parsed else None
+    try:
+        parsed = dt_util.parse_datetime(str(raw))
+        if parsed is None or parsed.year < 2000:
+            return None
+        return dt_util.as_utc(parsed)
+    except (OverflowError, ValueError, TypeError):
+        return None
 
 
 def _auth_meta(token: Any) -> dict[str, Any]:

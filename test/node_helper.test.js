@@ -470,6 +470,24 @@ const { freshHelper, tmpCacheDir } = require("./fresh-node-helper.js");
   assert.deepStrictEqual(retired, []);
 }
 
+// ---- publishMqtt(): binary_sensor topics carry "true"/"false" even when
+// the API reports a number (the EV9's plugged-in connector code 4) --
+// MQTT discovery's payload_on/off only match those exact strings ----
+{
+  const helper = freshHelper();
+  const published = {};
+  helper.mqttClient = () => ({ publish: (topic, payload) => { published[topic] = payload; } });
+  helper.publishMqtt(
+    { mqtt: { enabled: true, url: "mqtt://broker", topicPrefix: "kia/ev9" } },
+    { vehicle: { VIN: "", ev_battery_is_plugged_in: 4, ev_battery_is_charging: 0,
+                 is_locked: "true", ev_battery_percentage: 63 }, _meta: {} }
+  );
+  assert.strictEqual(published["kia/ev9/ev_battery_is_plugged_in"], "true");
+  assert.strictEqual(published["kia/ev9/ev_battery_is_charging"], "false");
+  assert.strictEqual(published["kia/ev9/is_locked"], "true");
+  assert.strictEqual(published["kia/ev9/ev_battery_percentage"], "63", "non-binary keys untouched");
+}
+
 // ---- _retireVehicle(): MQTT offline publish + Prometheus snapshot removal ----
 {
   const helper = freshHelper();

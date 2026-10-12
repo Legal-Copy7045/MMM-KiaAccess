@@ -172,11 +172,27 @@ REGION_INT = {
     "US": 3, "USA": 3,
     "CN": 4, "CHINA": 4,
     "AU": 5, "AUSTRALIA": 5,
-    "IN": 7, "INDIA": 7,
-    "NZ": 8,
-    "BR": 9, "BRAZIL": 9,
+    # must match hyundai_kia_connect_api.const.REGIONS -- 6 India, 7 New
+    # Zealand, 8 Brazil (9 is Europe CCI, which this project doesn't offer).
+    # These were once off by one, sending India accounts to the NZ API, NZ
+    # to Brazil's and Brazil to Europe CCI's; test/region_map_test.py pins
+    # them to the installed library now.
+    "IN": 6, "INDIA": 6,
+    "NZ": 7,
+    "BR": 8, "BRAZIL": 8,
 }
 BRAND_INT = {"KIA": 1, "HYUNDAI": 2, "GENESIS": 3}
+
+
+def command_allowed(spec, region):
+    """A commands.json entry with a `regions` list runs only for those
+    regions (aliases like "Europe" count, via REGION_INT). The one check
+    shared by run_command() and the HA buttons."""
+    regions = spec.get("regions")
+    if not regions:
+        return True
+    want = REGION_INT.get(str(region or "USA").strip().upper())
+    return want is not None and want in {REGION_INT.get(str(r).upper()) for r in regions}
 
 
 class OtpRequired(Exception):
@@ -773,13 +789,11 @@ def run_command(job, token_file=None):
     spec = next((c for c in load_commands() if c["key"] == name), None)
     if spec is None:
         raise ClientError(f"unknown command {name!r}")
-    if spec.get("regions"):
-        allowed = {REGION_INT.get(str(r).upper()) for r in spec["regions"]}
-        if REGION_INT.get(str(job.get("region", "USA")).upper()) not in allowed:
-            raise ClientError(
-                f"'{name}' isn't available for {job.get('region', 'USA')} vehicles "
-                f"(only {', '.join(spec['regions'])})"
-            )
+    if not command_allowed(spec, job.get("region", "USA")):
+        raise ClientError(
+            f"'{name}' isn't available for {job.get('region', 'USA')} vehicles "
+            f"(only {', '.join(spec['regions'])})"
+        )
 
     vm, _ = connect(job, token_file)
     _refresh_cached_state(vm, job)
@@ -874,7 +888,12 @@ def run_command(job, token_file=None):
         if typ == "time":
             return _parse_time(key, val)
         if typ == "days":
-            return _parse_days(key, val)
+            return parse_days(key, val)
+        step = (opt_specs.get(key) or {}).get("step")
+        if typ == "int" and isinstance(step, int) and step > 1:
+            lo = (opt_specs.get(key) or {}).get("min") or 0
+            if (int(val) - lo) % step:
+                raise ClientError(f"{key} must be a multiple of {step} from {lo}")
         return val
 
     action_id = None
@@ -960,7 +979,7 @@ def _parse_time(key, val):
     raise ClientError(f"{key} must be a time like 07:30, got {val!r}")
 
 
-def _parse_days(key, val):
+def parse_days(key, val):
     """['mon', 'tue'] / 'mon,tue' / [1, 2] -> library day numbers (Sun=0)."""
     items = val if isinstance(val, (list, tuple)) else str(val).split(",")
     out = []

@@ -496,7 +496,21 @@ async def _check_command_authorized(hass: HomeAssistant, call: ServiceCall, coor
         )
 
 
-_DAY_NAMES = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
+def _days(value):
+    """Departure days -> library day numbers, via the same parser kia_client
+    uses (['mon', 'tue'], 'mon,tue', [1, 2] and full names all work)."""
+    try:
+        return kia_client.parse_days("days", value)
+    except kia_client.ClientError as err:
+        raise vol.Invalid(str(err)) from err
+
+
+def _on_step(lo, step):
+    def _check(value):
+        if (value - lo) % step:
+            raise vol.Invalid(f"must be a multiple of {step} from {lo}")
+        return value
+    return _check
 
 
 def _register_services(hass: HomeAssistant) -> None:
@@ -512,12 +526,13 @@ def _register_services(hass: HomeAssistant) -> None:
                 "bool": cv.boolean,
                 # kia_client.py turns these into the library's own types
                 "select": vol.All(cv.string, vol.In(meta.get("choices") or [])),
-                "time": cv.string,
-                "days": vol.All(
-                    cv.ensure_list,
-                    [vol.All(cv.string, vol.Lower, vol.In(_DAY_NAMES))],
-                ),
+                # rejected here, before any Kia login, rather than by
+                # kia_client after one; both hand kia_client a type it takes
+                "time": cv.time,
+                "days": _days,
             }.get(meta.get("type"), cv.string)
+            if meta.get("type") == "int" and meta.get("step"):
+                base = vol.All(base, _on_step(meta.get("min") or 0, meta["step"]))
             # This schema is registered once, globally, before any specific
             # vehicle/entry_id is known (a service call's entry_id is only
             # resolved inside the handler via _coordinator_for()) -- it can't

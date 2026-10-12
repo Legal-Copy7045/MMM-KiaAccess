@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import kia_client
 from .const import COMMANDS, DOMAIN
 from .entity import KiaAccessEntity
 from .vehicle_state import can_plug_in_for
@@ -48,7 +49,7 @@ async def async_setup_entry(
             and not (not can_plug_in and spec.get("category") == "charge")
             # region-limited commands (valet mode, windows) only where the
             # library implements them -- elsewhere they could only fail
-            and (not spec.get("regions") or region in spec["regions"])
+            and kia_client.command_allowed(spec, region)
         ]
     )
 

@@ -412,7 +412,15 @@
       }
     }
 
-    return { conditions: out, meta: { charging: triState(s.charging) } };
+    // An unknown charging sample (API hiccup) carries the last known state
+    // forward instead of erasing it -- otherwise true, null, false never
+    // sees the stop (no charge_complete / charge_interrupted) and true,
+    // null, true fires a second "Charging started" mid-session.
+    var chargingNow = triState(s.charging);
+    if (chargingNow === null && (prev._charging === true || prev._charging === false)) {
+      chargingNow = prev._charging;
+    }
+    return { conditions: out, meta: { charging: chargingNow } };
   }
 
   return { evaluate: evaluate, CHECK_DEFAULTS: CHECK_DEFAULTS, DEFAULTS: DEFAULTS };

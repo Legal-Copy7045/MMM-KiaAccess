@@ -41,7 +41,13 @@ def can_plug_in_for(engine_type) -> bool:
 
 
 def _bool(f, key):
-    v = f.get("vehicle." + key)
+    return to_bool(f.get("vehicle." + key))
+
+
+def to_bool(v):
+    """A vehicle boolean -> True / False / None (unknown). Shared with the HA
+    binary sensors and the charge-session tracker so every surface reads
+    the same raw value the same way."""
     if v in _TRUE:
         return True
     if v in _FALSE:

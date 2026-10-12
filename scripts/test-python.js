@@ -26,6 +26,7 @@ const CORE_TESTS = [
   "test/spec_check.py",
   "test/contract_test.py",
   "test/dump_vehicle_test.py",
+  "test/region_map_test.py",
   "test/token_file_test.py",
   "test/auth_cooldown_test.py",
   "test/sessions_test.py",

@@ -242,4 +242,22 @@ r = C.evaluate(
 );
 assert.strictEqual(find(r, "not_plugged_home").active, true, "PHEV (hybrid, canPlugIn:true): has a plug");
 
+// --- an unknown charging sample keeps the last known state ---
+{
+  const run = (seq) => {
+    let prev = {};
+    return seq.map((charging) => {
+      const res = C.evaluate({ charging, plugged: true, batteryPct: 100, chargeLimitAc: 100 }, {}, prev);
+      prev = { _charging: res.meta.charging };
+      return res;
+    });
+  };
+  let rs = run([true, null, false]);
+  assert.strictEqual(rs[1].meta.charging, true, "null carries true forward");
+  assert.strictEqual(find(rs[2], "charge_complete").active, true, "true, null, false still sees the stop");
+  rs = run([true, null, true]);
+  assert.strictEqual(find(rs[2], "charging_started").active, false, "no second 'started' mid-session");
+  assert.strictEqual(run([null])[0].meta.charging, null, "nothing known yet stays unknown");
+}
+
 console.log("all conditions tests passed");

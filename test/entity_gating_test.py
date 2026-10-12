@@ -135,6 +135,23 @@ def test_hev_gets_no_charge_limit_numbers():
     print("-- HEV: no charge-limit number entities (no plug)")
 
 
+def test_numeric_booleans():
+    """The EV9 reports plugged-in as a connector code (4 while charging):
+    any nonzero number is on, 0 off, a non-boolean string unknown."""
+    spec = next(e for e in ENTITIES if e["key"] == "ev_battery_is_plugged_in")
+    coordinator = _FakeCoordinator("EV")
+    ent = binary_sensor_mod.KiaAccessBinarySensor(coordinator, spec)
+    for raw, want in ((4, True), (1, True), (0, False), ("true", True),
+                      ("false", False), ("maybe", None), (None, None)):
+        coordinator.vehicle["ev_battery_is_plugged_in"] = raw
+        assert ent.is_on is want, (raw, ent.is_on)
+    lock = binary_sensor_mod.KiaAccessBinarySensor(
+        coordinator, next(e for e in ENTITIES if e["key"] == "is_locked"))
+    coordinator.vehicle["is_locked"] = 1
+    assert lock.is_on is False, "inverted lock: locked (1) -> off"
+    print("-- numeric booleans (EV9 connector code) read as on/off")
+
+
 def test_region_limited_buttons_only_where_supported():
     """valet mode / close / vent windows are EU-style-API only: no button
     for a USA car (it could only fail), a button for an EU one."""
@@ -179,4 +196,5 @@ if __name__ == "__main__":
     test_hev_gets_no_charge_limit_numbers()
     test_region_specific_entities_start_disabled()
     test_region_limited_buttons_only_where_supported()
+    test_numeric_booleans()
     print("all entity gating tests passed")

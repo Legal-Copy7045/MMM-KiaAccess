@@ -68,7 +68,7 @@
     { "key": "front_right_window_is_open", "domain": "binary_sensor", "name": "Front-right window", "device_class": "window" },
     { "key": "back_left_window_is_open", "domain": "binary_sensor", "name": "Rear-left window", "device_class": "window" },
     { "key": "back_right_window_is_open", "domain": "binary_sensor", "name": "Rear-right window", "device_class": "window" },
-    { "key": "ev_charge_port_door_is_open", "domain": "binary_sensor", "name": "Charge port door", "device_class": "door" },
+    { "key": "ev_charge_port_door_is_open", "domain": "binary_sensor", "name": "Charge port door", "device_class": "door", "enabled_default": false },
     { "key": "engine_is_running", "domain": "binary_sensor", "name": "Engine running", "device_class": "running" },
     { "key": "oil_level_warning_is_on", "domain": "binary_sensor", "name": "Oil level low", "device_class": "problem", "category": "diagnostic", "enabled_default": false },
     { "key": "ev_v2l_status", "domain": "binary_sensor", "name": "V2L active", "device_class": "running", "enabled_default": false }

@@ -22,6 +22,12 @@ const crypto = require("crypto");
 const { flatten } = require("./core/flatten.js");
 const S = require("./core/state.js");
 const haDiscovery = require("./core/ha-discovery.js");
+// catalogue keys published as HA binary_sensors (see publishMqtt())
+const BINARY_KEYS = new Set(
+  require("./core/entities.json").entities
+    .filter((e) => e.domain === "binary_sensor")
+    .map((e) => e.key)
+);
 const haSource = require("./ha_source.js");
 const sessions = require("./core/sessions.js");
 const trips = require("./core/trips.js");
@@ -1478,9 +1484,13 @@ module.exports = NodeHelper.create({
     // don't fan the full raw API dump (vehicle.data.*) out to retained topics
     const skip = m.publishRaw === true ? null : /^data\./;
     Object.keys(flat).forEach((k) => {
-      const v = flat[k];
+      let v = flat[k];
       if (v === undefined) return;
       if (skip && skip.test(k)) return;
+      // binary_sensor topics: HA discovery matches "true"/"false" exactly,
+      // so a numeric reading (0/1, the EV9's plugged-in connector code 4)
+      // would otherwise leave the entity unknown
+      if (BINARY_KEYS.has(k) && truthy(v) !== null) v = truthy(v) ? "true" : "false";
       client.publish(prefix + "/" + k.replace(/\./g, "/"), v === null ? "" : String(v), { retain });
     });
     client.publish(prefix + "/_meta/fetched_at", String(payload._meta.fetchedAt || ""), { retain });

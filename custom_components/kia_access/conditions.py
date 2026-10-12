@@ -391,4 +391,9 @@ def evaluate(s, cfg, prev):
                  f"Range getting tight for the drive home — ~{round(slack)} km slack",
                  {"homeKm": round(d_home), "usableKm": round(usable), "needKm": round(need)})
 
-    return {"conditions": out, "meta": {"charging": _tri(s.get("charging"))}}
+    # An unknown charging sample carries the last known state forward
+    # instead of erasing it (see conditions.js).
+    charging_now = _tri(s.get("charging"))
+    if charging_now is None and prev.get("_charging") in (True, False):
+        charging_now = prev.get("_charging")
+    return {"conditions": out, "meta": {"charging": charging_now}}
