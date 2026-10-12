@@ -66,6 +66,10 @@ CHARGER_POWER_ACTIVE_THRESHOLD_W = 50
 # within well under this window.
 CHARGER_START_SETTLE_SECONDS = 90
 
+# A failed poll right after a good one is retried this soon (once) instead
+# of after a whole scan_interval -- see _update_failed().
+QUICK_RETRY_SECONDS = 60
+
 from .vehicle_state import build_state
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,6 +77,10 @@ _LOGGER = logging.getLogger(__name__)
 
 class KiaAccessCoordinator(DataUpdateCoordinator):
     """Polls the Kia cloud via the shared kia_client and caches the last state."""
+
+    # see _update_failed() -- class default too, for instances built
+    # without __init__ (the coordinator test harnesses)
+    _quick_retry_used = False
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         minutes = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES)
@@ -100,6 +108,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # marks entities unavailable for that) from "polls keep succeeding,
         # but the car itself hasn't reported anything new in a while".
         self.last_successful_update: datetime | None = None
+        # see _update_failed()
+        self._quick_retry_used = False
         self._prev_cond: dict = {}
         self._announced: dict = {}
         self._first_alert_run = True
@@ -1191,13 +1201,68 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         except (TypeError, ValueError):
             return False
 
+    def _update_failed(self, msg: str) -> UpdateFailed:
+        """UpdateFailed for a failed poll. The first failure after a success
+        retries in QUICK_RETRY_SECONDS rather than a whole scan_interval --
+        most Kia errors are passing (a timeout, a 5xx, a device-id hiccup)
+        and otherwise leave every entity unavailable for up to 30 min. Only
+        once per outage, so a Kia cloud that's genuinely down is still
+        polled at the normal pace, not hammered every minute."""
+        if not self._quick_retry_used:
+            self._quick_retry_used = True
+            try:
+                return UpdateFailed(
+                    f"{msg} (retrying in {QUICK_RETRY_SECONDS}s)",
+                    retry_after=QUICK_RETRY_SECONDS,
+                )
+            except TypeError:
+                # HA before retry_after existed -- plain failure
+                pass
+        return UpdateFailed(msg)
+
+    def _in_quiet_hours(self) -> bool:
+        """quiet_hours_start..quiet_hours_end (local hours, end exclusive,
+        wrapping midnight when start > end). start == end = no quiet hours."""
+        opts = self.entry.options
+        try:
+            start = int(float(opts.get("quiet_hours_start", 0) or 0))
+            end = int(float(opts.get("quiet_hours_end", 0) or 0))
+        except (TypeError, ValueError):
+            return False
+        if start == end:
+            return False
+        hour = dt_util.now().hour
+        if start < end:
+            return start <= hour < end
+        return hour >= start or hour < end
+
+    def _wake_allowed(self) -> bool:
+        """With "poll car directly" on: may this scheduled poll wake the car?
+
+        Not during quiet hours, and not while the car's own last report is
+        newer than wake_interval_min -- going by the car's timestamp rather
+        than our own last wake means a car that just reported on its own
+        (driving, charging, the app) isn't woken again, and the spacing
+        survives an HA restart. A manual "Refresh now" bypasses both."""
+        if self._in_quiet_hours():
+            return False
+        try:
+            interval_min = float(self.entry.options.get("wake_interval_min", 0) or 0)
+        except (TypeError, ValueError):
+            interval_min = 0.0
+        if interval_min > 0:
+            age = self.data_age_seconds
+            if age is not None and age < interval_min * 60:
+                return False
+        return True
+
     def _job(self, **extra) -> dict:
         d = self.entry.data
         # async_force_refresh() sets this for exactly one call to make a manual
         # "Refresh now" wake the car even when "poll car directly" is off.
         forced = self._force_next_refresh
         self._force_next_refresh = False
-        poll_now = self._poll_car_directly() or forced
+        poll_now = forced or (self._poll_car_directly() and self._wake_allowed())
         timeout = (
             self.entry.options.get(
                 "force_refresh_timeout", DEFAULT_FORCE_REFRESH_TIMEOUT
@@ -1314,6 +1379,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     )
                 self.vehicle = vehicle
                 self.last_successful_update = dt_util.utcnow()
+                self._quick_retry_used = False
                 await self._update_sessions()
                 await self._update_trips()
 
@@ -1325,11 +1391,12 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                     raise ConfigEntryAuthFailed(
                         "Kia needs re-enrollment (one-time code)."
                     ) from fetch_err
-                if isinstance(fetch_err, kia_client.ClientError):
-                    raise UpdateFailed(str(fetch_err)) from fetch_err
-                raise UpdateFailed(
-                    f"{type(fetch_err).__name__}: {fetch_err}"
-                ) from fetch_err
+                msg = (
+                    str(fetch_err)
+                    if isinstance(fetch_err, kia_client.ClientError)
+                    else f"{type(fetch_err).__name__}: {fetch_err}"
+                )
+                raise self._update_failed(msg) from fetch_err
 
             await self._emit_alerts()
             return self.vehicle

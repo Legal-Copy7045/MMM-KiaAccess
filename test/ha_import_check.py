@@ -272,6 +272,9 @@ assert _pcd(_mk({"force_refresh_timeout": 0})) is False
 class _FakeCoord:
     _poll_car_directly = co.KiaAccessCoordinator._poll_car_directly
     _job = co.KiaAccessCoordinator._job
+    _wake_allowed = co.KiaAccessCoordinator._wake_allowed
+    _in_quiet_hours = co.KiaAccessCoordinator._in_quiet_hours
+    data_age_seconds = None  # car hasn't reported yet
 
     def __init__(self, opts):
         self.entry = type(
