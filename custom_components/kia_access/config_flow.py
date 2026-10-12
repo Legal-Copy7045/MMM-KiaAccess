@@ -846,6 +846,21 @@ class KiaAccessOptionsFlow(config_entries.OptionsFlow):
                                     ),
                                 ): _number(0, 180, 1),
                                 vol.Optional(
+                                    "wake_interval_min",
+                                    # 0 = every scheduled poll wakes the car
+                                    # (the behaviour before this option existed)
+                                    default=opts.get("wake_interval_min", 0),
+                                ): _number(0, 1440, 5),
+                                vol.Optional(
+                                    "quiet_hours_start",
+                                    # start == end = no quiet hours
+                                    default=opts.get("quiet_hours_start", 0),
+                                ): _number(0, 23, 1),
+                                vol.Optional(
+                                    "quiet_hours_end",
+                                    default=opts.get("quiet_hours_end", 0),
+                                ): _number(0, 23, 1),
+                                vol.Optional(
                                     "block_automated_climate",
                                     default=opts.get("block_automated_climate", False),
                                 ): bool,

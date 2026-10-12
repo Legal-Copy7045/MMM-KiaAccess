@@ -79,6 +79,9 @@ power). Repeatedly waking a parked car flattens its 12V battery in the cold, so
 cached reads are the safe default. If the live wake-up is selected, it is
 time-boxed and falls back to the cache.
 - **HA** — *Configure → Poll the car directly*: off (default) = cache only.
+  When it's on, *Minimum time between wake-ups* (e.g. 1440 = once a day) and
+  *Quiet hours* (e.g. 22 → 7) limit when a scheduled poll may wake the car;
+  the polls in between read the cache. *Refresh now* always wakes it.
 - **MagicMirror mode B** — `refresh: false` = cache. Mode C leaves this to HA.
 
 ---
