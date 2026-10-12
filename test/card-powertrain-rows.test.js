@@ -126,4 +126,18 @@ assert.strictEqual(KiaAccessCard._hidePowertrainRow("odometer", "ICE"), false);
   assert.ok(!hev.includes("data-cmd='start_charge'"), "HEV: no charging commands (no plug)");
 }
 
+// ---- actionsGroupsHtml(): region-limited commands (valet mode, close /
+// vent windows) only render for a region the library implements them for ----
+{
+  const usa = KiaAccessCard._actionsGroupsHtml(true, "USA");
+  assert.ok(!usa.includes("data-cmd='start_valet_mode'"), "USA: no valet button");
+  assert.ok(!usa.includes("data-cmd='close_windows'"), "USA: no windows button");
+  assert.ok(usa.includes("data-cmd='lock'"), "USA: region-free commands unaffected");
+  const eu = KiaAccessCard._actionsGroupsHtml(true, "eu");
+  assert.ok(eu.includes("data-cmd='start_valet_mode'"), "EU: valet button");
+  assert.ok(eu.includes("data-cmd='close_windows'") && eu.includes("data-cmd='vent_windows'"), "EU: window buttons");
+  const unknown = KiaAccessCard._actionsGroupsHtml(true);
+  assert.ok(!unknown.includes("data-cmd='start_valet_mode'"), "unknown region: region-limited hidden");
+}
+
 console.log("all card-powertrain-rows tests passed");

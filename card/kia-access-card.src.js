@@ -231,10 +231,19 @@
   // otherwise sit there unconditionally, dispatching commands the car has
   // no way to honour. Any other value (including omitted) defaults to
   // showing them -- same fail-safe reasoning as buildState()'s canPlugIn.
-  function actionsGroupsHtml(canPlugIn) {
-    var visible = canPlugIn === false
-      ? BUTTON_COMMANDS.filter(function (c) { return c.category !== "charge"; })
-      : BUTTON_COMMANDS;
+  //
+  // `region` (the vehicle's region code) hides commands whose catalogue
+  // entry carries a `regions` list without it (valet mode, close / vent
+  // windows -- only implemented for the EU-style API). Omitted region keeps
+  // the old behaviour for region-free commands and hides region-limited
+  // ones, since they'd only fail for a car we can't place.
+  function actionsGroupsHtml(canPlugIn, region) {
+    var reg = String(region || "").toUpperCase();
+    var visible = BUTTON_COMMANDS.filter(function (c) {
+      if (canPlugIn === false && c.category === "charge") return false;
+      if (c.regions && c.regions.indexOf(reg) === -1) return false;
+      return true;
+    });
     var seen = {};
     var html = CAT_ORDER.map(function (cat) {
       var items = visible.filter(function (c) { return (c.category || "other") === cat; });
@@ -1090,7 +1099,7 @@
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml(state.canPlugIn) +
+        actionsGroupsHtml(state.canPlugIn, this._region) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";

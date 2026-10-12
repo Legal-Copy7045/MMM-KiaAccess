@@ -129,7 +129,9 @@ USA, °C 16–30 elsewhere).
   heat), one-tap `button`s (lock / unlock, flash, charge port, start / stop
   charge, **refresh now** — force a live pull from Kia's servers on demand,
   even with "poll the car directly" off) and services (`start_climate` with
-  seats, `set_charge_limits`, `send_to_car`).
+  seats, `set_charge_limits`, `send_to_car`). European-API regions (EU, AU,
+  NZ, IN, CN, BR) also get valet-mode and close / vent-windows buttons plus
+  the services below.
 - **`device_tracker.<v>_location`** — the car's GPS, so HA's map, zones and
   presence automations work natively.
 - **Derived sensors**
@@ -1588,6 +1590,33 @@ action:
 > the monthly upstream check. (If you can capture one Send-To-Car request from
 > the Kia app, a US `set_navigation` implementation could be contributed —
 > [open an issue](https://github.com/Legal-Copy7045/MMM-KiaAccess/issues).)
+
+## Windows, valet mode, schedules (EU / AU / NZ / IN / CN / BR)
+
+`hyundai_kia_connect_api` implements these only for its European-style API, so
+they're offered for vehicles in those regions. A USA or Canada car gets no
+buttons for them, and the services return a clear "not available for USA
+vehicles" error.
+
+| Service / button | What it does |
+|---|---|
+| **Start / Stop valet mode** (buttons + services) | Valet mode on / off |
+| **Close windows** / **Vent windows** (buttons + services) | All four windows at once |
+| `kia_access.set_windows` | Each window `closed` / `open` / `vent`; leave one out to keep it as it is |
+| `kia_access.set_charging_current` | AC charging current: `100` / `90` / `60` % |
+| `kia_access.set_v2l_limit` | V2L discharge limit, 20–80 % |
+| `kia_access.schedule_charging_and_climate` | Departure 1 / 2 (on/off, time, days), scheduled charging, off-peak window and "off-peak only", departure climate (temperature °C, defrost). Every field you leave out keeps the car's current setting |
+| `kia_access.set_off_peak_charging` | `mode`: `off`, `time` (charge only in the off-peak window) or `target` (prefer off-peak, but finish the charge), plus an optional new window |
+
+```yaml
+service: kia_access.schedule_charging_and_climate
+data:
+  first_departure_enabled: true
+  first_departure_time: "07:30"
+  first_departure_days: [mon, tue, wed, thu, fri]
+  climate_enabled: true
+  temperature: 21
+```
 
 ## Home Assistant — reference
 

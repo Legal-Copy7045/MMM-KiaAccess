@@ -496,6 +496,9 @@ async def _check_command_authorized(hass: HomeAssistant, call: ServiceCall, coor
         )
 
 
+_DAY_NAMES = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
+
+
 def _register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, COMMANDS[0]["key"]):
         return
@@ -507,6 +510,13 @@ def _register_services(hass: HomeAssistant) -> None:
                 "int": _strict_int,
                 "float": vol.Coerce(float),
                 "bool": cv.boolean,
+                # kia_client.py turns these into the library's own types
+                "select": vol.All(cv.string, vol.In(meta.get("choices") or [])),
+                "time": cv.string,
+                "days": vol.All(
+                    cv.ensure_list,
+                    [vol.All(cv.string, vol.Lower, vol.In(_DAY_NAMES))],
+                ),
             }.get(meta.get("type"), cv.string)
             # This schema is registered once, globally, before any specific
             # vehicle/entry_id is known (a service call's entry_id is only
@@ -528,7 +538,8 @@ def _register_services(hass: HomeAssistant) -> None:
                 typ = vol.All(base, vol.Range(min=lo, max=hi))
             else:
                 typ = base
-            opt_schema[vol.Optional(opt_name)] = typ
+            marker = vol.Required if meta.get("required") else vol.Optional
+            opt_schema[marker(opt_name)] = typ
 
         def _make_handler(command_key: str):
             async def _handler(call: ServiceCall) -> None:

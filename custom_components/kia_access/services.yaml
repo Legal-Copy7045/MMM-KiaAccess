@@ -279,6 +279,281 @@ send_to_car:
           step: "any"
           mode: "box"
 
+start_valet_mode:
+  name: "Start valet mode"
+  description: "Start valet mode — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
+stop_valet_mode:
+  name: "Stop valet mode"
+  description: "Stop valet mode — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
+close_windows:
+  name: "Close windows"
+  description: "Close windows — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
+vent_windows:
+  name: "Vent windows"
+  description: "Vent windows — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+
+set_windows:
+  name: "Set windows"
+  description: "Set windows — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+    front_left:
+      name: "Front left"
+      required: false
+      selector:
+        select:
+          options:
+            - "closed"
+            - "open"
+            - "vent"
+          mode: "dropdown"
+    front_right:
+      name: "Front right"
+      required: false
+      selector:
+        select:
+          options:
+            - "closed"
+            - "open"
+            - "vent"
+          mode: "dropdown"
+    back_left:
+      name: "Back left"
+      required: false
+      selector:
+        select:
+          options:
+            - "closed"
+            - "open"
+            - "vent"
+          mode: "dropdown"
+    back_right:
+      name: "Back right"
+      required: false
+      selector:
+        select:
+          options:
+            - "closed"
+            - "open"
+            - "vent"
+          mode: "dropdown"
+
+set_charging_current:
+  name: "Set AC charging current"
+  description: "Set AC charging current — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+    current:
+      name: "Current"
+      required: true
+      selector:
+        select:
+          options:
+            - "100"
+            - "90"
+            - "60"
+          mode: "dropdown"
+
+set_v2l_limit:
+  name: "Set V2L discharge limit"
+  description: "Set V2L discharge limit — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+    limit:
+      name: "Limit"
+      required: true
+      selector:
+        number:
+          min: 20
+          max: 80
+          mode: "box"
+          unit_of_measurement: "%"
+
+schedule_charging_and_climate:
+  name: "Set charging & climate schedule"
+  description: "Set charging & climate schedule — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+    first_departure_enabled:
+      name: "First departure enabled"
+      required: false
+      selector:
+        boolean: {}
+    first_departure_time:
+      name: "First departure time"
+      required: false
+      selector:
+        time: {}
+    first_departure_days:
+      name: "First departure days"
+      required: false
+      selector:
+        select:
+          options:
+            - "sun"
+            - "mon"
+            - "tue"
+            - "wed"
+            - "thu"
+            - "fri"
+            - "sat"
+          multiple: true
+    second_departure_enabled:
+      name: "Second departure enabled"
+      required: false
+      selector:
+        boolean: {}
+    second_departure_time:
+      name: "Second departure time"
+      required: false
+      selector:
+        time: {}
+    second_departure_days:
+      name: "Second departure days"
+      required: false
+      selector:
+        select:
+          options:
+            - "sun"
+            - "mon"
+            - "tue"
+            - "wed"
+            - "thu"
+            - "fri"
+            - "sat"
+          multiple: true
+    charging_enabled:
+      name: "Charging enabled"
+      required: false
+      selector:
+        boolean: {}
+    off_peak_start_time:
+      name: "Off peak start time"
+      required: false
+      selector:
+        time: {}
+    off_peak_end_time:
+      name: "Off peak end time"
+      required: false
+      selector:
+        time: {}
+    off_peak_charge_only_enabled:
+      name: "Off peak charge only enabled"
+      required: false
+      selector:
+        boolean: {}
+    climate_enabled:
+      name: "Climate enabled"
+      required: false
+      selector:
+        boolean: {}
+    temperature:
+      name: "Temperature"
+      required: false
+      selector:
+        number:
+          min: 16
+          max: 30
+          step: 0.5
+          mode: "box"
+          unit_of_measurement: "°C"
+    defrost:
+      name: "Defrost"
+      required: false
+      selector:
+        boolean: {}
+
+set_off_peak_charging:
+  name: "Set off-peak charging"
+  description: "Set off-peak charging — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  fields:
+    entry_id:
+      name: Account
+      description: Config entry id (only needed with multiple accounts).
+      required: false
+      selector:
+        config_entry:
+          integration: kia_access
+    mode:
+      name: "Mode"
+      required: false
+      selector:
+        select:
+          options:
+            - "off"
+            - "time"
+            - "target"
+          mode: "dropdown"
+    off_peak_start_time:
+      name: "Off peak start time"
+      required: false
+      selector:
+        time: {}
+    off_peak_end_time:
+      name: "Off peak end time"
+      required: false
+      selector:
+        time: {}
+
 refresh_calendar_destinations:
   name: "Refresh calendar destinations"
   description: "Re-read the configured calendars now and geocode any new event locations for the reachable-destinations list / range map."

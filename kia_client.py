@@ -773,6 +773,13 @@ def run_command(job, token_file=None):
     spec = next((c for c in load_commands() if c["key"] == name), None)
     if spec is None:
         raise ClientError(f"unknown command {name!r}")
+    if spec.get("regions"):
+        allowed = {REGION_INT.get(str(r).upper()) for r in spec["regions"]}
+        if REGION_INT.get(str(job.get("region", "USA")).upper()) not in allowed:
+            raise ClientError(
+                f"'{name}' isn't available for {job.get('region', 'USA')} vehicles "
+                f"(only {', '.join(spec['regions'])})"
+            )
 
     vm, _ = connect(job, token_file)
     _refresh_cached_state(vm, job)
@@ -798,7 +805,9 @@ def run_command(job, token_file=None):
             f"hyundai_kia_connect_api has no '{spec['method']}' — library too old?"
         )
 
-    opts = job.get("options") or {}
+    # a preset (close_windows / vent_windows) fills fixed options for a
+    # one-tap variant of a parameterised call
+    opts = {**(spec.get("preset") or {}), **(job.get("options") or {})}
     opt_specs = spec.get("options") or {}
     call = spec.get("call", "bare")
     # options like start_climate's set_temp carry a region-specific "metric"
@@ -846,7 +855,27 @@ def run_command(job, token_file=None):
             return val
         if not fahrenheit and metric:
             return metric.get("default")
+        if spec_for_key.get("required"):
+            raise ClientError(f"'{name}' needs {key}")
         return spec_for_key.get("default")
+
+    def _option(key):
+        """_with_default() plus the select / time / days conversions."""
+        val = _with_default(key)
+        if val is None:
+            return None
+        typ = (opt_specs.get(key) or {}).get("type")
+        if typ == "select":
+            choices = opt_specs[key].get("choices") or []
+            val = str(val)
+            if choices and val not in choices:
+                raise ClientError(f"{key} must be one of {', '.join(choices)}")
+            return (opt_specs[key].get("map") or {}).get(val, val)
+        if typ == "time":
+            return _parse_time(key, val)
+        if typ == "days":
+            return _parse_days(key, val)
+        return val
 
     action_id = None
     try:
@@ -873,8 +902,12 @@ def run_command(job, token_file=None):
                     setattr(co, key, val)
             action_id = method(vehicle_id, co)
         elif call == "positional":
-            args = [_with_default(a) for a in spec.get("args", [])]
+            args = [_option(a) for a in spec.get("args", [])]
             action_id = method(vehicle_id, *args)
+        elif call == "windows":
+            action_id = method(vehicle_id, _window_options(opts))
+        elif call == "schedule":
+            action_id = method(vehicle_id, _schedule_options(_option, opt_specs))
         elif call == "poi":
             action_id = method(vehicle_id, [_build_poi(opts)])
         else:
@@ -909,6 +942,100 @@ def run_command(job, token_file=None):
         raise ClientError(f"{spec['method']} failed: {type(exc).__name__}: {exc}") from exc
 
     return {"ok": True, "command": name, "vehicleId": vehicle_id, "actionId": action_id}
+
+
+_WINDOW_STATES = {"closed": 0, "open": 1, "vent": 2}
+_DAYS = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
+
+
+def _parse_time(key, val):
+    """'HH:MM' / 'HH:MM:SS' (what HA's time selector sends) -> datetime.time."""
+    if isinstance(val, datetime.time):
+        return val
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            return datetime.datetime.strptime(str(val).strip(), fmt).time()
+        except ValueError:
+            continue
+    raise ClientError(f"{key} must be a time like 07:30, got {val!r}")
+
+
+def _parse_days(key, val):
+    """['mon', 'tue'] / 'mon,tue' / [1, 2] -> library day numbers (Sun=0)."""
+    items = val if isinstance(val, (list, tuple)) else str(val).split(",")
+    out = []
+    for item in items:
+        text = str(item).strip().lower()[:3]
+        if text.isdigit() and 0 <= int(text) <= 6:
+            out.append(int(text))
+        elif text in _DAYS:
+            out.append(_DAYS.index(text))
+        elif text:
+            raise ClientError(f"{key}: unknown day {item!r} (use sun..sat)")
+    return sorted(set(out))
+
+
+def _window_options(opts):
+    """{front_left: 'closed'|'open'|'vent', ...} -> WindowRequestOptions;
+    a window left out stays as it is."""
+    try:
+        from hyundai_kia_connect_api.ApiImpl import WindowRequestOptions
+    except Exception as exc:  # noqa: BLE001
+        raise ClientError(
+            "this hyundai_kia_connect_api version has no WindowRequestOptions"
+        ) from exc
+    states = {}
+    for pos in ("front_left", "front_right", "back_left", "back_right"):
+        val = opts.get(pos)
+        if val is None or val == "":
+            continue
+        if str(val) not in _WINDOW_STATES:
+            raise ClientError(f"{pos} must be closed, open or vent")
+        states[pos] = _WINDOW_STATES[str(val)]
+    if not states:
+        raise ClientError("set at least one window (closed, open or vent)")
+    return WindowRequestOptions(**states)
+
+
+def _schedule_options(option, opt_specs):
+    """The schedule commands' options -> ScheduleChargingClimateRequestOptions.
+    Every field left out stays None, which the library reads as "keep the
+    car's current setting"."""
+    try:
+        from hyundai_kia_connect_api.ApiImpl import ScheduleChargingClimateRequestOptions
+    except Exception as exc:  # noqa: BLE001
+        raise ClientError(
+            "this hyundai_kia_connect_api version has no "
+            "ScheduleChargingClimateRequestOptions"
+        ) from exc
+    req = ScheduleChargingClimateRequestOptions()
+    for n in ("first", "second"):
+        fields = {
+            "enabled": option(f"{n}_departure_enabled") if f"{n}_departure_enabled" in opt_specs else None,
+            "time": option(f"{n}_departure_time") if f"{n}_departure_time" in opt_specs else None,
+            "days": option(f"{n}_departure_days") if f"{n}_departure_days" in opt_specs else None,
+        }
+        if any(v is not None for v in fields.values()):
+            setattr(req, f"{n}_departure",
+                    ScheduleChargingClimateRequestOptions.DepartureOptions(**fields))
+    for key in ("charging_enabled", "off_peak_start_time", "off_peak_end_time",
+                "off_peak_charge_only_enabled", "climate_enabled", "temperature",
+                "defrost"):
+        if key in opt_specs:
+            val = option(key)
+            if val is not None:
+                setattr(req, key, val)
+    if "mode" in opt_specs:
+        mode = option("mode")
+        if mode == "off":
+            req.charging_enabled = False
+        elif mode == "time":
+            req.charging_enabled = True
+            req.off_peak_charge_only_enabled = True
+        elif mode == "target":
+            req.charging_enabled = True
+            req.off_peak_charge_only_enabled = False
+    return req
 
 
 def _geocode(address):
