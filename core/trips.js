@@ -10,12 +10,18 @@
  * Pure: no DOM, no `this`, no clock of its own (the caller passes `t`).
  */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.KiaAccessTrips = factory();
-})(typeof self !== "undefined" ? self : this, function () {
+  // depends on core/sessions.js (EV9 pack size) and core/range.js
+  // (distance) -- in a browser both must load first (MM getScripts order,
+  // the card bundle in scripts/sync-core.js)
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory(require("./sessions.js"), require("./range.js"));
+  } else {
+    root.KiaAccessTrips = factory(root.KiaAccessSessions, root.KiaAccessRange);
+  }
+})(typeof self !== "undefined" ? self : this, function (Sessions, Range) {
   "use strict";
 
-  var DEFAULT_CAPACITY_KWH = 99.8; // Kia EV9 usable
+  var DEFAULT_CAPACITY_KWH = Sessions.DEFAULT_CAPACITY_KWH;
   var MIN_KM = 0.5;                // ignore driveway shuffles below this
   var PARK_GAP_MIN = 8;            // odo stable / engine off this long -> parked
   var MI_PER_KM = 0.621371;
@@ -30,39 +36,10 @@
     var f = Math.pow(10, dp == null ? 2 : dp);
     return Math.round(n * f) / f;
   }
-  // See core/sessions.js's resolveCap()/isEv9() for why: DEFAULT_CAPACITY_KWH
-  // is the EV9's own usable pack size and must never stand in as a generic
-  // "capacity unknown" guess for some other model, or that model's own
-  // energy/cost/efficiency fields would silently be computed off the wrong
-  // car's battery size.
-  function isEv9(model) {
-    // see core/sessions.js's isEv9() for the [\s-]*/(?!\d) reasoning
-    return typeof model === "string" && /ev[\s-]*9(?!\d)/i.test(model);
-  }
-  function resolveCap(opts) {
-    var cap = num(opts.capacityKwh);
-    if (cap == null && isEv9(opts.model)) cap = DEFAULT_CAPACITY_KWH;
-    return cap;
-  }
-  function haversineKm(aLat, aLon, bLat, bLon) {
-    if (aLat == null || aLon == null || bLat == null || bLon == null) return null;
-    // null already handled; also reject NaN/Infinity (both pass a bare
-    // != null check and their trig math can produce NaN/Infinity results)
-    // and an out-of-range-but-finite lat/lon -- the one caller here
-    // (close()) already passes a null result through round() safely, so
-    // extending this is a no-op for that call site and closes the gap for
-    // anything else that might reach this function.
-    if (typeof aLat !== "number" || typeof aLon !== "number" ||
-        typeof bLat !== "number" || typeof bLon !== "number") return null;
-    if (!isFinite(aLat) || !isFinite(aLon) || !isFinite(bLat) || !isFinite(bLon)) return null;
-    if (aLat < -90 || aLat > 90 || bLat < -90 || bLat > 90) return null;
-    if (aLon < -180 || aLon > 180 || bLon < -180 || bLon > 180) return null;
-    var R = 6371, p = Math.PI / 180;
-    var dLat = (bLat - aLat) * p, dLon = (bLon - aLon) * p;
-    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(aLat * p) * Math.cos(bLat * p) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return R * 2 * Math.asin(Math.sqrt(s));
-  }
+  // one EV9 check / pack-size rule and one distance function for every
+  // surface (see core/sessions.js resolveCap(), core/range.js haversineKm())
+  var resolveCap = Sessions.resolveCap;
+  var haversineKm = Range.haversineKm;
 
   function close(open, opts, endAt) {
     var cap = resolveCap(opts);

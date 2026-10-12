@@ -219,5 +219,52 @@
     return flat;
   }
 
-  return { buildState: buildState, flatFromAttributes: flatFromAttributes };
+  /**
+   * The timer-derived alert context buildState() can't compute alone:
+   * how long the car has been home + unplugged, and whether it moved while
+   * parked (GPS shifted >= 1000 ft while the odometer stayed put and the car
+   * was off -- a tow / theft). `ctx` carries the timers between polls
+   * ({_homeUnpluggedSince, _movedSince, _lastParked}, ms) and is updated in
+   * place; `st` (needs atHome set) gains homeUnpluggedMin /
+   * movedWhileParkedKm / movedWhileParkedMin. `distKm` is core/range.js's
+   * haversineKm. One copy for MM and the card (vehicle_state.py has the HA
+   * port), so a fix lands everywhere.
+   */
+  function trackAlertTimers(ctx, st, now, distKm) {
+    var homeUnplugged = st.atHome === true && st.plugged !== true;
+    if (homeUnplugged && ctx._homeUnpluggedSince == null) ctx._homeUnpluggedSince = now;
+    if (!homeUnplugged) ctx._homeUnpluggedSince = null;
+    st.homeUnpluggedMin = ctx._homeUnpluggedSince != null
+      ? (now - ctx._homeUnpluggedSince) / 60000 : null;
+
+    var p = ctx._lastParked;
+    var odoStable = p && st.odometerKm != null && Math.abs(st.odometerKm - p.odo) < 0.1;
+    if (odoStable && st.carOn !== true && st.locationLat != null && p.lat != null) {
+      var movedKm = distKm(p.lat, p.lon, st.locationLat, st.locationLon);
+      if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
+        if (ctx._movedSince == null) ctx._movedSince = now;
+        st.movedWhileParkedKm = movedKm;
+        st.movedWhileParkedMin = (now - ctx._movedSince) / 60000;
+      } else {
+        ctx._movedSince = null;
+        st.movedWhileParkedKm = 0;
+        st.movedWhileParkedMin = 0;
+      }
+    } else {
+      // driven, or first sample, or no GPS -- (re)anchor the parked position
+      ctx._movedSince = null;
+      if (st.locationLat != null && st.odometerKm != null) {
+        ctx._lastParked = { lat: st.locationLat, lon: st.locationLon, odo: st.odometerKm };
+      }
+      st.movedWhileParkedKm = ctx._lastParked ? 0 : null;
+      st.movedWhileParkedMin = 0;
+    }
+    return st;
+  }
+
+  return {
+    buildState: buildState,
+    flatFromAttributes: flatFromAttributes,
+    trackAlertTimers: trackAlertTimers
+  };
 });

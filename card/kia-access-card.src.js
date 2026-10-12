@@ -902,39 +902,10 @@
         state.homeDistanceKm = null;
       }
 
-      var homeUnplugged = state.atHome === true && state.plugged !== true;
-      if (homeUnplugged && !this._homeUnpluggedSince) this._homeUnpluggedSince = Date.now();
-      if (!homeUnplugged) this._homeUnpluggedSince = null;
-      state.homeUnpluggedMin = this._homeUnpluggedSince
-        ? (Date.now() - this._homeUnpluggedSince) / 60000 : null;
-
-      // moved-while-parked (tow / theft): GPS shifted while the odometer
-      // stayed put and the car was off
-      var now = Date.now();
-      var p = this._lastParked;
-      var odoStable = p && state.odometerKm != null && Math.abs(state.odometerKm - p.odo) < 0.1;
-      if (odoStable && state.carOn !== true && state.locationLat != null
-          && p.lat != null && RNG && RNG.haversineKm) {
-        var movedKm = RNG.haversineKm(p.lat, p.lon, state.locationLat, state.locationLon);
-        if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
-          if (!this._movedSince) this._movedSince = now;
-          state.movedWhileParkedKm = movedKm;
-          state.movedWhileParkedMin = (now - this._movedSince) / 60000;
-        } else {
-          this._movedSince = null;
-          state.movedWhileParkedKm = 0;
-          state.movedWhileParkedMin = 0;
-        }
-      } else {
-        this._movedSince = null;
-        if (state.locationLat != null && state.odometerKm != null) {
-          this._lastParked = {
-            lat: state.locationLat, lon: state.locationLon, odo: state.odometerKm
-          };
-        }
-        state.movedWhileParkedKm = this._lastParked ? 0 : null;
-        state.movedWhileParkedMin = 0;
-      }
+      // home-unplugged duration + moved-while-parked (shared with MM)
+      S.trackAlertTimers(this, state, Date.now(), function (a, b, c, d) {
+        return RNG && RNG.haversineKm ? RNG.haversineKm(a, b, c, d) : null;
+      });
     }
 
     // Alert hysteresis (_prevCond) and the home-unplugged / moved-while-

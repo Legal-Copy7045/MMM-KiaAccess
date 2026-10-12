@@ -216,3 +216,44 @@ def build_state(flat, opts=None):
         "otpLifetimeDays": opts.get("otpLifetimeDays"),
         "otpWarnDays": opts.get("otpWarnDays"),
     }
+
+
+def track_alert_timers(ctx, st, now, dist_km):
+    """Python port of core/state.js trackAlertTimers(): how long the car has
+    been home + unplugged, and whether it moved while parked (GPS shifted
+    >= 1000 ft while the odometer stayed put and the car was off). `ctx`
+    holds the timers between polls ({"home_unplugged_since", "moved_since",
+    "last_parked"}, seconds) and is updated in place; `st` (needs atHome)
+    gains homeUnpluggedMin / movedWhileParkedKm / movedWhileParkedMin.
+    `dist_km` is a haversine returning None for unknown."""
+    home_unplugged = st.get("atHome") is True and st.get("plugged") is not True
+    if home_unplugged and ctx.get("home_unplugged_since") is None:
+        ctx["home_unplugged_since"] = now
+    if not home_unplugged:
+        ctx["home_unplugged_since"] = None
+    since = ctx.get("home_unplugged_since")
+    st["homeUnpluggedMin"] = (now - since) / 60 if since is not None else None
+
+    lat, lon = st.get("locationLat"), st.get("locationLon")
+    odo = st.get("odometerKm")
+    p = ctx.get("last_parked")
+    odo_stable = p is not None and odo is not None and abs(odo - p["odo"]) < 0.1
+    if odo_stable and st.get("carOn") is not True and lat is not None and p.get("lat") is not None:
+        moved = dist_km(p["lat"], p["lon"], lat, lon)
+        if moved is not None and moved >= 0.3048:  # 1000 ft -- real move, not GPS jitter
+            if ctx.get("moved_since") is None:
+                ctx["moved_since"] = now
+            st["movedWhileParkedKm"] = moved
+            st["movedWhileParkedMin"] = (now - ctx["moved_since"]) / 60
+        else:
+            ctx["moved_since"] = None
+            st["movedWhileParkedKm"] = 0
+            st["movedWhileParkedMin"] = 0
+    else:
+        # driven, or first sample, or no GPS -- (re)anchor the parked position
+        ctx["moved_since"] = None
+        if lat is not None and odo is not None:
+            ctx["last_parked"] = {"lat": lat, "lon": lon, "odo": odo}
+        st["movedWhileParkedKm"] = 0 if ctx.get("last_parked") else None
+        st["movedWhileParkedMin"] = 0
+    return st

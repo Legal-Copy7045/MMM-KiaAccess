@@ -119,4 +119,25 @@ assert.strictEqual(
 );
 assert.strictEqual(buildState({}, {}).rangeKm, null, "no range data at all -> null, not a crash");
 
+// ---- trackAlertTimers(): the one copy MM and the card share ----
+{
+  const S = require("../core/state.js");
+  const R = require("../core/range.js");
+  const ctx = {};
+  const st = (o) => Object.assign({ atHome: true, plugged: false, carOn: false,
+    odometerKm: 1000, locationLat: 40, locationLon: -75 }, o);
+  let a = S.trackAlertTimers(ctx, st({}), 0, R.haversineKm);
+  assert.strictEqual(a.homeUnpluggedMin, 0);
+  assert.strictEqual(a.movedWhileParkedKm, 0, "first sample anchors the parked spot");
+  a = S.trackAlertTimers(ctx, st({}), 30 * 60000, R.haversineKm);
+  assert.strictEqual(a.homeUnpluggedMin, 30);
+  a = S.trackAlertTimers(ctx, st({ locationLat: 40.01 }), 31 * 60000, R.haversineKm);
+  assert.ok(a.movedWhileParkedKm > 1, "GPS moved ~1.1 km with the odometer still");
+  a = S.trackAlertTimers(ctx, st({ locationLat: 40.01 }), 36 * 60000, R.haversineKm);
+  assert.strictEqual(a.movedWhileParkedMin, 5);
+  a = S.trackAlertTimers(ctx, st({ plugged: true, odometerKm: 1010, locationLat: 40.1 }), 40 * 60000, R.haversineKm);
+  assert.strictEqual(a.homeUnpluggedMin, null, "plugged in clears the timer");
+  assert.strictEqual(a.movedWhileParkedKm, 0, "driven: re-anchored, no tow alert");
+}
+
 console.log("all state tests passed");
