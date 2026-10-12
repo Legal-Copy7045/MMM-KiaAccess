@@ -82,7 +82,7 @@ const = importlib.import_module(f"{pkg}.const")
 assert len(const.ENTITIES) >= 20
 assert {c["key"] for c in const.COMMANDS} >= {"lock", "unlock", "start_climate", "send_to_car"}
 _calls = {c.get("call", "bare") for c in const.COMMANDS}
-assert _calls <= {"bare", "positional", "climate_options", "poi"}, f"unknown call style: {_calls}"
+assert _calls <= {"bare", "positional", "climate_options", "poi", "windows", "schedule"}, f"unknown call style: {_calls}"
 assert {"lock", "climate", "number", "switch", "select"} <= set(const.PLATFORMS)
 assert const.SEAT_LEVELS["Heat - high"] == 8 and const.SEAT_LEVELS["Off"] == 0
 assert set(const.DEFAULT_CLIMATE_PREFS) >= {"duration", "front_left_seat", "steering_wheel"}

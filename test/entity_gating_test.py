@@ -28,9 +28,10 @@ class _FakeEntry:
 
 
 class _FakeCoordinator:
-    def __init__(self, engine_type):
+    def __init__(self, engine_type, region="USA"):
         self.entry = _FakeEntry("e1")
         self.vehicle = {"engine_type": engine_type} if engine_type else {}
+        self.region = region
 
 
 class _FakeHass:
@@ -134,6 +135,21 @@ def test_hev_gets_no_charge_limit_numbers():
     print("-- HEV: no charge-limit number entities (no plug)")
 
 
+def test_region_limited_buttons_only_where_supported():
+    """valet mode / close / vent windows are EU-style-API only: no button
+    for a USA car (it could only fail), a button for an EU one."""
+    limited = {"Start valet mode", "Stop valet mode", "Close windows", "Vent windows"}
+    for region, want in (("USA", False), ("CA", False), ("EU", True), ("AU", True)):
+        coordinator = _FakeCoordinator("EV", region)
+        collected = []
+        asyncio.run(button_mod.async_setup_entry(
+            _FakeHass(coordinator), _FakeEntry("e1"), collected.extend))
+        names = {e._attr_name for e in collected}
+        assert (limited <= names) is want and (not (limited & names)) is (not want), (region, names)
+        assert "Lock" in names
+    print("-- valet / window buttons only for regions the library supports")
+
+
 def test_region_specific_entities_start_disabled():
     """entities.json `enabled_default: false` -> created, but disabled in
     the entity registry; every other catalogue entry stays enabled."""
@@ -162,4 +178,5 @@ if __name__ == "__main__":
     test_phev_gets_charge_limit_numbers()
     test_hev_gets_no_charge_limit_numbers()
     test_region_specific_entities_start_disabled()
+    test_region_limited_buttons_only_where_supported()
     print("all entity gating tests passed")

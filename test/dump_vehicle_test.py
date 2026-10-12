@@ -573,4 +573,104 @@ for member in _ENGINE_TYPES:
 # stay a clean None, not "None" or crash
 assert kia_client.dump_vehicle(_Veh(engine_type=None))["engine_type"] is None
 
+# --- run_command(): the EU-style-only commands (valet, windows, schedule,
+# charging current, V2L limit) ---
+import datetime as _dt  # noqa: E402
+
+
+class _RecVM(_CmdVM):
+    """Records every VehicleManager call it gets."""
+
+    def __init__(self, vehicles):
+        super().__init__(vehicles)
+        self.calls = []
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        def rec(*args):
+            self.calls.append((name, args))
+            return "xid"
+        return rec
+
+
+def _run_rec(job):
+    vm = _RecVM([_CmdVeh("VIN1")])
+    orig = kia_client.connect
+    kia_client.connect = lambda *a, **k: (vm, None)
+    try:
+        kia_client.run_command(job)
+    finally:
+        kia_client.connect = orig
+    return vm.calls
+
+
+# region-limited: refused for USA before ever connecting
+try:
+    _run_rec({"command": "start_valet_mode", "region": "USA"})
+    raise AssertionError("valet mode must be refused for a USA vehicle")
+except kia_client.ClientError as e:
+    assert "USA" in str(e) and "EU" in str(e), e
+assert _run_rec({"command": "start_valet_mode", "region": "EU"}) == [("start_valet_mode", ("VIN1",))]
+
+# close_windows: preset -> every window CLOSED
+(name, (vid, w)), = _run_rec({"command": "close_windows", "region": "EU"})
+assert name == "set_windows_state" and vid == "VIN1"
+assert [int(w.front_left), int(w.front_right), int(w.back_left), int(w.back_right)] == [0, 0, 0, 0]
+
+# set_windows: only the windows given change, the rest stay None
+(_, (_, w)), = _run_rec({"command": "set_windows", "region": "AU",
+                         "options": {"front_left": "vent", "back_right": "open"}})
+assert int(w.front_left) == 2 and int(w.back_right) == 1
+assert w.front_right is None and w.back_left is None
+try:
+    _run_rec({"command": "set_windows", "region": "EU", "options": {}})
+    raise AssertionError("set_windows with no window must be refused")
+except kia_client.ClientError:
+    pass
+
+# set_charging_current: the % choice maps to the library's level
+assert _run_rec({"command": "set_charging_current", "region": "EU",
+                 "options": {"current": "90"}}) == [("set_charging_current", ("VIN1", 2))]
+try:
+    _run_rec({"command": "set_charging_current", "region": "EU", "options": {}})
+    raise AssertionError("a required option left out must be refused")
+except kia_client.ClientError as e:
+    assert "current" in str(e)
+
+assert _run_rec({"command": "set_v2l_limit", "region": "EU",
+                 "options": {"limit": 30}}) == [("set_vehicle_to_load_discharge_limit", ("VIN1", 30))]
+
+# schedule: given fields set, everything else None (= keep the car's setting)
+(name, (_, req)), = _run_rec({"command": "schedule_charging_and_climate", "region": "EU", "options": {
+    "first_departure_enabled": True, "first_departure_time": "07:30",
+    "first_departure_days": ["mon", "tue", "fri"], "off_peak_start_time": "23:00:00",
+    "temperature": 21.5,
+}})
+assert name == "schedule_charging_and_climate"
+assert req.first_departure.enabled is True
+assert req.first_departure.time == _dt.time(7, 30)
+assert req.first_departure.days == [1, 2, 5]
+assert req.second_departure is None
+assert req.off_peak_start_time == _dt.time(23, 0) and req.off_peak_end_time is None
+assert req.temperature == 21.5 and req.charging_enabled is None and req.defrost is None
+
+# set_off_peak_charging: mode -> (charging_enabled, off_peak_charge_only_enabled)
+for mode, want in (("off", (False, None)), ("time", (True, True)), ("target", (True, False))):
+    (_, (_, req)), = _run_rec({"command": "set_off_peak_charging", "region": "EU",
+                               "options": {"mode": mode}})
+    assert (req.charging_enabled, req.off_peak_charge_only_enabled) == want, mode
+try:
+    _run_rec({"command": "set_off_peak_charging", "region": "EU", "options": {"mode": "sometimes"}})
+    raise AssertionError("an unknown select choice must be refused")
+except kia_client.ClientError:
+    pass
+try:
+    _run_rec({"command": "schedule_charging_and_climate", "region": "EU",
+              "options": {"off_peak_start_time": "25:99"}})
+    raise AssertionError("a bad time must be refused")
+except kia_client.ClientError:
+    pass
+
 print("dump_vehicle tests passed")

@@ -2,7 +2,8 @@
 
 Most buttons here are generated from commands.json: only the no-argument
 commands (lock, unlock, stop climate, start/stop charge, flash hazards,
-flash + honk, open/close charge port) get one. The parameterised commands
+flash + honk, open/close charge port, and -- where the region supports
+them -- valet mode and close / vent windows) get one. The parameterised commands
 (start_climate, set_charge_limits, send_to_car) are services only — the
 Lovelace card gives start_climate a proper panel.
 
@@ -37,6 +38,7 @@ async def async_setup_entry(
     # platforms are set up, not whatever an empty pre-poll dict would
     # default to.
     can_plug_in = can_plug_in_for(coordinator.vehicle.get("engine_type"))
+    region = coordinator.region
     async_add_entities(
         [KiaAccessRefreshButton(coordinator)]
         + [
@@ -44,6 +46,9 @@ async def async_setup_entry(
             for spec in COMMANDS
             if not spec.get("options")
             and not (not can_plug_in and spec.get("category") == "charge")
+            # region-limited commands (valet mode, windows) only where the
+            # library implements them -- elsewhere they could only fail
+            and (not spec.get("regions") or region in spec["regions"])
         ]
     )
 

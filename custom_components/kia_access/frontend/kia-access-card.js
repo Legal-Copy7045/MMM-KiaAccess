@@ -77,8 +77,8 @@ g.KiaAccessEntities={
   ]
 };
 g.KiaAccessCommands={
-  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)); \"poi\" = method(vehicle_id, [POIInfo(...)]) built from name/address or latitude/longitude (address is geocoded). `dormant: true` marks a command whose library method exists but isn't implemented for all regions yet (it returns a clear error until it is). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file. NOTE on start_climate for the USA region (this project's target): the library's KiaUvoApiUSA sends `set_temp` in FAHRENHEIT, valid 62-82 (below/above → \"LOW\"/\"HIGH\"); `climate` is the A/C master switch (must be true to blow air); `defrost` = front windscreen; `heating` is a bit-flag (1 = rear window + mirrors); `steering_wheel` 0-2; `*_seat` levels are KiaUvoApiUSA._seat_settings codes (0 off, 6/7/8 heat lo/md/hi, 3/4/5 cool lo/md/hi). EU/other regions use °C 16-30 and different seat codes — adjust the option bounds if you retarget. An option can carry a `metric` sub-object with the non-Fahrenheit-region variant of default/min/max/step/unit (currently just `set_temp`) — anything dispatching this catalogue for a specific vehicle (kia_client.py's default-filling, the Lovelace card's climate panel) must pick `metric` over the top level when that vehicle's region isn't USA (Canada included -- KiaUvoApiCA takes set_temp in Celsius, not Fahrenheit, despite region code CA sitting right next to USA in most of this project's other region lists); the raw generated HA service (services.yaml) can't be region-scoped since it's one static file shared by every config entry, so it keeps the top-level (Fahrenheit) numbers as a reasonable default and widens min/max to not reject a metric value passed explicitly. The HA integration also exposes native climate/lock/number/switch/select entities for all of this (already region-aware independent of this catalogue -- see coordinator.py's climate_temp_unit()/build_climate_options()).",
-  "version": 6,
+  "$comment": "Canonical catalogue of vehicle control commands. The Home Assistant integration generates services + buttons from this, the Lovelace card generates action buttons, and kia_client.py dispatches to the matching hyundai_kia_connect_api VehicleManager method. `method` is the VehicleManager attribute. `call` is how kia_client invokes it: \"bare\" = method(vehicle_id); \"positional\" = method(vehicle_id, *args) taking `args` from `options` (falling back to each option's default); \"climate_options\" = method(vehicle_id, ClimateRequestOptions(**options)); \"poi\" = method(vehicle_id, [POIInfo(...)]) built from name/address or latitude/longitude (address is geocoded). `dormant: true` marks a command whose library method exists but isn't implemented for all regions yet (it returns a clear error until it is). `confirm` marks commands a UI should double-check. MagicMirror stays read-only and ignores this file. NOTE on start_climate for the USA region (this project's target): the library's KiaUvoApiUSA sends `set_temp` in FAHRENHEIT, valid 62-82 (below/above → \"LOW\"/\"HIGH\"); `climate` is the A/C master switch (must be true to blow air); `defrost` = front windscreen; `heating` is a bit-flag (1 = rear window + mirrors); `steering_wheel` 0-2; `*_seat` levels are KiaUvoApiUSA._seat_settings codes (0 off, 6/7/8 heat lo/md/hi, 3/4/5 cool lo/md/hi). EU/other regions use °C 16-30 and different seat codes — adjust the option bounds if you retarget. An option can carry a `metric` sub-object with the non-Fahrenheit-region variant of default/min/max/step/unit (currently just `set_temp`) — anything dispatching this catalogue for a specific vehicle (kia_client.py's default-filling, the Lovelace card's climate panel) must pick `metric` over the top level when that vehicle's region isn't USA (Canada included -- KiaUvoApiCA takes set_temp in Celsius, not Fahrenheit, despite region code CA sitting right next to USA in most of this project's other region lists); the raw generated HA service (services.yaml) can't be region-scoped since it's one static file shared by every config entry, so it keeps the top-level (Fahrenheit) numbers as a reasonable default and widens min/max to not reject a metric value passed explicitly. The HA integration also exposes native climate/lock/number/switch/select entities for all of this (already region-aware independent of this catalogue -- see coordinator.py's climate_temp_unit()/build_climate_options()). `regions` limits a command to those region codes: kia_client refuses it elsewhere with a clear error, and HA / the card only create its button there -- used for the commands hyundai_kia_connect_api implements only for its EU-style API (EU/AU/NZ/IN/CN/BR). `preset` fills fixed options for a one-tap variant of a parameterised call (close_windows / vent_windows); a command with a preset and no `options` gets a button like any no-argument command. Option types beyond int/float/bool/string: `select` (`choices`, optionally `map` from a choice to the value the library takes), `time` (HH:MM or HH:MM:SS) and `days` (a list of sun..sat). `required: true` makes the service field mandatory. call \"windows\" builds a WindowRequestOptions (closed/open/vent per window; omitted = unchanged). call \"schedule\" builds a ScheduleChargingClimateRequestOptions (every omitted field = keep the car's current setting); set_off_peak_charging's `mode` maps off -> scheduled charging off, time -> charge only in the off-peak window, target -> prefer off-peak but finish the charge.",
+  "version": 7,
   "commands": [
     { "key": "lock", "name": "Lock", "method": "lock", "call": "bare", "icon": "mdi:lock", "category": "security" },
     { "key": "unlock", "name": "Unlock", "method": "unlock", "call": "bare", "icon": "mdi:lock-open", "category": "security", "confirm": true },
@@ -119,6 +119,59 @@ g.KiaAccessCommands={
         "address": { "type": "string" },
         "latitude": { "type": "float", "min": -90, "max": 90, "step": "any" },
         "longitude": { "type": "float", "min": -180, "max": 180, "step": "any" }
+      }
+    },
+    { "key": "start_valet_mode", "name": "Start valet mode", "method": "start_valet_mode", "call": "bare", "icon": "mdi:account-tie-hat", "category": "security", "confirm": true, "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"] },
+    { "key": "stop_valet_mode", "name": "Stop valet mode", "method": "stop_valet_mode", "call": "bare", "icon": "mdi:account-tie-hat-outline", "category": "security", "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"] },
+    { "key": "close_windows", "name": "Close windows", "method": "set_windows_state", "call": "windows", "icon": "mdi:window-closed-variant", "category": "security", "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"],
+      "preset": { "front_left": "closed", "front_right": "closed", "back_left": "closed", "back_right": "closed" } },
+    { "key": "vent_windows", "name": "Vent windows", "method": "set_windows_state", "call": "windows", "icon": "mdi:window-open-variant", "category": "climate", "confirm": true, "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"],
+      "preset": { "front_left": "vent", "front_right": "vent", "back_left": "vent", "back_right": "vent" } },
+    {
+      "key": "set_windows", "name": "Set windows", "method": "set_windows_state", "call": "windows", "icon": "mdi:car-door", "category": "climate", "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"],
+      "options": {
+        "front_left": { "type": "select", "choices": ["closed", "open", "vent"] },
+        "front_right": { "type": "select", "choices": ["closed", "open", "vent"] },
+        "back_left": { "type": "select", "choices": ["closed", "open", "vent"] },
+        "back_right": { "type": "select", "choices": ["closed", "open", "vent"] }
+      }
+    },
+    {
+      "key": "set_charging_current", "name": "Set AC charging current", "method": "set_charging_current", "call": "positional", "args": ["current"], "icon": "mdi:current-ac", "category": "charge", "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"],
+      "options": {
+        "current": { "type": "select", "choices": ["100", "90", "60"], "map": { "100": 1, "90": 2, "60": 3 }, "unit": "%", "required": true }
+      }
+    },
+    {
+      "key": "set_v2l_limit", "name": "Set V2L discharge limit", "method": "set_vehicle_to_load_discharge_limit", "call": "positional", "args": ["limit"], "icon": "mdi:power-plug-outline", "category": "charge", "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"],
+      "options": {
+        "limit": { "type": "int", "min": 20, "max": 80, "step": 10, "unit": "%", "required": true }
+      }
+    },
+    {
+      "key": "schedule_charging_and_climate", "name": "Set charging & climate schedule", "method": "schedule_charging_and_climate", "call": "schedule", "icon": "mdi:calendar-clock", "category": "charge", "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"],
+      "options": {
+        "first_departure_enabled": { "type": "bool" },
+        "first_departure_time": { "type": "time" },
+        "first_departure_days": { "type": "days" },
+        "second_departure_enabled": { "type": "bool" },
+        "second_departure_time": { "type": "time" },
+        "second_departure_days": { "type": "days" },
+        "charging_enabled": { "type": "bool" },
+        "off_peak_start_time": { "type": "time" },
+        "off_peak_end_time": { "type": "time" },
+        "off_peak_charge_only_enabled": { "type": "bool" },
+        "climate_enabled": { "type": "bool" },
+        "temperature": { "type": "float", "min": 16, "max": 30, "step": 0.5, "unit": "°C" },
+        "defrost": { "type": "bool" }
+      }
+    },
+    {
+      "key": "set_off_peak_charging", "name": "Set off-peak charging", "method": "schedule_charging_and_climate", "call": "schedule", "icon": "mdi:clock-time-ten-outline", "category": "charge", "regions": ["EU", "AU", "NZ", "IN", "CN", "BR"],
+      "options": {
+        "mode": { "type": "select", "choices": ["off", "time", "target"] },
+        "off_peak_start_time": { "type": "time" },
+        "off_peak_end_time": { "type": "time" }
       }
     }
   ]
@@ -2736,10 +2789,19 @@ g.KiaAccessCommands={
   // otherwise sit there unconditionally, dispatching commands the car has
   // no way to honour. Any other value (including omitted) defaults to
   // showing them -- same fail-safe reasoning as buildState()'s canPlugIn.
-  function actionsGroupsHtml(canPlugIn) {
-    var visible = canPlugIn === false
-      ? BUTTON_COMMANDS.filter(function (c) { return c.category !== "charge"; })
-      : BUTTON_COMMANDS;
+  //
+  // `region` (the vehicle's region code) hides commands whose catalogue
+  // entry carries a `regions` list without it (valet mode, close / vent
+  // windows -- only implemented for the EU-style API). Omitted region keeps
+  // the old behaviour for region-free commands and hides region-limited
+  // ones, since they'd only fail for a car we can't place.
+  function actionsGroupsHtml(canPlugIn, region) {
+    var reg = String(region || "").toUpperCase();
+    var visible = BUTTON_COMMANDS.filter(function (c) {
+      if (canPlugIn === false && c.category === "charge") return false;
+      if (c.regions && c.regions.indexOf(reg) === -1) return false;
+      return true;
+    });
     var seen = {};
     var html = CAT_ORDER.map(function (cat) {
       var items = visible.filter(function (c) { return (c.category || "other") === cat; });
@@ -3595,7 +3657,7 @@ g.KiaAccessCommands={
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml(state.canPlugIn) +
+        actionsGroupsHtml(state.canPlugIn, this._region) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";
