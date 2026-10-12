@@ -91,6 +91,25 @@ assert usa_km["ev_driving_range"] == 300.0, usa_km["ev_driving_range"]
 eu_missing = kia_client.dump_vehicle(_Veh(ev_driving_range=300.0), "EU")
 assert eu_missing["ev_driving_range"] == 300.0
 
+# charge-limit target ranges get the same miles -> km treatment
+tr = kia_client.dump_vehicle(
+    _Veh(ev_target_range_charge_AC=250.0, _ev_target_range_charge_AC_unit="mi"), "EU"
+)
+assert approx(tr["ev_target_range_charge_AC"], 402.3, 1), tr["ev_target_range_charge_AC"]
+
+# tyre pressures: the car's display unit (psi / kPa / bar) -> kPa
+tp = kia_client.dump_vehicle(_Veh(
+    tire_pressure_front_left=36.0, tire_pressure_front_left_unit="psi",
+    tire_pressure_front_right=2.5, tire_pressure_front_right_unit="bar",
+    tire_pressure_rear_left=250.0, tire_pressure_rear_left_unit="kPa",
+    tire_pressure_rear_right=36.0, tire_pressure_rear_right_unit=None,
+))
+assert approx(tp["tire_pressure_front_left"], 248.2, 0.2), tp["tire_pressure_front_left"]
+assert tp["tire_pressure_front_left_unit"] == "kPa"
+assert tp["tire_pressure_front_right"] == 250.0, tp["tire_pressure_front_right"]
+assert tp["tire_pressure_rear_left"] == 250.0
+assert tp["tire_pressure_rear_right"] is None, "no unit: psi vs kPa unknowable -> no reading"
+
 
 # --- fetch(): refresh:false / forceRefreshTimeout<=0 must NOT wake the car ---
 class _VM:

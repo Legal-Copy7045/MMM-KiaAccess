@@ -88,6 +88,10 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
             self._attr_icon = spec["icon"]
         if spec.get("category") == "diagnostic":
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        if spec.get("enabled_default") is False:
+            # only some regions/models report it -- don't add an "unknown"
+            # entity to every device; the user can enable it
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self):

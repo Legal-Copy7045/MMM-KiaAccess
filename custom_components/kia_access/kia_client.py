@@ -296,6 +296,7 @@ def dump_vehicle(vehicle, region=None):
     for base in (
         "odometer", "ev_driving_range", "total_driving_range",
         "fuel_driving_range", "next_service_distance", "last_service_distance",
+        "ev_target_range_charge_AC", "ev_target_range_charge_DC",
     ):
         val = out.get(base)
         if isinstance(val, (int, float)) and not isinstance(val, bool) and \
@@ -303,6 +304,22 @@ def dump_vehicle(vehicle, region=None):
             out[base] = round(val * 1.609344, 1)
             if base + "_unit" in out:
                 out[base + "_unit"] = "km"
+
+    # Tyre pressures come in the car's own display unit (psi / kPa / bar,
+    # user-selectable on the car) -- normalise to kPa so the HA sensors can
+    # carry one fixed unit and let HA convert for display.
+    _TO_KPA = {"PSI": 6.894757, "KPA": 1.0, "BAR": 100.0}
+    for pos in ("front_left", "front_right", "rear_left", "rear_right"):
+        base = "tire_pressure_" + pos
+        val = out.get(base)
+        unit = str(out.get(base + "_unit") or "").strip().upper()
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            if unit in _TO_KPA:
+                out[base] = round(val * _TO_KPA[unit], 1)
+                out[base + "_unit"] = "kPa"
+            else:
+                # no unit = can't tell psi from kPa -- better no reading
+                out[base] = None
 
     # Domain-range guard: NaN/Infinity/coordinate-range hardening already
     # exists throughout the HA coordinator (_haversine_km, _zone_radius_m,

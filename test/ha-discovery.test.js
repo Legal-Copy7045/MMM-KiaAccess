@@ -30,6 +30,19 @@ const door = by["homeassistant/binary_sensor/kia_ev9/front_left_door_is_open/con
 assert.strictEqual(door.device_class, "door");
 assert.strictEqual(door.payload_on, "true");
 
+// region/model-specific readings arrive disabled; diagnostics stay in the
+// device's diagnostic section; everyday entities carry neither flag
+const tyre = by["homeassistant/sensor/kia_ev9/tire_pressure_front_left/config"];
+assert.strictEqual(tyre.enabled_by_default, false);
+assert.strictEqual(tyre.unit_of_measurement, "kPa");
+const dtc = by["homeassistant/sensor/kia_ev9/dtc_count/config"];
+assert.strictEqual(dtc.entity_category, "diagnostic");
+assert.ok(!("enabled_by_default" in dtc));
+const win = by["homeassistant/binary_sensor/kia_ev9/front_left_window_is_open/config"];
+assert.strictEqual(win.device_class, "window");
+assert.ok(!("enabled_by_default" in win) && !("entity_category" in win));
+assert.ok(!("enabled_by_default" in batt) && !("entity_category" in batt));
+
 // publish() calls client.publish for each, retained
 let n = 0;
 HA.publish({ publish: (t, p, o) => { n++; assert.strictEqual(o.retain, true); } }, { prefix: "kia" });

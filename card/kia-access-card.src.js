@@ -128,9 +128,17 @@
 
   var DIST_KEYS = {
     ev_driving_range: 1, total_driving_range: 1, fuel_driving_range: 1,
-    odometer: 1, next_service_distance: 1
+    odometer: 1, next_service_distance: 1,
+    ev_target_range_charge_AC: 1, ev_target_range_charge_DC: 1
   };
-  var TEMP_KEYS = { outside_temperature: 1, air_temperature: 1 };
+  var TEMP_KEYS = {
+    outside_temperature: 1, air_temperature: 1,
+    ev_battery_temperature_min: 1, ev_battery_temperature_max: 1
+  };
+  var PRESSURE_KEYS = {
+    tire_pressure_front_left: 1, tire_pressure_front_right: 1,
+    tire_pressure_rear_left: 1, tire_pressure_rear_right: 1
+  };
 
   function fmt(key, value, imperial) {
     if (value === true || value === "true") return "Yes";
@@ -142,6 +150,7 @@
       var n = Number(value);
       if (imperial && DIST_KEYS[key]) { n = n * 0.621371; u = "mi"; }
       else if (imperial && TEMP_KEYS[key]) { n = n * 9 / 5 + 32; u = "°F"; }
+      else if (imperial && PRESSURE_KEYS[key]) { n = n / 6.894757; u = "psi"; }
       return (Math.round(n * 10) / 10) + " " + u;
     }
     return String(value);
@@ -1052,6 +1061,10 @@
       var rows = CATALOGUE.map(function (e) {
         var raw = flat["vehicle." + e.key];
         if (raw === undefined) return "";
+        // readings only some regions/models report: no "—" row when this
+        // car doesn't report them (unless asked for explicitly via rows:)
+        if (e.enabled_default === false && (raw === null || raw === "") &&
+            !(rowFilter && rowFilter.indexOf(e.key) !== -1)) return "";
         if (!KiaAccessCard._rowVisible(e.key, rowFilter, engineType)) return "";
         return "<tr><td>" + esc(e.name) + "</td><td>" + esc(fmt(e.key, raw, imperial)) + "</td></tr>";
       }).join("");
