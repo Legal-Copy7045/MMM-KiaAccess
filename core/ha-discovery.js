@@ -51,6 +51,8 @@
       if (e.state_class) extra.state_class = e.state_class;
       if (e.icon) extra.icon = e.icon;
     }
+    if (e.category === "diagnostic") extra.entity_category = "diagnostic";
+    if (e.enabled_default === false) extra.enabled_by_default = false;
     return [e.domain, e.key, extra];
   });
 

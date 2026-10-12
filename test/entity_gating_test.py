@@ -17,7 +17,9 @@ sys.modules.setdefault("hyundai_kia_connect_api", type(sys)("hyundai_kia_connect
 
 from custom_components.kia_access import button as button_mod  # noqa: E402
 from custom_components.kia_access import number as number_mod  # noqa: E402
-from custom_components.kia_access.const import DOMAIN  # noqa: E402
+from custom_components.kia_access import binary_sensor as binary_sensor_mod  # noqa: E402
+from custom_components.kia_access import sensor as sensor_mod  # noqa: E402
+from custom_components.kia_access.const import DOMAIN, ENTITIES  # noqa: E402
 
 
 class _FakeEntry:
@@ -132,6 +134,23 @@ def test_hev_gets_no_charge_limit_numbers():
     print("-- HEV: no charge-limit number entities (no plug)")
 
 
+def test_region_specific_entities_start_disabled():
+    """entities.json `enabled_default: false` -> created, but disabled in
+    the entity registry; every other catalogue entry stays enabled."""
+    coordinator = _FakeCoordinator("EV")
+    by_key = {}
+    for spec in ENTITIES:
+        cls = (sensor_mod.KiaAccessSensor if spec["domain"] == "sensor"
+               else binary_sensor_mod.KiaAccessBinarySensor)
+        by_key[spec["key"]] = (spec, cls(coordinator, spec))
+    for key, (spec, ent) in by_key.items():
+        want = spec.get("enabled_default") is not False
+        assert ent.entity_registry_enabled_default is want, key
+    assert by_key["tire_pressure_front_left"][1].entity_registry_enabled_default is False
+    assert by_key["front_left_window_is_open"][1].entity_registry_enabled_default is True
+    print("-- region/model-specific catalogue entities are created disabled")
+
+
 if __name__ == "__main__":
     test_gas_vehicle_gets_no_charging_buttons()
     test_ev_vehicle_gets_charging_buttons()
@@ -142,4 +161,5 @@ if __name__ == "__main__":
     test_ev_vehicle_gets_charge_limit_numbers()
     test_phev_gets_charge_limit_numbers()
     test_hev_gets_no_charge_limit_numbers()
+    test_region_specific_entities_start_disabled()
     print("all entity gating tests passed")
