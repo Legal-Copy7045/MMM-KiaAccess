@@ -5,6 +5,7 @@ check the pieces hassfest cares about, without a running HA instance.
 Run: pip install homeassistant && python test/ha_import_check.py
 """
 import importlib
+import datetime as _dt
 import json
 import os
 import sys
@@ -785,6 +786,30 @@ assert _diag_options["static_destinations"] != "Home | 123 Main St", (
     f"static_destinations must be redacted in diagnostics output, got: {_diag_options}"
 )
 assert _diag_options["scan_interval"] == 30, "a non-sensitive option must pass through unredacted"
+
+# auth block: login enrolment / renewal-due / access-token expiry, and
+# never any of the token's own strings
+_tok_enrolled = (_dt_util.utcnow() - _dt.timedelta(days=25)).isoformat()
+_diag_entry.data = {
+    "username": "d@e.com",
+    "token": {
+        "access_token": "ACCESS-SECRET", "refresh_token": "REFRESH-SECRET",
+        "device_id": "DEVICE-SECRET", "pin": "1234",
+        "valid_until": "2030-01-01T00:00:00+00:00", "enrolled_at": _tok_enrolled,
+    },
+}
+_diag_result = asyncio.run(diag.async_get_config_entry_diagnostics(_diag_hass, _diag_entry))
+_diag_text = json.dumps(_diag_result, default=str)
+for _secret in ("ACCESS-SECRET", "REFRESH-SECRET", "DEVICE-SECRET"):
+    assert _secret not in _diag_text, f"{_secret} leaked into diagnostics"
+_auth = _diag_result["auth"]
+assert _auth["token_saved"] is True and _auth["device_id_present"] is True
+assert 4.5 <= _auth["days_until_renewal"] <= 5.5, _auth
+assert _auth["access_token_valid_until"].startswith("2030-01-01"), _auth
+assert set(_diag_result["versions"]) == {"integration", "hyundai_kia_connect_api", "home_assistant"}
+assert _diag_result["polling"]["is_stale"] is None  # no coordinator in this fake
+_diag_entry.data = {"username": "d@e.com"}
+assert asyncio.run(diag.async_get_config_entry_diagnostics(_diag_hass, _diag_entry))["auth"] == {"token_saved": False}
 
 init = importlib.import_module(pkg)
 assert hasattr(init, "_register_frontend")
