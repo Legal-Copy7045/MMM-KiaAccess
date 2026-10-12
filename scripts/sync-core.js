@@ -55,6 +55,7 @@ outputs[path.join(HA, "frontend", "kia-access-card.js")] = [
   read("core/conditions.js"),
   read("core/range.js"),
   read("core/isoline.js"),
+  read("core/sessions.js"), // core/trips.js needs it (and range.js) first
   read("core/trips.js"),
   read("card/kia-access-card.src.js"),
   read("card/kia-range-map-card.src.js")

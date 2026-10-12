@@ -899,15 +899,7 @@ module.exports = NodeHelper.create({
     // emitData()) so every emitData() caller -- a live poll, serve()'s
     // stale-cache replay, handleFetch()'s healthy-socket replay -- sees
     // the same figures without recomputing, matching how s.rangeMap works.
-    if (tripChanged || sessChanged) {
-      const unitsOpt = { units: config.units };
-      s.analytics = {
-        observedEfficiency: analytics.observedEfficiency(s.trips, unitsOpt),
-        rangeAccuracy: analytics.rangeAccuracy(s.trips, unitsOpt),
-        chargingPerformance: analytics.chargingPerformance(s.sessions),
-        drivingPatterns: analytics.drivingPatterns(s.trips, unitsOpt)
-      };
-    }
+    if (tripChanged || sessChanged) s.analytics = buildAnalytics(s, config);
 
     s.failStreak = 0;
     s.lastGood = payload;
@@ -1103,8 +1095,8 @@ module.exports = NodeHelper.create({
         }
         return { ring: drange.circleRing(lat, lon, km), approx: true };
       };
-      const oneR = await ringFor(oneWay);
-      const roundR = await ringFor(round);
+      // independent lookups (each up to two provider calls) -- run together
+      const [oneR, roundR] = await Promise.all([ringFor(oneWay), ringFor(round)]);
       const pick = (r) => r && r.ring;
 
       const far = Math.max(oneWay, round || 0) * 1.6;
@@ -1174,17 +1166,7 @@ module.exports = NodeHelper.create({
   // instance that individually failed to fetch.
   _reportFailure(id, config, rotating, message) {
     if (!rotating) return this.fail(id, config, message);
-    // Dedup defensively even though MMM-KiaAccess.js's own config
-    // normalisation already does -- a duplicated vin entry here would
-    // otherwise call fail() twice for the one vehicle, double-counting its
-    // failStreak for a single real failure.
-    const seen = new Set();
-    (config.vehicles || []).forEach((v) => {
-      const vin = String((v && v.vin) || "").toUpperCase();
-      if (!vin || seen.has(vin)) return;
-      seen.add(vin);
-      this.fail(this.identifierFor(Object.assign({}, config, { vin })), config, message);
-    });
+    this._eachConfiguredVehicle(config, (vid) => this.fail(vid, config, message));
   },
 
   // Same idea as _reportFailure(), for a non-error "serve what we have"
@@ -1193,12 +1175,20 @@ module.exports = NodeHelper.create({
   // cap is account-wide, not per-car.
   _reportServe(id, config, rotating, opts) {
     if (!rotating) return this.serve(id, config, opts);
+    this._eachConfiguredVehicle(config, (vid) => this.serve(vid, config, opts));
+  },
+
+  // Calls fn(identifier) once per configured rotate-mode vehicle. Dedups
+  // defensively even though MMM-KiaAccess.js's own config normalisation
+  // already does -- a duplicated vin entry would otherwise report one
+  // failure twice (double-counting that vehicle's failStreak).
+  _eachConfiguredVehicle(config, fn) {
     const seen = new Set();
     (config.vehicles || []).forEach((v) => {
       const vin = String((v && v.vin) || "").toUpperCase();
       if (!vin || seen.has(vin)) return;
       seen.add(vin);
-      this.serve(this.identifierFor(Object.assign({}, config, { vin })), config, opts);
+      fn(this.identifierFor(Object.assign({}, config, { vin })));
     });
   },
 
@@ -1296,15 +1286,7 @@ module.exports = NodeHelper.create({
     // change, which could be a long wait for a car that's just sitting
     // parked. Compute it once here on first access instead of leaving the
     // "Observed Range & Efficiency" widget empty until then.
-    if (s.analytics === undefined) {
-      const unitsOpt = { units: config.units };
-      s.analytics = {
-        observedEfficiency: analytics.observedEfficiency(s.trips, unitsOpt),
-        rangeAccuracy: analytics.rangeAccuracy(s.trips, unitsOpt),
-        chargingPerformance: analytics.chargingPerformance(s.sessions),
-        drivingPatterns: analytics.drivingPatterns(s.trips, unitsOpt)
-      };
-    }
+    if (s.analytics === undefined) s.analytics = buildAnalytics(s, config);
     payload.analytics = s.analytics;
     // note: `config` (credentials / token) is deliberately NOT echoed back
     this.sendSocketNotification("KIA_DATA", { identifier: id, payload });
@@ -1511,6 +1493,18 @@ function numOrNull(v) {
 }
 
 // true / false / null (unknown) — matches core/state.js bool()
+/** the observed-performance figures (core/analytics.js) for one vehicle's
+ *  state -- the one place onPayload() and emitData() both build them */
+function buildAnalytics(s, config) {
+  const unitsOpt = { units: config.units };
+  return {
+    observedEfficiency: analytics.observedEfficiency(s.trips, unitsOpt),
+    rangeAccuracy: analytics.rangeAccuracy(s.trips, unitsOpt),
+    chargingPerformance: analytics.chargingPerformance(s.sessions),
+    drivingPatterns: analytics.drivingPatterns(s.trips, unitsOpt)
+  };
+}
+
 function truthy(v) {
   if (v === true || v === "true" || v === 1 || v === "1") return true;
   if (v === false || v === "false" || v === 0 || v === "0") return false;

@@ -7,10 +7,16 @@ Kept line-for-line with the JS; both are exercised in CI
 from __future__ import annotations
 
 import math
-import re
 import time
 
-DEFAULT_CAPACITY_KWH = 99.8  # Kia EV9 usable
+try:  # the HA integration's package
+    from . import range as _range
+    from . import sessions as _sessions
+except ImportError:  # the repo root (MagicMirror bridge, tests)
+    import range as _range  # noqa: A004 -- this project's range.py, not the builtin
+    import sessions as _sessions
+
+DEFAULT_CAPACITY_KWH = _sessions.DEFAULT_CAPACITY_KWH
 MIN_KM = 0.5
 PARK_GAP_MIN = 8
 MI_PER_KM = 0.621371
@@ -35,46 +41,10 @@ def _round(n, dp=2):
     return math.floor(n * f + 0.5) / f
 
 
-# See core/sessions.js's resolveCap()/isEv9() (and sessions.py's mirror) for
-# why: DEFAULT_CAPACITY_KWH is the EV9's own usable pack size and must never
-# stand in as a generic "capacity unknown" guess for some other model, or
-# that model's own energy/cost/efficiency fields would silently be computed
-# off the wrong car's battery size.
-# see sessions.py's mirror for the [\s-]*/(?!\d) reasoning
-_EV9_RE = re.compile(r"ev[\s-]*9(?!\d)", re.IGNORECASE)
-
-
-def _is_ev9(model) -> bool:
-    return bool(model) and bool(_EV9_RE.search(str(model)))
-
-
-def _resolve_cap(opts) -> float | None:
-    cap = _num(opts.get("capacityKwh"))
-    if cap is None and _is_ev9(opts.get("model")):
-        cap = DEFAULT_CAPACITY_KWH
-    return cap
-
-
-def haversine_km(a_lat, a_lon, b_lat, b_lon):
-    # None already handled; also reject NaN/Infinity (both are real floats
-    # that pass a bare None check, and their trig math can raise a "math
-    # domain error" downstream) and an out-of-range-but-finite lat/lon --
-    # the one caller here (_close()) already passes a None result through
-    # _round() safely, so extending this is a no-op for that call site and
-    # closes the gap for anything else that might reach this function.
-    for v in (a_lat, a_lon, b_lat, b_lon):
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
-            return None
-    if not (-90 <= a_lat <= 90 and -90 <= b_lat <= 90):
-        return None
-    if not (-180 <= a_lon <= 180 and -180 <= b_lon <= 180):
-        return None
-    r, p = 6371, math.pi / 180
-    d_lat = (b_lat - a_lat) * p
-    d_lon = (b_lon - a_lon) * p
-    s = (math.sin(d_lat / 2) ** 2
-         + math.cos(a_lat * p) * math.cos(b_lat * p) * math.sin(d_lon / 2) ** 2)
-    return r * 2 * math.asin(math.sqrt(s))
+# One EV9 pack-size rule and one distance function for every surface (see
+# sessions.py _resolve_cap(), range.py haversine_km()) -- as in trips.js.
+_resolve_cap = _sessions._resolve_cap
+haversine_km = _range.haversine_km
 
 
 def _close(open_t, opts, end_at):

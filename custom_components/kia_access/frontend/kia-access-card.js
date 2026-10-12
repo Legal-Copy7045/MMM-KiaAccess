@@ -397,7 +397,54 @@ g.KiaAccessCommands={
     return flat;
   }
 
-  return { buildState: buildState, flatFromAttributes: flatFromAttributes };
+  /**
+   * The timer-derived alert context buildState() can't compute alone:
+   * how long the car has been home + unplugged, and whether it moved while
+   * parked (GPS shifted >= 1000 ft while the odometer stayed put and the car
+   * was off -- a tow / theft). `ctx` carries the timers between polls
+   * ({_homeUnpluggedSince, _movedSince, _lastParked}, ms) and is updated in
+   * place; `st` (needs atHome set) gains homeUnpluggedMin /
+   * movedWhileParkedKm / movedWhileParkedMin. `distKm` is core/range.js's
+   * haversineKm. One copy for MM and the card (vehicle_state.py has the HA
+   * port), so a fix lands everywhere.
+   */
+  function trackAlertTimers(ctx, st, now, distKm) {
+    var homeUnplugged = st.atHome === true && st.plugged !== true;
+    if (homeUnplugged && ctx._homeUnpluggedSince == null) ctx._homeUnpluggedSince = now;
+    if (!homeUnplugged) ctx._homeUnpluggedSince = null;
+    st.homeUnpluggedMin = ctx._homeUnpluggedSince != null
+      ? (now - ctx._homeUnpluggedSince) / 60000 : null;
+
+    var p = ctx._lastParked;
+    var odoStable = p && st.odometerKm != null && Math.abs(st.odometerKm - p.odo) < 0.1;
+    if (odoStable && st.carOn !== true && st.locationLat != null && p.lat != null) {
+      var movedKm = distKm(p.lat, p.lon, st.locationLat, st.locationLon);
+      if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
+        if (ctx._movedSince == null) ctx._movedSince = now;
+        st.movedWhileParkedKm = movedKm;
+        st.movedWhileParkedMin = (now - ctx._movedSince) / 60000;
+      } else {
+        ctx._movedSince = null;
+        st.movedWhileParkedKm = 0;
+        st.movedWhileParkedMin = 0;
+      }
+    } else {
+      // driven, or first sample, or no GPS -- (re)anchor the parked position
+      ctx._movedSince = null;
+      if (st.locationLat != null && st.odometerKm != null) {
+        ctx._lastParked = { lat: st.locationLat, lon: st.locationLon, odo: st.odometerKm };
+      }
+      st.movedWhileParkedKm = ctx._lastParked ? 0 : null;
+      st.movedWhileParkedMin = 0;
+    }
+    return st;
+  }
+
+  return {
+    buildState: buildState,
+    flatFromAttributes: flatFromAttributes,
+    trackAlertTimers: trackAlertTimers
+  };
 });
 
 /* Optional graphical widgets for MMM-KiaAccess.
@@ -2309,6 +2356,317 @@ g.KiaAccessCommands={
   };
 });
 
+/* Charge-session tracking — shared by the MagicMirror node_helper and the HA
+ * coordinator, both of which drive it with their own streaming state + storage.
+ *
+ * A "session" runs from the first `charging` sample until the car is unplugged
+ * (or has sat plugged-but-not-charging for GAP_MIN). Scheduled-charging pauses
+ * inside that window stay part of the one session — kWh is derived from the
+ * start→end state-of-charge, so gaps don't matter.
+ *
+ * Pure: no DOM, no `this`, no clock of its own (the caller passes `t`).
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.KiaAccessSessions = factory();
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  var DEFAULT_CAPACITY_KWH = 99.8; // Kia EV9 usable
+  var GAP_MIN = 45; // plugged + not charging this long → the session is over
+  var MIN_KWH = 0.3; // ignore trickle / noise sessions below this
+
+  function num(v) {
+    if (v == null || v === "") return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  function round(n, dp) {
+    var f = Math.pow(10, dp == null ? 2 : dp);
+    return Math.round(n * f) / f;
+  }
+  // DEFAULT_CAPACITY_KWH is the EV9's own usable pack size -- it must never
+  // be applied as a generic "we don't know this car's capacity" guess, or
+  // every OTHER model whose capacity is neither configured (capacity_kwh)
+  // nor reported by the API (ev_battery_capacity) would silently have its
+  // kWh/cost derived from the wrong car's battery size, contaminating that
+  // vehicle's own energy/cost analytics. Only apply it when the caller has
+  // told us (via opts.model) this really is an EV9; otherwise leave
+  // capacity genuinely unknown so the kWh/cost fields degrade to null,
+  // same as any other missing-data case elsewhere in this module.
+  function isEv9(model) {
+    // [\s-]* tolerates a space, hyphen, or nothing between "ev" and "9" --
+    // Kia's own API-reported model string isn't guaranteed to format it
+    // identically across regions/brands, so this is a best-effort
+    // heuristic, not a certainty; opts.capacityKwh (checked first, in
+    // resolveCap() below) is the reliable way to get a correct pack size
+    // for ANY vehicle, EV9 included, if this string match ever misses.
+    // (?!\d) -- a trailing digit means this is some OTHER model whose name
+    // merely starts with "ev9" (a hypothetical future "EV90"/"EV99"), not
+    // an EV9 trim/variant (real examples like "EV9 GT-Line" still match
+    // fine, since a space isn't a digit).
+    return typeof model === "string" && /ev[\s-]*9(?!\d)/i.test(model);
+  }
+  function resolveCap(opts) {
+    var cap = num(opts.capacityKwh);
+    if (cap == null && isEv9(opts.model)) cap = DEFAULT_CAPACITY_KWH;
+    return cap;
+  }
+
+  /** which per-kWh rate applies to a session, given where it charged */
+  function rateFor(atHome, opts) {
+    var home = num(opts.pricePerKwh) || 0;
+    var away = num(opts.awayPricePerKwh);
+    return atHome === false && away != null ? away : home;
+  }
+  function tri(v) { return v === true || v === false ? v : null; }
+  // An explicitly configured 0 (a free charging zone, away price 0) is a
+  // real price -- the session cost 0, not "unknown". Only the unset home
+  // price's 0 fallback means no price at all.
+  function isPriced(open, opts, rate) {
+    return rate > 0 || open.rate != null ||
+      (open.atHome === false && num(opts.awayPricePerKwh) != null);
+  }
+
+  /**
+   * Fold one state sample into session tracking.
+   * @param {object|null} open  session in progress, or null
+   * @param {object} cur   { t, charging, plugged, batteryPct, chargeKw,
+   *                          atHome, rate, rateLabel }
+   *        atHome: true / false / null — home vs away bucket + the fallback rate.
+   *        rate:   an explicit $/kWh for this session (from a per-zone rate) —
+   *                overrides pricePerKwh/awayPricePerKwh when set.
+   *        rateLabel: the `location` string for the session ("home" keeps it in
+   *                the home bucket; anything else is treated as public/away).
+   * @param {object} opts  { pricePerKwh, awayPricePerKwh, capacityKwh, minKwh, gapMin }
+   * @returns {{ open: (object|null), closed: (object|null) }}
+   */
+  function update(open, cur, opts) {
+    opts = opts || {};
+    var cap = resolveCap(opts);
+    var minKwh = num(opts.minKwh);
+    if (minKwh == null) minKwh = MIN_KWH;
+    var gapMs = (num(opts.gapMin) || GAP_MIN) * 60000;
+
+    var t = num(cur.t) || Date.now();
+    var pct = num(cur.batteryPct);
+    var kw = num(cur.chargeKw);
+    var charging = cur.charging === true;
+    // "not confirmed unplugged" (true OR unknown/null), not "confirmed
+    // plugged" -- a genuinely unknown reading (a momentary API hiccup) must
+    // not prematurely end a real session, but this is NOT "hold open
+    // indefinitely": the gapMs window below is measured from lastChargingAt,
+    // so an unknown/plugged reading only keeps a session open for the same
+    // bounded grace period (default 45 min, see GAP_MIN) that a real pause
+    // already gets, never longer.
+    var pluggedNotConfirmedUnplugged = cur.plugged !== false;
+
+    // start
+    if (charging && !open) {
+      return {
+        open: {
+          startedAt: t, lastChargingAt: t,
+          startPct: pct, lastPct: pct, peakKw: kw || 0,
+          atHome: tri(cur.atHome),
+          rate: num(cur.rate),
+          rateLabel: cur.rateLabel || null,
+          // activeMs: sum of the gaps between CONSECUTIVE charging=true
+          // samples only -- see close()'s activeAvgKw comment for why
+          // this exists separately from the plain startedAt->
+          // lastChargingAt span. 0 here, not null: this very first
+          // sample has no prior sample to diff against yet.
+          activeMs: 0, lastSampleAt: t, lastSampleCharging: true
+        },
+        closed: null
+      };
+    }
+    if (!open) return { open: null, closed: null };
+
+    // running
+    if (charging) {
+      if (open.lastSampleCharging === true && open.lastSampleAt != null) {
+        open.activeMs = (open.activeMs || 0) + (t - open.lastSampleAt);
+      }
+      open.lastSampleAt = t;
+      open.lastSampleCharging = true;
+      open.lastChargingAt = t;
+      if (open.atHome == null && tri(cur.atHome) != null) open.atHome = cur.atHome;
+      if (open.rate == null && num(cur.rate) != null) {
+        open.rate = num(cur.rate);
+        open.rateLabel = cur.rateLabel || open.rateLabel;
+      }
+      if (pct != null) {
+        open.lastPct = pct;
+        if (open.startPct == null) open.startPct = pct;
+      }
+      if (kw != null && kw > open.peakKw) open.peakKw = kw;
+      return { open: open, closed: null };
+    }
+
+    // not charging this sample — keep open through a short pause
+    if (pluggedNotConfirmedUnplugged &&
+        t - (open.lastChargingAt || open.startedAt) < gapMs) {
+      open.lastSampleAt = t;
+      open.lastSampleCharging = false;
+      if (pct != null) open.lastPct = pct;
+      return { open: open, closed: null };
+    }
+
+    // close it
+    var endPct = pct != null ? pct : open.lastPct;
+    var gained = (open.startPct != null && endPct != null)
+      ? Math.max(0, endPct - open.startPct) : null;
+    var kwh = (gained != null && cap != null) ? (gained / 100) * cap : null;
+    var mins = Math.max(0, Math.round((open.lastChargingAt - open.startedAt) / 60000));
+    var activeMins = Math.max(0, Math.round((open.activeMs || 0) / 60000));
+    var rate = open.rate != null ? open.rate : rateFor(open.atHome, opts);
+    var priced = isPriced(open, opts, rate);
+    // atHome === true/false -> a confirmed bucket; atHome left null (no
+    // home zone configured, or no GPS fix ever came in this session) is
+    // genuinely UNKNOWN, not "assume home" -- rateFor() above still prices
+    // it at the home rate (the best guess available for cost purposes),
+    // but the bucket a session is filed under for home/away analytics must
+    // not silently claim a confirmed location we never actually had.
+    var where = open.rateLabel || (
+      open.atHome === true ? "home" : open.atHome === false ? "away" : "unknown"
+    );
+    var s = {
+      startedAt: open.startedAt,
+      endedAt: open.lastChargingAt || t,
+      minutes: mins,
+      // minutes actually spent mid-charge (consecutive charging=true
+      // samples only) -- excludes scheduled-charging pauses / tapering
+      // gaps that `minutes` above folds into the same session. Will
+      // always be <= minutes; the gap between the two IS the plugged-in-
+      // but-not-drawing time.
+      activeMinutes: activeMins,
+      startPct: open.startPct,
+      endPct: endPct,
+      gainedPct: gained != null ? round(gained, 1) : null,
+      kwh: kwh != null ? round(kwh, 2) : null,
+      cost: (kwh != null && priced) ? round(kwh * rate, 2) : null,
+      peakKw: round(open.peakKw, 1),
+      // kWh delivered over the WHOLE session span, pauses included -- "if
+      // I leave it plugged in for a session shaped like this, what rate
+      // should I plan around". avgKw (NOT activeAvgKw) is what
+      // core/trips.js-style summaries and the analytics/SoC-band
+      // aggregates already read, kept for backwards compatibility.
+      avgKw: (kwh != null && mins > 0) ? round(kwh / (mins / 60), 1) : null,
+      // kWh delivered over only the time actually spent charging -- this
+      // is the charger's real rate; the two will differ whenever a
+      // session had a scheduled-charging pause or a long standby/taper.
+      activeAvgKw: (kwh != null && activeMins > 0) ? round(kwh / (activeMins / 60), 1) : null,
+      pricePerKwh: priced ? rate : null,
+      location: where,
+      costSource: (kwh != null && priced) ? "rate" : null
+    };
+    return { open: null, closed: (s.kwh != null && s.kwh >= minKwh) ? s : null };
+  }
+
+  /**
+   * Replace a session's cost with a known figure (from a public-charging
+   * integration, or entered by hand). Keeps the rate estimate as
+   * `estimatedCost`. Returns a new object.
+   * @param {object} session
+   * @param {number} cost
+   * @param {string} source  "external" | "manual"
+   */
+  function applyCost(session, cost, source) {
+    if (!session) return session;
+    var c = num(cost);
+    var out = {};
+    for (var k in session) if (Object.prototype.hasOwnProperty.call(session, k)) out[k] = session[k];
+    if (c == null || c < 0) return out;
+    if (out.estimatedCost == null) out.estimatedCost = out.cost;
+    out.cost = round(c, 2);
+    out.costSource = source || "external";
+    return out;
+  }
+
+  /**
+   * Live figures for the session in progress — kWh from the state-of-charge
+   * delta so far, plus a short kW×time extrapolation so the number keeps
+   * climbing between polls (capped at 15 min of drift). null if no session.
+   * @param {object} cur { t, charging, batteryPct, chargeKw }
+   */
+  function progress(open, cur, opts) {
+    if (!open) return null;
+    opts = opts || {};
+    var cap = resolveCap(opts);
+    var price = open.rate != null ? open.rate : rateFor(open.atHome, opts);
+    var t = num(cur.t) || Date.now();
+    var pct = num(cur.batteryPct);
+    var lastPct = pct != null ? pct : open.lastPct;
+    var kwhSoc = (open.startPct != null && lastPct != null && cap != null)
+      ? Math.max(0, ((lastPct - open.startPct) / 100) * cap) : 0;
+    var kw = num(cur.chargeKw);
+    if (kw == null) kw = open.peakKw || 0;
+    var driftMs = Math.max(0, Math.min(15 * 60000, t - (open.lastChargingAt || open.startedAt)));
+    var kwh = kwhSoc + (cur.charging === true ? kw * (driftMs / 3600000) : 0);
+    return {
+      kwh: round(kwh, 2),
+      cost: isPriced(open, opts, price) ? round(kwh * price, 2) : null,
+      gainedPct: (open.startPct != null && lastPct != null)
+        ? round(lastPct - open.startPct, 1) : null,
+      minutes: Math.max(0, Math.round((t - open.startedAt) / 60000))
+    };
+  }
+
+  /** totals over the last `days` (default 30) of a session list, split
+   *  home / away */
+  function summary(sessions, days) {
+    var cutoff = Date.now() - (days || 30) * 864e5;
+    var acc = {
+      all: { count: 0, kwh: 0, cost: 0, haveCost: false },
+      home: { count: 0, kwh: 0, cost: 0, haveCost: false },
+      away: { count: 0, kwh: 0, cost: 0, haveCost: false },
+      unknown: { count: 0, kwh: 0, cost: 0, haveCost: false }
+    };
+    (sessions || []).forEach(function (s) {
+      if (!s || num(s.endedAt) == null || s.endedAt < cutoff) return;
+      // "home" (or a session from before location tracking existed at all,
+      // which has no `location` field whatsoever) is the home bucket; the
+      // explicit "unknown" value (see update() above) means this specific
+      // session's location genuinely couldn't be determined and must NOT
+      // be folded into either home or away; anything else — "away" or a
+      // named public-charger zone — is the away bucket.
+      var where = s.location === "unknown" ? "unknown"
+        : (s.location == null || s.location === "home") ? "home" : "away";
+      [acc.all, acc[where]].forEach(function (a) {
+        a.count += 1;
+        if (s.kwh != null) a.kwh += s.kwh;
+        if (s.cost != null) { a.cost += s.cost; a.haveCost = true; }
+      });
+    });
+    function out(a) {
+      return {
+        count: a.count,
+        kwh: round(a.kwh, 1),
+        cost: a.haveCost ? round(a.cost, 2) : null
+      };
+    }
+    var r = out(acc.all);
+    r.home = out(acc.home);
+    r.away = out(acc.away);
+    r.unknown = out(acc.unknown);
+    return r;
+  }
+
+  return {
+    update: update,
+    progress: progress,
+    summary: summary,
+    applyCost: applyCost,
+    DEFAULT_CAPACITY_KWH: DEFAULT_CAPACITY_KWH,
+    resolveCap: resolveCap,
+    // exported so every OTHER place a pack-size fallback is needed (e.g.
+    // MMM-KiaAccess.js's driving-times arrival-kWh estimate) can gate on
+    // the exact same EV9 check instead of each re-implementing (and
+    // potentially drifting from) its own copy of this regex.
+    isEv9: isEv9
+  };
+});
+
 /* Trip / drive-segment tracking — shared by the MagicMirror node_helper and the
  * HA coordinator, both of which drive it with their own streaming state + storage.
  *
@@ -2321,12 +2679,18 @@ g.KiaAccessCommands={
  * Pure: no DOM, no `this`, no clock of its own (the caller passes `t`).
  */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.KiaAccessTrips = factory();
-})(typeof self !== "undefined" ? self : this, function () {
+  // depends on core/sessions.js (EV9 pack size) and core/range.js
+  // (distance) -- in a browser both must load first (MM getScripts order,
+  // the card bundle in scripts/sync-core.js)
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory(require("./sessions.js"), require("./range.js"));
+  } else {
+    root.KiaAccessTrips = factory(root.KiaAccessSessions, root.KiaAccessRange);
+  }
+})(typeof self !== "undefined" ? self : this, function (Sessions, Range) {
   "use strict";
 
-  var DEFAULT_CAPACITY_KWH = 99.8; // Kia EV9 usable
+  var DEFAULT_CAPACITY_KWH = Sessions.DEFAULT_CAPACITY_KWH;
   var MIN_KM = 0.5;                // ignore driveway shuffles below this
   var PARK_GAP_MIN = 8;            // odo stable / engine off this long -> parked
   var MI_PER_KM = 0.621371;
@@ -2341,39 +2705,10 @@ g.KiaAccessCommands={
     var f = Math.pow(10, dp == null ? 2 : dp);
     return Math.round(n * f) / f;
   }
-  // See core/sessions.js's resolveCap()/isEv9() for why: DEFAULT_CAPACITY_KWH
-  // is the EV9's own usable pack size and must never stand in as a generic
-  // "capacity unknown" guess for some other model, or that model's own
-  // energy/cost/efficiency fields would silently be computed off the wrong
-  // car's battery size.
-  function isEv9(model) {
-    // see core/sessions.js's isEv9() for the [\s-]*/(?!\d) reasoning
-    return typeof model === "string" && /ev[\s-]*9(?!\d)/i.test(model);
-  }
-  function resolveCap(opts) {
-    var cap = num(opts.capacityKwh);
-    if (cap == null && isEv9(opts.model)) cap = DEFAULT_CAPACITY_KWH;
-    return cap;
-  }
-  function haversineKm(aLat, aLon, bLat, bLon) {
-    if (aLat == null || aLon == null || bLat == null || bLon == null) return null;
-    // null already handled; also reject NaN/Infinity (both pass a bare
-    // != null check and their trig math can produce NaN/Infinity results)
-    // and an out-of-range-but-finite lat/lon -- the one caller here
-    // (close()) already passes a null result through round() safely, so
-    // extending this is a no-op for that call site and closes the gap for
-    // anything else that might reach this function.
-    if (typeof aLat !== "number" || typeof aLon !== "number" ||
-        typeof bLat !== "number" || typeof bLon !== "number") return null;
-    if (!isFinite(aLat) || !isFinite(aLon) || !isFinite(bLat) || !isFinite(bLon)) return null;
-    if (aLat < -90 || aLat > 90 || bLat < -90 || bLat > 90) return null;
-    if (aLon < -180 || aLon > 180 || bLon < -180 || bLon > 180) return null;
-    var R = 6371, p = Math.PI / 180;
-    var dLat = (bLat - aLat) * p, dLon = (bLon - aLon) * p;
-    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(aLat * p) * Math.cos(bLat * p) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return R * 2 * Math.asin(Math.sqrt(s));
-  }
+  // one EV9 check / pack-size rule and one distance function for every
+  // surface (see core/sessions.js resolveCap(), core/range.js haversineKm())
+  var resolveCap = Sessions.resolveCap;
+  var haversineKm = Range.haversineKm;
 
   function close(open, opts, endAt) {
     var cap = resolveCap(opts);
@@ -3489,39 +3824,10 @@ g.KiaAccessCommands={
         state.homeDistanceKm = null;
       }
 
-      var homeUnplugged = state.atHome === true && state.plugged !== true;
-      if (homeUnplugged && !this._homeUnpluggedSince) this._homeUnpluggedSince = Date.now();
-      if (!homeUnplugged) this._homeUnpluggedSince = null;
-      state.homeUnpluggedMin = this._homeUnpluggedSince
-        ? (Date.now() - this._homeUnpluggedSince) / 60000 : null;
-
-      // moved-while-parked (tow / theft): GPS shifted while the odometer
-      // stayed put and the car was off
-      var now = Date.now();
-      var p = this._lastParked;
-      var odoStable = p && state.odometerKm != null && Math.abs(state.odometerKm - p.odo) < 0.1;
-      if (odoStable && state.carOn !== true && state.locationLat != null
-          && p.lat != null && RNG && RNG.haversineKm) {
-        var movedKm = RNG.haversineKm(p.lat, p.lon, state.locationLat, state.locationLon);
-        if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
-          if (!this._movedSince) this._movedSince = now;
-          state.movedWhileParkedKm = movedKm;
-          state.movedWhileParkedMin = (now - this._movedSince) / 60000;
-        } else {
-          this._movedSince = null;
-          state.movedWhileParkedKm = 0;
-          state.movedWhileParkedMin = 0;
-        }
-      } else {
-        this._movedSince = null;
-        if (state.locationLat != null && state.odometerKm != null) {
-          this._lastParked = {
-            lat: state.locationLat, lon: state.locationLon, odo: state.odometerKm
-          };
-        }
-        state.movedWhileParkedKm = this._lastParked ? 0 : null;
-        state.movedWhileParkedMin = 0;
-      }
+      // home-unplugged duration + moved-while-parked (shared with MM)
+      S.trackAlertTimers(this, state, Date.now(), function (a, b, c, d) {
+        return RNG && RNG.haversineKm ? RNG.haversineKm(a, b, c, d) : null;
+      });
     }
 
     // Alert hysteresis (_prevCond) and the home-unplugged / moved-while-

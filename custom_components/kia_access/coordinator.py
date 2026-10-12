@@ -74,7 +74,7 @@ QUICK_RETRY_SECONDS = 60
 # defaults to 12; this leaves room for a longer configured one)
 V12_HISTORY_HOURS = 48
 
-from .vehicle_state import build_state, to_bool
+from .vehicle_state import build_state, to_bool, track_alert_timers
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1684,52 +1684,26 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         units = "metric" if self.hass.config.units is METRIC_SYSTEM else "imperial"
         state = build_state(flat, {"units": units, "history": list(self._v12_history)})
 
-        # home / not-plugged-in context. time.time() (wall clock), not
-        # time.monotonic() -- this measures "how long has this been
-        # continuously true", which must survive a HA restart (routine:
-        # updates, crashes) without silently resetting the clock and
-        # delaying the alert by another full graceMin/sustainedMin.
-        state["atHome"] = self._at_home(state)
-        home_unplugged = state["atHome"] is True and state.get("plugged") is not True
-        if home_unplugged and self._home_unplugged_since is None:
-            self._home_unplugged_since = time.time()
-        if not home_unplugged:
-            self._home_unplugged_since = None
-        state["homeUnpluggedMin"] = (
-            (time.time() - self._home_unplugged_since) / 60
-            if self._home_unplugged_since is not None
-            else None
-        )
-
         # distance car -> home for the "can't get home" check
+        state["atHome"] = self._at_home(state)
         hlat, hlon, _ = self._home_point()
         state["homeDistanceKm"] = self._haversine_km(
             state.get("locationLat"), state.get("locationLon"), hlat, hlon
         )
 
-        # moved-while-parked (tow / theft): GPS shifted while the odometer stayed
-        # put and the car was off
-        lat, lon = state.get("locationLat"), state.get("locationLon")
-        odo = state.get("odometerKm")
-        p = self._last_parked
-        odo_stable = p is not None and odo is not None and abs(odo - p["odo"]) < 0.1
-        if odo_stable and state.get("carOn") is not True and lat is not None:
-            moved = self._haversine_km(p["lat"], p["lon"], lat, lon)
-            if moved is not None and moved >= 0.3048:  # 1000 ft -- real move, not GPS jitter
-                if self._moved_since is None:
-                    self._moved_since = time.time()
-                state["movedWhileParkedKm"] = moved
-                state["movedWhileParkedMin"] = (time.time() - self._moved_since) / 60
-            else:
-                self._moved_since = None
-                state["movedWhileParkedKm"] = 0
-                state["movedWhileParkedMin"] = 0
-        else:
-            self._moved_since = None
-            if lat is not None and odo is not None:
-                self._last_parked = {"lat": lat, "lon": lon, "odo": odo}
-            state["movedWhileParkedKm"] = 0 if self._last_parked else None
-            state["movedWhileParkedMin"] = 0
+        # home-unplugged duration + moved-while-parked: the shared
+        # vehicle_state port of core/state.js trackAlertTimers(). time.time()
+        # (wall clock), not time.monotonic() -- "how long has this been
+        # continuously true" must survive an HA restart without resetting.
+        ctx = {
+            "home_unplugged_since": self._home_unplugged_since,
+            "moved_since": self._moved_since,
+            "last_parked": self._last_parked,
+        }
+        track_alert_timers(ctx, state, time.time(), self._haversine_km)
+        self._home_unplugged_since = ctx["home_unplugged_since"]
+        self._moved_since = ctx["moved_since"]
+        self._last_parked = ctx["last_parked"]
 
         return state
 

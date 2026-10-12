@@ -300,6 +300,7 @@
     summary: summary,
     applyCost: applyCost,
     DEFAULT_CAPACITY_KWH: DEFAULT_CAPACITY_KWH,
+    resolveCap: resolveCap,
     // exported so every OTHER place a pack-size fallback is needed (e.g.
     // MMM-KiaAccess.js's driving-times arrival-kWh estimate) can gate on
     // the exact same EV9 check instead of each re-implementing (and

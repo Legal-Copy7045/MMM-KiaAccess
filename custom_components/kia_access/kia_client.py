@@ -49,22 +49,22 @@ def _account_hash(region, brand, username) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def _job_account_hash(job) -> str:
+    return _account_hash(
+        job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
+    )
+
+
 def account_token_file(job) -> str:
     """The token file THIS job's account owns -- distinct per (region, brand,
     username), so two differently-configured accounts never share one file."""
-    h = _account_hash(
-        job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
-    )
-    return os.path.join(_HERE, f"token-{h}.json")
+    return os.path.join(_HERE, f"token-{_job_account_hash(job)}.json")
 
 
 def _auth_state_file(job) -> str:
     """Per-account, alongside the token file (same _HERE + account-hash
     convention account_token_file() already uses)."""
-    h = _account_hash(
-        job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
-    )
-    return os.path.join(_HERE, f"authstate-{h}.json")
+    return os.path.join(_HERE, f"authstate-{_job_account_hash(job)}.json")
 
 
 # A live token that fails to re-auth means Kia is rejecting THIS account's
@@ -366,9 +366,18 @@ def dump_vehicle(vehicle, region=None):
     return out
 
 
+_COMMANDS_CACHE = None
+
+
 def load_commands():
-    with open(COMMANDS_FILE, encoding="utf-8") as fh:
-        return json.load(fh).get("commands", [])
+    """The command catalogue, read from disk once -- it ships with the code
+    and can't change while it runs (run_command() used to re-read and
+    re-parse it, blocking file I/O on HA's executor, on every command)."""
+    global _COMMANDS_CACHE
+    if _COMMANDS_CACHE is None:
+        with open(COMMANDS_FILE, encoding="utf-8") as fh:
+            _COMMANDS_CACHE = json.load(fh).get("commands", [])
+    return _COMMANDS_CACHE
 
 
 # ---------------------------------------------------------------------------
@@ -549,10 +558,9 @@ def _refresh_cached_state(vm, job):
 
 def connect(job, token_file=None):
     """Return (vm, enrolled_at). Raises OtpRequired / ClientError."""
-    account_hash = _account_hash(
-        job.get("region", "USA"), job.get("brand", "KIA"), job.get("username", "")
-    )
-    token_file = token_file or job.get("tokenFile") or account_token_file(job)
+    account_hash = _job_account_hash(job)
+    token_file = (token_file or job.get("tokenFile")
+                  or os.path.join(_HERE, f"token-{account_hash}.json"))
     _migrate_legacy_token(token_file, account_hash)
     try:
         from hyundai_kia_connect_api import VehicleManager

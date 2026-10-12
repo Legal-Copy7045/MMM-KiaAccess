@@ -359,8 +359,8 @@ Module.register("MMM-KiaAccess", {
       this.file("core/conditions.js"),
       this.file("core/state.js"),
       this.file("core/sessions.js"),
-      this.file("core/trips.js"),
       this.file("core/range.js"),
+      this.file("core/trips.js"), // needs sessions.js + range.js loaded first
       this.file("core/dest-planner.js")
     ];
   },
@@ -391,6 +391,7 @@ Module.register("MMM-KiaAccess", {
     this.stateBuilder = typeof KiaAccessState !== "undefined" ? KiaAccessState : null;
     this.sessionLib = typeof KiaAccessSessions !== "undefined" ? KiaAccessSessions : null;
     this.tripLib = typeof KiaAccessTrips !== "undefined" ? KiaAccessTrips : null;
+    this.rangeLib = typeof KiaAccessRange !== "undefined" ? KiaAccessRange : null;
     this.destPlanner = typeof KiaAccessDestPlanner !== "undefined" ? KiaAccessDestPlanner : null;
     this.flatMap = null;
     this.history = [];
@@ -1040,6 +1041,7 @@ Module.register("MMM-KiaAccess", {
     const km = this.haversineKm(
       st.locationLat, st.locationLon, Number(loc.homeLat), Number(loc.homeLon)
     );
+    if (km == null) return undefined; // bad home point: unknown, not "at home"
     const radiusKm = Number(loc.homeRadiusKm);
     return km <= (isFinite(radiusKm) ? radiusKm : 0.2);
   },
@@ -1064,12 +1066,6 @@ Module.register("MMM-KiaAccess", {
     // clone the (memoised) state so the home context doesn't pollute the cache
     const st = Object.assign({}, this.visualState());
     st.atHome = this.atHome(st);
-    const homeUnplugged = st.atHome === true && st.plugged !== true;
-    if (homeUnplugged && !this._homeUnpluggedSince) this._homeUnpluggedSince = Date.now();
-    if (!homeUnplugged) this._homeUnpluggedSince = null;
-    st.homeUnpluggedMin = this._homeUnpluggedSince
-      ? (Date.now() - this._homeUnpluggedSince) / 60000 : null;
-
     // distance car -> configured home (km) for the "can't get home" check
     const _loc = (this.config.visuals && this.config.visuals.location) || {};
     st.homeDistanceKm = (_loc.homeLat != null && st.locationLat != null)
@@ -1077,30 +1073,9 @@ Module.register("MMM-KiaAccess", {
           Number(_loc.homeLat), Number(_loc.homeLon))
       : null;
 
-    // moved-while-parked (tow / theft): GPS shifted while the odometer stayed
-    // put and the car was off. Track how far and for how long.
-    const now = Date.now();
-    const p = this._lastParked;
-    const odoStable = p && st.odometerKm != null && Math.abs(st.odometerKm - p.odo) < 0.1;
-    if (odoStable && st.carOn !== true && st.locationLat != null && p.lat != null) {
-      const movedKm = this.haversineKm(p.lat, p.lon, st.locationLat, st.locationLon);
-      if (movedKm != null && movedKm >= 0.3048) { // 1000 ft -- real move, not GPS jitter
-        if (!this._movedSince) this._movedSince = now;
-        st.movedWhileParkedKm = movedKm;
-        st.movedWhileParkedMin = (now - this._movedSince) / 60000;
-      } else {
-        this._movedSince = null;
-        st.movedWhileParkedKm = 0;
-        st.movedWhileParkedMin = 0;
-      }
-    } else {
-      // driven, or first sample, or no GPS — (re)anchor the parked position
-      this._movedSince = null;
-      if (st.locationLat != null && st.odometerKm != null) {
-        this._lastParked = { lat: st.locationLat, lon: st.locationLon, odo: st.odometerKm };
-      }
-      st.movedWhileParkedKm = this._lastParked ? 0 : null;
-      st.movedWhileParkedMin = 0;
+    // home-unplugged duration + moved-while-parked (shared with the card)
+    if (this.stateBuilder) {
+      this.stateBuilder.trackAlertTimers(this, st, Date.now(), (a, b, c, d) => this.haversineKm(a, b, c, d));
     }
 
     if (this.config.debug) {
@@ -1108,9 +1083,7 @@ Module.register("MMM-KiaAccess", {
       Log.info("[MMM-KiaAccess] home check: " + JSON.stringify({
         carLat: st.locationLat, carLon: st.locationLon,
         homeLat: loc.homeLat, homeLon: loc.homeLon, radiusKm: loc.homeRadiusKm,
-        distKm: (st.locationLat != null && loc.homeLat != null)
-          ? +this.haversineKm(st.locationLat, st.locationLon,
-              Number(loc.homeLat), Number(loc.homeLon)).toFixed(3) : null,
+        distKm: st.homeDistanceKm != null ? +st.homeDistanceKm.toFixed(3) : null,
         atHome: st.atHome, plugged: st.plugged,
         homeUnpluggedMin: st.homeUnpluggedMin == null
           ? null : +st.homeUnpluggedMin.toFixed(1)
@@ -1295,15 +1268,10 @@ Module.register("MMM-KiaAccess", {
       : Math.round(km * 0.621371) + " mi";
   },
 
-  // distance in km between two lat/lon (haversine)
+  // distance in km between two lat/lon -- core/range.js's, the one copy
+  // every surface shares (null = invalid input / unknown, never 0)
   haversineKm(a, b, c, d) {
-    const R = 6371;
-    const p = Math.PI / 180;
-    const h =
-      0.5 -
-      Math.cos((c - a) * p) / 2 +
-      (Math.cos(a * p) * Math.cos(c * p) * (1 - Math.cos((d - b) * p))) / 2;
-    return 2 * R * Math.asin(Math.sqrt(h));
+    return this.rangeLib ? this.rangeLib.haversineKm(a, b, c, d) : null;
   },
 
   compactLine() {
@@ -1453,7 +1421,7 @@ Module.register("MMM-KiaAccess", {
     const lines = [];
     if (cfg.homeLat != null && cfg.homeLon != null) {
       const km = this.haversineKm(lat, lon, Number(cfg.homeLat), Number(cfg.homeLon));
-      lines.push(km < 0.15 ? "At home" : (this.fmtDist(km) || "") + " from home");
+      if (km != null) lines.push(km < 0.15 ? "At home" : (this.fmtDist(km) || "") + " from home");
     }
     const addr = f["vehicle.geocode"] || f["vehicle.location_name"];
     if (addr && addr !== "—") lines.push(String(addr));

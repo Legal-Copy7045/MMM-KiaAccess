@@ -944,19 +944,18 @@ async function testRangeMapRace() {
     const payload1 = { vehicle: { location_latitude: 40.0, location_longitude: -80.0, ev_driving_range: 300 } };
     const p1 = helper.maybeRangeMap(id, config, payload1);
     await flush();
-    assert.strictEqual(pending.length, 1, "cycle 1's oneWay fetch must be in flight");
+    // the one-way and round-trip rings are fetched together
+    assert.strictEqual(pending.length, 2, "cycle 1's oneWay + round-trip fetches must be in flight");
 
     // cycle 2: the car's NEWER position (key2) -- starts while cycle 1 is still pending
     const payload2 = { vehicle: { location_latitude: 41.0, location_longitude: -81.0, ev_driving_range: 300 } };
     const p2 = helper.maybeRangeMap(id, config, payload2);
     await flush();
-    assert.strictEqual(pending.length, 2, "cycle 2's oneWay fetch must also now be in flight");
+    assert.strictEqual(pending.length, 4, "cycle 2's two fetches must also now be in flight");
 
     // resolve cycle 2 FULLY first -- the newer cycle finishes before the older one
-    pending[1].resolve(tomtomOk);
-    await flush();
-    assert.strictEqual(pending.length, 3, "cycle 2's round-trip fetch must now be in flight");
     pending[2].resolve(tomtomOk);
+    pending[3].resolve(tomtomOk);
     await p2;
 
     const s = helper.st(id);
@@ -965,9 +964,7 @@ async function testRangeMapRace() {
 
     // NOW let cycle 1 (older, slower, now-stale) finish
     pending[0].resolve(tomtomOk);
-    await flush();
-    assert.strictEqual(pending.length, 4, "cycle 1's round-trip fetch must now be in flight");
-    pending[3].resolve(tomtomOk);
+    pending[1].resolve(tomtomOk);
     await p1;
 
     assert.strictEqual(s.rangeMap.key, key2, (
