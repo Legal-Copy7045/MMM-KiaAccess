@@ -70,6 +70,27 @@ assert eu_d["odometer"] == 45000.0, eu_d["odometer"]
 none_d = kia_client.dump_vehicle(_Veh(ev_driving_range=300.0))
 assert none_d["ev_driving_range"] == 300.0
 
+# USA payload that left the unit code out: the library sets the value but
+# leaves the unit None -- that's still miles, not km
+usa_missing = kia_client.dump_vehicle(
+    _Veh(ev_driving_range=200.0, _ev_driving_range_unit=None,
+         total_driving_range=210.0, ev_driving_range_unit=None),
+    "USA",
+)
+assert approx(usa_missing["ev_driving_range"], 321.9, 1), usa_missing["ev_driving_range"]
+assert approx(usa_missing["total_driving_range"], 338.0, 1), usa_missing["total_driving_range"]
+assert usa_missing["ev_driving_range_unit"] == "km", usa_missing["ev_driving_range_unit"]
+
+# ...but an explicit unit still wins over the region default
+usa_km = kia_client.dump_vehicle(
+    _Veh(ev_driving_range=300.0, _ev_driving_range_unit="km"), "USA"
+)
+assert usa_km["ev_driving_range"] == 300.0, usa_km["ev_driving_range"]
+
+# missing unit outside the USA: leave as-is (EU/AU/... report km)
+eu_missing = kia_client.dump_vehicle(_Veh(ev_driving_range=300.0), "EU")
+assert eu_missing["ev_driving_range"] == 300.0
+
 
 # --- fetch(): refresh:false / forceRefreshTimeout<=0 must NOT wake the car ---
 class _VM:
