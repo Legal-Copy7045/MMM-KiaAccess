@@ -233,8 +233,17 @@ def _flatten_scalar_seq(val):
     return val
 
 
-def dump_vehicle(vehicle):
-    """Every readable public attribute + property off the Vehicle object."""
+# Regions whose Kia API reports distances in miles and temperatures in °F.
+# Used only when a poll's payload leaves the unit out (see dump_vehicle()).
+_IMPERIAL_REGIONS = {"USA", "US"}
+
+
+def dump_vehicle(vehicle, region=None):
+    """Every readable public attribute + property off the Vehicle object.
+
+    `region` (the job's region string) only matters when a reading arrives
+    without its unit -- see the normalisation block below.
+    """
     out = {}
     for attr in dir(vehicle):
         if attr.startswith("_"):
@@ -262,22 +271,35 @@ def dump_vehicle(vehicle):
     # unit (°F + miles for USA & Canada) but stores the raw value — while every
     # downstream formatter (state.js, visuals.js, the HA sensors' device classes)
     # assumes °C / km. Normalise here, the one place both surfaces share.
+    #
+    # The library takes the range units from a code in each payload and, when
+    # that code is missing, sets the value but leaves the unit None. We build
+    # a fresh VehicleManager every poll, so there's no earlier unit to fall
+    # back on either -- a USA range in miles would pass through as "km",
+    # about 38% low, into every stat, trip and alert. A missing unit
+    # therefore means the region's own unit.
+    imperial = str(region or "").strip().upper() in _IMPERIAL_REGIONS
     _F = ("F", "°F", "FAHRENHEIT")
     _MI = ("MI", "MILES", "MILE")
-    for base in ("air_temperature", "outside_temperature"):
+
+    def _unit(base, imperial_unit):
         unit = getattr(vehicle, "_" + base + "_unit", None)
+        if (unit is None or str(unit).strip() == "") and imperial:
+            return imperial_unit
+        return str(unit).strip().upper()
+
+    for base in ("air_temperature", "outside_temperature"):
         val = out.get(base)
         if isinstance(val, (int, float)) and not isinstance(val, bool) and \
-                str(unit).strip().upper() in _F:
+                _unit(base, "F") in _F:
             out[base] = round((val - 32) * 5.0 / 9.0, 1)
     for base in (
         "odometer", "ev_driving_range", "total_driving_range",
         "fuel_driving_range", "next_service_distance", "last_service_distance",
     ):
-        unit = getattr(vehicle, "_" + base + "_unit", None)
         val = out.get(base)
         if isinstance(val, (int, float)) and not isinstance(val, bool) and \
-                str(unit).strip().upper() in _MI:
+                _unit(base, "MI") in _MI:
             out[base] = round(val * 1.609344, 1)
             if base + "_unit" in out:
                 out[base + "_unit"] = "km"
@@ -706,7 +728,7 @@ def fetch(job, token_file=None):
             "config to pick one (reads need an explicit target, same as "
             "control commands)"
         )
-    vehicles = [dump_vehicle(v) for v in selected]
+    vehicles = [dump_vehicle(v, job.get("region", "USA")) for v in selected]
 
     meta = {}
     if meta_note:
