@@ -1,74 +1,114 @@
 name: Release
 
-# Publishes a GitHub release (what HACS installs from) whenever a version tag
-# is pushed. The release title and notes come from the annotated tag message:
+# Publishes a GitHub release (what HACS installs from) for every new version.
 #
-#   git tag -a v2.109.0 --cleanup=whitespace -F notes.md
-#   git push origin v2.109.0
+# Normal path -- bump the version and let main do the rest:
+#   1. set the same version in custom_components/kia_access/manifest.json
+#      and package.json
+#   2. write the notes to .github/releases/v<version>.md
+#      (line 1 = title, a blank line, then the markdown body)
+#   3. merge to main -> CI runs, then this tags the commit and publishes
 #
-# notes.md: line 1 = title, a blank line, then the markdown body.
-# --cleanup=whitespace matters: git's default strips every line starting with
-# "#", which would eat the markdown headings.
+# Pushing a v* tag yourself also works: the notes then come from the same
+# .github/releases file if there is one, else from the annotated tag message
+# (git tag -a --cleanup=whitespace keeps the markdown "#" headings), else
+# GitHub's generated notes.
 #
-# A lightweight tag, or one with no body, still releases, with GitHub's
-# generated notes.
-# A tag with a suffix (v2.109.0-beta.1) is marked pre-release, so HACS only
-# offers it to users who have "Show beta versions" turned on.
+# A version with a suffix (2.109.0-beta.1) is marked pre-release, so HACS
+# only offers it to users who have "Show beta versions" turned on.
 
 on:
   push:
+    branches: [main]
+    paths:
+      - custom_components/kia_access/manifest.json
+      - .github/releases/**
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release
   cancel-in-progress: false
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      publish: ${{ steps.plan.outputs.publish }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: plan
+        name: Work out the version and whether it's released yet
+        run: |
+          manifest=$(jq -r .version custom_components/kia_access/manifest.json)
+          pkg=$(jq -r .version package.json)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="v${manifest}"
+          fi
+          echo "tag=$tag manifest=$manifest package.json=$pkg"
+          if [ "$manifest" != "${tag#v}" ] || [ "$pkg" != "${tag#v}" ]; then
+            echo "::error::$tag does not match manifest.json ($manifest) / package.json ($pkg) -- HACS would install a build reporting the wrong version"
+            exit 1
+          fi
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::Release $tag already exists -- nothing to do"
+            publish=false
+          else
+            publish=true
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
   ci:
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
     uses: ./.github/workflows/ci.yml
 
   release:
-    needs: ci
+    needs: [plan, ci]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ needs.plan.outputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      # checkout leaves the tag peeled to its commit; fetch the tag object
-      # itself so its annotation (the release notes) is readable
-      - name: Fetch annotated tag
-        run: git fetch --force origin "+refs/tags/${TAG}:refs/tags/${TAG}"
-      - name: Tag matches the shipped version
-        run: |
-          want="${TAG#v}"
-          manifest=$(jq -r .version custom_components/kia_access/manifest.json)
-          pkg=$(jq -r .version package.json)
-          echo "tag=$want manifest=$manifest package.json=$pkg"
-          if [ "$manifest" != "$want" ] || [ "$pkg" != "$want" ]; then
-            echo "::error::Tag $TAG does not match manifest.json ($manifest) / package.json ($pkg) -- HACS would install a build reporting the wrong version"
-            exit 1
-          fi
       - name: Publish release
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::notice::Release $TAG already exists -- leaving it as is"
-            exit 0
-          fi
-          args=(--verify-tag)
+          args=(--target "$GITHUB_SHA")
           case "$TAG" in *-*) args+=(--prerelease) ;; esac
-          git for-each-ref --format='%(contents:body)' "refs/tags/$TAG" > notes.md
-          if [ "$(git cat-file -t "refs/tags/$TAG")" = "tag" ] && grep -q '[^[:space:]]' notes.md; then
-            title=$(git for-each-ref --format='%(contents:subject)' "refs/tags/$TAG")
-            args+=(--title "$title" --notes-file notes.md)
+
+          notes_file=".github/releases/${TAG}.md"
+          if [ -f "$notes_file" ]; then
+            title=$(head -n1 "$notes_file")
+            tail -n +2 "$notes_file" | sed '/./,$!d' > notes.md
           else
-            args+=(--title "$TAG" --generate-notes)
+            # checkout leaves a pushed tag peeled to its commit; fetch the
+            # tag object itself so its annotation is readable
+            git fetch --force origin "+refs/tags/${TAG}:refs/tags/${TAG}" 2>/dev/null || true
+            if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
+              title=$(git for-each-ref --format='%(contents:subject)' "refs/tags/$TAG")
+              git for-each-ref --format='%(contents:body)' "refs/tags/$TAG" > notes.md
+            else
+              : > notes.md
+            fi
           fi
+
+          if grep -q '[^[:space:]]' notes.md; then
+            args+=(--title "${title:-$TAG}" --notes-file notes.md)
+          else
+            args+=(--title "${title:-$TAG}" --generate-notes)
+          fi
+          # creates the tag at this commit when it doesn't exist yet
           gh release create "$TAG" "${args[@]}"
