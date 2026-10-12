@@ -1,0 +1,74 @@
+name: Release
+
+# Publishes a GitHub release (what HACS installs from) whenever a version tag
+# is pushed. The release title and notes come from the annotated tag message:
+#
+#   git tag -a v2.109.0 --cleanup=whitespace -F notes.md
+#   git push origin v2.109.0
+#
+# notes.md: line 1 = title, a blank line, then the markdown body.
+# --cleanup=whitespace matters: git's default strips every line starting with
+# "#", which would eat the markdown headings.
+#
+# A lightweight tag, or one with no body, still releases, with GitHub's
+# generated notes.
+# A tag with a suffix (v2.109.0-beta.1) is marked pre-release, so HACS only
+# offers it to users who have "Show beta versions" turned on.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # checkout leaves the tag peeled to its commit; fetch the tag object
+      # itself so its annotation (the release notes) is readable
+      - name: Fetch annotated tag
+        run: git fetch --force origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+      - name: Tag matches the shipped version
+        run: |
+          want="${TAG#v}"
+          manifest=$(jq -r .version custom_components/kia_access/manifest.json)
+          pkg=$(jq -r .version package.json)
+          echo "tag=$want manifest=$manifest package.json=$pkg"
+          if [ "$manifest" != "$want" ] || [ "$pkg" != "$want" ]; then
+            echo "::error::Tag $TAG does not match manifest.json ($manifest) / package.json ($pkg) -- HACS would install a build reporting the wrong version"
+            exit 1
+          fi
+      - name: Publish release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists -- leaving it as is"
+            exit 0
+          fi
+          args=(--verify-tag)
+          case "$TAG" in *-*) args+=(--prerelease) ;; esac
+          git for-each-ref --format='%(contents:body)' "refs/tags/$TAG" > notes.md
+          if [ "$(git cat-file -t "refs/tags/$TAG")" = "tag" ] && grep -q '[^[:space:]]' notes.md; then
+            title=$(git for-each-ref --format='%(contents:subject)' "refs/tags/$TAG")
+            args+=(--title "$title" --notes-file notes.md)
+          else
+            args+=(--title "$TAG" --generate-notes)
+          fi
+          gh release create "$TAG" "${args[@]}"
