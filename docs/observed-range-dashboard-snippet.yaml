@@ -101,6 +101,32 @@
 
     - type: markdown
       content: >
+        {% set e = 'sensor.melodev_observed_range_efficiency' %}
+
+        {% set car = state_attr(e, 'car_efficiency') %}
+
+        {% set parts = state_attr(e, 'car_energy_breakdown_pct') or {} %}
+
+        ### Car-measured energy (last 30 days)
+
+        {% if car is not none %}
+
+        **{{ car }} {{ state_attr(e, 'car_efficiency_unit') }}** ·
+        {{ state_attr(e, 'car_consumption') }} {{ state_attr(e, 'car_consumption_unit') }}
+        · regen {{ state_attr(e, 'car_regen_pct') }}%
+
+        Driving {{ parts.driving }}% · climate {{ parts.climate }}% ·
+        electronics {{ parts.electronics }}% · battery care {{ parts.batteryCare }}%
+
+        {% else %}
+
+        _Your car doesn't report its own energy log (Kia USA doesn't) — the
+        trip-based figures below are the source._
+
+        {% endif %}
+
+    - type: markdown
+      content: >
         {% set unit = state_attr('sensor.melodev_observed_range_efficiency',
         'efficiency_unit') or '' %}
 

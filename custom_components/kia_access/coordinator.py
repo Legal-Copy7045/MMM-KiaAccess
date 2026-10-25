@@ -88,6 +88,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
     _retry_from_cache = False
     _last_wake_at: datetime | None = None
     _v12_history: list = []  # replaced (never mutated) -- see _record_12v()
+    _energy_log: list = []  # replaced (never mutated) -- see _update_energy_log()
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         minutes = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL_MINUTES)
@@ -215,6 +216,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         tdata = await self._trips_store.async_load() or {}
         self._trips = tdata.get("trips") or []
         self._open_trip = tdata.get("open") or None
+        self._energy_log = tdata.get("energy") or []
         cdata = await self._cal_store.async_load() or {}
         self._cal_pois = cdata.get("cal_pois") or []
         self._static_pois = cdata.get("static_pois") or []
@@ -525,9 +527,26 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 f" @ {res['closed'].get('miPerKwh')} mi/kWh" if res["closed"].get("miPerKwh") else "",
             )
         if changed:
-            await self._trips_store.async_save(
-                {"trips": self._trips, "open": self._open_trip}
-            )
+            await self._save_trips_store()
+
+    async def _save_trips_store(self) -> None:
+        await self._trips_store.async_save(
+            {"trips": self._trips, "open": self._open_trip, "energy": self._energy_log}
+        )
+
+    async def _update_energy_log(self) -> None:
+        """Fold this fetch's car-reported energy records (vehicle
+        daily_stats -- EU-style regions, Canada, US Hyundai) into the stored
+        log. The car only returns about a month, so keeping it is what
+        builds a longer history for analytics' carEnergy(). Kia USA sends
+        none, so this never writes anything there."""
+        incoming = self.vehicle.get("daily_stats") or []
+        if not incoming:
+            return
+        merged = observed_analytics.merge_energy_log(self._energy_log, incoming)
+        if merged != self._energy_log:
+            self._energy_log = merged
+            await self._save_trips_store()
 
     @property
     def trip_log(self) -> dict:
@@ -554,6 +573,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             "rangeAccuracy": observed_analytics.range_accuracy(self._trips, opts),
             "chargingPerformance": observed_analytics.charging_performance(self._sessions),
             "drivingPatterns": observed_analytics.driving_patterns(self._trips, opts),
+            # car-measured kWh where the region reports it (not Kia USA)
+            "carEnergy": observed_analytics.car_energy(self._energy_log, opts),
         }
 
     # A destination further than this from home is treated as "not really
@@ -1441,6 +1462,7 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 self._record_12v()
                 await self._update_sessions()
                 await self._update_trips()
+                await self._update_energy_log()
 
             await self._refresh_calendar_and_routes()
 

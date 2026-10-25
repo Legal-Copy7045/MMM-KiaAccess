@@ -253,4 +253,117 @@ const near = (a, b, tol) => a != null && b != null && Math.abs(a - b) <= (tol ||
   assert.strictEqual(dp.windowDays, 30);
 }
 
+// ---- mergeEnergyLog() / carEnergy(): the car's own energy log (EU daily
+// records + CA / US Hyundai per-trip records) -- same fixture and expected
+// numbers as test/analytics_test.py ----
+{
+  const fx = {
+  "stored": [
+    {
+      "at": "2025-08-01T00:00:00",
+      "date": "2025-08-01",
+      "kwh": 9.0,
+      "drivingKwh": 7.0,
+      "climateKwh": 1.0,
+      "electronicsKwh": 0.5,
+      "batteryCareKwh": 0.5,
+      "regenKwh": 1.0,
+      "distanceKm": 50
+    },
+    {
+      "at": "2026-05-02T00:00:00",
+      "date": "2026-05-02",
+      "kwh": 10.0,
+      "drivingKwh": 8.0,
+      "climateKwh": 1.0,
+      "electronicsKwh": 0.6,
+      "batteryCareKwh": 0.4,
+      "regenKwh": 1.5,
+      "distanceKm": 60
+    },
+    {
+      "at": "2026-05-20T00:00:00",
+      "date": "2026-05-20",
+      "kwh": 12.0,
+      "drivingKwh": 9.0,
+      "climateKwh": 2.0,
+      "electronicsKwh": 0.6,
+      "batteryCareKwh": 0.4,
+      "regenKwh": 2.0,
+      "distanceKm": 70
+    }
+  ],
+  "incoming": [
+    {
+      "at": "2026-05-20T00:00:00",
+      "date": "2026-05-20",
+      "kwh": 12.5,
+      "drivingKwh": 9.5,
+      "climateKwh": 2.0,
+      "electronicsKwh": 0.6,
+      "batteryCareKwh": 0.4,
+      "regenKwh": 2.0,
+      "distanceKm": 72
+    },
+    {
+      "at": "2026-06-01T08:15:00",
+      "date": "2026-06-01",
+      "kwh": 4.0,
+      "drivingKwh": 3.0,
+      "climateKwh": 0.8,
+      "electronicsKwh": 0.2,
+      "batteryCareKwh": null,
+      "regenKwh": 0.5,
+      "distanceKm": 25
+    },
+    {
+      "at": "2026-06-01T17:40:00",
+      "date": "2026-06-01",
+      "kwh": 5.0,
+      "drivingKwh": null,
+      "climateKwh": null,
+      "electronicsKwh": null,
+      "batteryCareKwh": null,
+      "regenKwh": null,
+      "distanceKm": 30
+    },
+    {
+      "at": "2026-06-03T09:00:00",
+      "date": "2026-06-03",
+      "kwh": 3.0,
+      "drivingKwh": 2.5,
+      "climateKwh": 0.3,
+      "electronicsKwh": 0.2,
+      "batteryCareKwh": 0.0,
+      "regenKwh": 0.4,
+      "distanceKm": null
+    }
+  ]
+};
+  const log = A.mergeEnergyLog(fx.stored, fx.incoming);
+  assert.deepStrictEqual(log.map((r) => r.at), [
+    "2025-08-01T00:00:00", "2026-05-02T00:00:00", "2026-05-20T00:00:00",
+    "2026-06-01T08:15:00", "2026-06-01T17:40:00", "2026-06-03T09:00:00"
+  ], "keyed by `at`, oldest first");
+  assert.strictEqual(log[2].kwh, 12.5, "a newer fetch's copy of a record wins");
+  assert.strictEqual(A.mergeEnergyLog(log, [], 30).length, 4, "trimmed to keepDays before the newest record");
+
+  const e = A.carEnergy(log, { units: "imperial" });
+  assert.strictEqual(e.source, "car");
+  assert.strictEqual(e.unit, "mi/kWh");
+  assert.strictEqual(e.daysReported, 3, "per-trip records grouped by day; 30-day window");
+  assert.strictEqual(e.kwh, 24.5);
+  assert.strictEqual(e.efficiency, 3.67, "distance / kWh only over records with both");
+  assert.strictEqual(e.whPerDistance, 272);
+  assert.deepStrictEqual(e.breakdown, { driving: 77, climate: 16, electronics: 5, batteryCare: 2 });
+  assert.strictEqual(e.regenKwh, 2.9);
+  assert.strictEqual(e.regenPct, 12);
+  assert.deepStrictEqual(e.monthlyTrend.map((m) => [m.month, m.days, m.efficiency]),
+    [["2025-08", 1, 3.45], ["2026-05", 2, 3.65], ["2026-06", 2, 3.8]]);
+  const m = A.carEnergy(log, { units: "metric" });
+  assert.strictEqual(m.unit, "km/kWh");
+  assert.strictEqual(m.efficiency, 5.91);
+  assert.strictEqual(A.carEnergy([], {}), null, "Kia USA: no car log -> null");
+}
+
 console.log("all analytics tests passed");

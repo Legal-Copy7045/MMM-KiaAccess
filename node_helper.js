@@ -334,6 +334,11 @@ module.exports = NodeHelper.create({
       // "Driving times" widget would sit empty until HA supplied it again.
       rangeReach: null,
       trips: [], openTrip: null,
+      // the car's own energy log (vehicle.daily_stats -- EU-style regions,
+      // Canada, US Hyundai), merged across fetches: the car only returns
+      // about a month, this keeps the longer history core/analytics.js
+      // carEnergy() trends over. Stays [] for Kia USA.
+      energyLog: [],
       // moved-while-parked (tow/theft) anchor -- lives on the FRONTEND
       // (MMM-KiaAccess.js's processConditions()), not computed here, but
       // persisted through this per-vehicle cache like everything else so a
@@ -355,6 +360,7 @@ module.exports = NodeHelper.create({
         s.rangeReach = disk.rangeReach || null;
         s.trips = Array.isArray(disk.trips) ? disk.trips : [];
         s.openTrip = disk.openTrip || null;
+        s.energyLog = Array.isArray(disk.energyLog) ? disk.energyLog : [];
         s.lastParked = disk.lastParked || null;
       }
     } catch (e) {
@@ -385,6 +391,7 @@ module.exports = NodeHelper.create({
           sessions: s.sessions, openSession: s.openSession,
           rangeMap: s.rangeMap, rangeReach: s.rangeReach,
           trips: s.trips, openTrip: s.openTrip,
+          energyLog: s.energyLog,
           lastParked: s.lastParked
         }),
         // owner-only -- this file carries the vehicle's raw API dump
@@ -890,6 +897,15 @@ module.exports = NodeHelper.create({
         (tr.closed.cost != null ? " / " + tr.closed.cost : ""));
     }
     if (tripChanged) sessChanged = true; // reuse the "persist + re-render" flag
+
+    // ---- the car's own energy log, where the region reports one ----
+    if (Array.isArray(vehicle.daily_stats) && vehicle.daily_stats.length) {
+      const merged = analytics.mergeEnergyLog(s.energyLog, vehicle.daily_stats);
+      if (JSON.stringify(merged) !== JSON.stringify(s.energyLog)) {
+        s.energyLog = merged;
+        sessChanged = true; // same "persist + recompute analytics" flag
+      }
+    }
 
     // ---- observed-performance analytics (core/analytics.js) ----
     // Recomputed only when a trip or session actually closed/changed --
@@ -1466,8 +1482,10 @@ module.exports = NodeHelper.create({
       }
     }
 
-    // don't fan the full raw API dump (vehicle.data.*) out to retained topics
-    const skip = m.publishRaw === true ? null : /^data\./;
+    // don't fan the full raw API dump (vehicle.data.*) out to retained
+    // topics, nor the car's energy log (a list of up to ~120 records --
+    // hundreds of retained topics; analytics carries its summary)
+    const skip = m.publishRaw === true ? /^daily_stats\./ : /^(data|daily_stats)\./;
     Object.keys(flat).forEach((k) => {
       let v = flat[k];
       if (v === undefined) return;
@@ -1501,7 +1519,9 @@ function buildAnalytics(s, config) {
     observedEfficiency: analytics.observedEfficiency(s.trips, unitsOpt),
     rangeAccuracy: analytics.rangeAccuracy(s.trips, unitsOpt),
     chargingPerformance: analytics.chargingPerformance(s.sessions),
-    drivingPatterns: analytics.drivingPatterns(s.trips, unitsOpt)
+    drivingPatterns: analytics.drivingPatterns(s.trips, unitsOpt),
+    // car-measured kWh where the region reports it (null for Kia USA)
+    carEnergy: analytics.carEnergy(s.energyLog || [], unitsOpt)
   };
 }
 

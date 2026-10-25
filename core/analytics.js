@@ -1,7 +1,9 @@
 /* Real-world range & efficiency analytics -- derived entirely from data
  * MMM-KiaAccess already collects for the US market: trip/session history
  * (core/trips.js, core/sessions.js), GPS, odometer, and outside
- * temperature. Deliberately avoids anything requiring EU-only telemetry.
+ * temperature -- which works for every region. carEnergy() (section 5)
+ * adds the car's own measured energy log where the region reports one
+ * (EU-style regions, Canada, US Hyundai), and is simply null elsewhere.
  *
  * Verified against the actual installed hyundai_kia_connect_api source
  * (v4.31.0) before building this: KiaUvoApiUSA.py never populates
@@ -342,11 +344,129 @@
     };
   }
 
+  // ---- 5. car-reported energy (EU-style regions, Canada, US Hyundai) ----
+  // The car's own energy log (kia_client.py _energy_log(): kWh measured by
+  // the car, split into driving / climate / electronics / battery care,
+  // plus regen and distance) -- per day in Europe, per trip in Canada and
+  // for US Hyundai. Kia USA doesn't report it, so carEnergy() is null there
+  // and the SoC-based figures above stay the only source.
+
+  const ENERGY_LOG_KEEP_DAYS = 400;
+  const CAR_ENERGY_WINDOW_DAYS = 30;
+
+  function dayMs(dateStr) {
+    // "YYYY-MM-DD" as UTC midnight -- matches analytics.py's _day_ms()
+    const t = Date.parse(String(dateStr).slice(0, 10) + "T00:00:00Z");
+    return isFinite(t) ? t : null;
+  }
+
+  /**
+   * Fold a fetch's energy records into the stored log: keyed by `at` (a
+   * newer fetch's copy of the same record wins), oldest first, trimmed to
+   * keepDays before the newest record. The car only returns about a month,
+   * so this is what builds a longer history.
+   */
+  function mergeEnergyLog(stored, incoming, keepDays) {
+    const byAt = {};
+    (stored || []).concat(incoming || []).forEach((r) => {
+      if (r && r.at && dayMs(r.date) != null) byAt[r.at] = r;
+    });
+    const rows = Object.keys(byAt).sort().map((k) => byAt[k]);
+    if (!rows.length) return [];
+    const newest = dayMs(rows[rows.length - 1].date);
+    const cutoff = newest - (keepDays || ENERGY_LOG_KEEP_DAYS) * 864e5;
+    return rows.filter((r) => dayMs(r.date) > cutoff);
+  }
+
+  function sumOf(rows, key) {
+    let total = 0, seen = false;
+    rows.forEach((r) => {
+      const v = r[key];
+      if (v != null && isFinite(v)) { total += v; seen = true; }
+    });
+    return seen ? total : null;
+  }
+
+  /** distance per kWh over records that have both (like with like) */
+  function efficiencyOf(rows, mi) {
+    const both = rows.filter((r) => r.kwh != null && r.kwh > 0 && r.distanceKm != null);
+    const kwh = sumOf(both, "kwh");
+    const km = sumOf(both, "distanceKm");
+    if (!kwh || !km) return null;
+    return { kwh, km, efficiency: round(toDisplay(km, mi) / kwh, 2) };
+  }
+
+  /**
+   * @param {Array} log    mergeEnergyLog() output
+   * @param {object} opts  { units: "imperial"|"metric" }
+   */
+  function carEnergy(log, opts) {
+    opts = opts || {};
+    const mi = opts.units !== "metric";
+    const rows = (log || []).filter((r) => r && dayMs(r.date) != null);
+    if (!rows.length) return null;
+    const newest = dayMs(rows[rows.length - 1].date);
+    const recent = rows.filter((r) => dayMs(r.date) > newest - CAR_ENERGY_WINDOW_DAYS * 864e5);
+
+    const eff = efficiencyOf(recent, mi);
+    const kwh = sumOf(recent, "kwh");
+    const parts = ["drivingKwh", "climateKwh", "electronicsKwh", "batteryCareKwh"];
+    const withParts = recent.filter((r) =>
+      r.kwh != null && r.kwh > 0 && parts.some((k) => r[k] != null));
+    const partBase = sumOf(withParts, "kwh");
+    let breakdown = null;
+    if (partBase) {
+      const pct = (k) => {
+        const v = sumOf(withParts, k);
+        return v == null ? null : round((v / partBase) * 100, 0);
+      };
+      breakdown = {
+        driving: pct("drivingKwh"),
+        climate: pct("climateKwh"),
+        electronics: pct("electronicsKwh"),
+        batteryCare: pct("batteryCareKwh")
+      };
+    }
+    const regen = sumOf(recent, "regenKwh");
+
+    const byMonth = {};
+    rows.forEach((r) => {
+      const key = String(r.date).slice(0, 7);
+      (byMonth[key] || (byMonth[key] = [])).push(r);
+    });
+    const monthlyTrend = Object.keys(byMonth).sort().map((key) => {
+      const e = efficiencyOf(byMonth[key], mi);
+      const days = {};
+      byMonth[key].forEach((r) => { days[r.date] = 1; });
+      return { month: key, days: Object.keys(days).length, efficiency: e ? e.efficiency : null };
+    });
+
+    const days = {};
+    recent.forEach((r) => { days[r.date] = 1; });
+    return {
+      source: "car",
+      unit: mi ? "mi/kWh" : "km/kWh",
+      windowDays: CAR_ENERGY_WINDOW_DAYS,
+      daysReported: Object.keys(days).length,
+      kwh: kwh != null ? round(kwh, 1) : null,
+      distance: eff ? round(toDisplay(eff.km, mi), 1) : null,
+      efficiency: eff ? eff.efficiency : null,
+      whPerDistance: eff ? round((eff.kwh * 1000) / toDisplay(eff.km, mi), 0) : null,
+      whPerDistanceUnit: mi ? "Wh/mi" : "Wh/km",
+      breakdown,
+      regenKwh: regen != null ? round(regen, 1) : null,
+      regenPct: (regen != null && kwh) ? round((regen / kwh) * 100, 0) : null,
+      monthlyTrend
+    };
+  }
+
   return {
     observedEfficiency,
     rangeAccuracy,
     chargingPerformance,
     drivingPatterns,
+    mergeEnergyLog,
+    carEnergy,
     MI_PER_KM
   };
 });

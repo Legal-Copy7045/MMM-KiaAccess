@@ -760,6 +760,48 @@ const { freshHelper, tmpCacheDir } = require("./fresh-node-helper.js");
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ---- onPayload(): the car's own energy log (vehicle.daily_stats -- EU-
+// style regions, Canada, US Hyundai) is merged across fetches, cached to
+// disk, and surfaces as payload.analytics.carEnergy; never fanned out to
+// MQTT topics ----
+{
+  const dir = tmpCacheDir();
+  const helper = freshHelper(dir);
+  const notifications = [];
+  helper.sendSocketNotification = (name, data) => notifications.push({ name, data });
+  const id = helper.identifierFor({ region: "EU", brand: "KIA", username: "u@e.com", vin: "VIN1" });
+  const day = (d, kwh, km) => ({ at: d + "T00:00:00", date: d, kwh, drivingKwh: kwh * 0.8,
+    climateKwh: kwh * 0.2, electronicsKwh: null, batteryCareKwh: null, regenKwh: 1, distanceKm: km });
+  helper.onPayload(id, { units: "metric" }, {
+    vehicle: { VIN: "VIN1", daily_stats: [day("2026-06-01", 10, 60), day("2026-06-02", 10, 70)] }, _meta: {}
+  });
+  helper.onPayload(id, { units: "metric" }, {
+    vehicle: { VIN: "VIN1", daily_stats: [day("2026-06-02", 10, 70), day("2026-06-03", 10, 50)] }, _meta: {}
+  });
+  const s = helper.st(id);
+  assert.deepStrictEqual(s.energyLog.map((r) => r.date), ["2026-06-01", "2026-06-02", "2026-06-03"]);
+  const onDisk = JSON.parse(fs.readFileSync(helper.cacheFile(id), "utf8"));
+  assert.strictEqual(onDisk.energyLog.length, 3, "the merged log is cached across restarts");
+  const car = notifications[notifications.length - 1].data.payload.analytics.carEnergy;
+  assert.strictEqual(car.unit, "km/kWh");
+  assert.strictEqual(car.efficiency, 6, "180 km / 30 kWh");
+  assert.strictEqual(car.breakdown.climate, 20);
+
+  const published = {};
+  helper.mqttClient = () => ({ publish: (topic, payload) => { published[topic] = payload; } });
+  helper.publishMqtt({ mqtt: { enabled: true, url: "mqtt://broker", topicPrefix: "kia/ev" } },
+    { vehicle: { VIN: "", daily_stats: [day("2026-06-01", 10, 60)], ev_battery_percentage: 70 }, _meta: {} });
+  assert.ok(!Object.keys(published).some((t) => t.indexOf("daily_stats") !== -1),
+    "the energy log must not become retained MQTT topics");
+  assert.strictEqual(published["kia/ev/ev_battery_percentage"], "70");
+
+  // Kia USA: no daily_stats -> carEnergy null, nothing breaks
+  const id2 = helper.identifierFor({ region: "USA", brand: "KIA", username: "u@e.com", vin: "VIN2" });
+  helper.onPayload(id2, { units: "imperial" }, { vehicle: { VIN: "VIN2" }, _meta: {} });
+  assert.strictEqual(notifications[notifications.length - 1].data.payload.analytics.carEnergy, null);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // ---- onPayload() -> core/analytics.js: a full trip/charge cycle driven
 // through the real onPayload() must flow rangeKm/outsideTempC into closed
 // trips and come out the other end as real, non-null payload.analytics
