@@ -336,6 +336,13 @@ class KiaAccessSummarySensor(KiaAccessEntity, SensorEntity):
             if key == "data" or isinstance(val, (dict, list)):
                 continue
             out[key] = val
+        # the car's energy log (a list, so skipped above) -- MagicMirror
+        # reading from HA builds its own car-energy analytics from it. The
+        # whole attribute set is unrecorded, so its size doesn't reach the DB.
+        # Newest 40 only: this attribute set goes to every frontend on each
+        # update, and MM merges what it gets into its own longer log.
+        if v.get("daily_stats"):
+            out["daily_stats"] = v["daily_stats"][-40:]
         note = self.coordinator.meta.get("note")
         if note:
             out["note"] = note
@@ -640,7 +647,8 @@ class KiaAccessObservedRangeSensor(KiaAccessEntity, SensorEntity):
     def available(self) -> bool:
         d = self._data()
         return super().available and any(d.get(k) for k in (
-            "observedEfficiency", "rangeAccuracy", "chargingPerformance", "drivingPatterns"
+            "observedEfficiency", "rangeAccuracy", "chargingPerformance", "drivingPatterns",
+            "carEnergy",
         ))
 
     @property
@@ -655,6 +663,7 @@ class KiaAccessObservedRangeSensor(KiaAccessEntity, SensorEntity):
         acc = d.get("rangeAccuracy") or {}
         chg = d.get("chargingPerformance") or {}
         drv = d.get("drivingPatterns") or {}
+        car = d.get("carEnergy") or {}
         return {
             "efficiency_unit": eff.get("unit"),
             "efficiency_overall": eff.get("overall"),
@@ -675,6 +684,18 @@ class KiaAccessObservedRangeSensor(KiaAccessEntity, SensorEntity):
             "driving_trips_per_week": drv.get("tripsPerWeek"),
             "driving_avg_trip_distance": drv.get("avgTripDistance"),
             "driving_avg_speed": drv.get("avgSpeed"),
+            # measured by the car (EU-style regions, Canada, US Hyundai);
+            # None for Kia USA, which doesn't report an energy log
+            "car_efficiency": car.get("efficiency"),
+            "car_efficiency_unit": car.get("unit"),
+            "car_consumption": car.get("whPerDistance"),
+            "car_consumption_unit": car.get("whPerDistanceUnit"),
+            "car_energy_kwh_30d": car.get("kwh"),
+            "car_energy_days_reported": car.get("daysReported"),
+            "car_energy_breakdown_pct": car.get("breakdown"),
+            "car_regen_kwh_30d": car.get("regenKwh"),
+            "car_regen_pct": car.get("regenPct"),
+            "car_efficiency_monthly_trend": car.get("monthlyTrend"),
         }
 
 

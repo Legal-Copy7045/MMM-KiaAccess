@@ -145,7 +145,13 @@ USA, °C 16–30 elsewhere).
     speed-bucketed, plus a monthly trend), how far off Kia's own displayed
     range has actually run, home charging power by SoC band, and a driving
     usage profile — all from your own trip/charge history. Never claims
-    "battery health" (the USA API has no true state-of-health).
+    "battery health" (the USA API has no true state-of-health). Where the
+    car reports its own energy log (Europe and the other EU-style regions,
+    Canada, US Hyundai — not Kia USA), it also carries **car-measured**
+    efficiency (mi/kWh or km/kWh), Wh per mile/km, where the energy went
+    (driving / climate / electronics / battery care), regen, and a monthly
+    trend (`car_*` attributes). That log is kept across fetches, so the
+    trend grows past the month the car itself returns.
   - **`Last charge`** / **`Charge session`** — kWh + cost per session, the live
     one climbing while charging.
   - **`Parked`** — where the car last parked, with map deep-links and distance
@@ -639,7 +645,7 @@ cache when the data actually changed, so a fast rate costs almost nothing.
       "vehicle.last_updated_at",
       "_meta.fetchedAt"
     ],
-    exclude: ["vehicle.data.*", "vehicle.VIN"],
+    exclude: ["vehicle.data.*", "vehicle.daily_stats.*", "vehicle.VIN"],
     order: ["vehicle.ev_*", "vehicle.odometer", "vehicle.*_door_*"],
     labels: {
       "vehicle.ev_battery_percentage": "Battery",
@@ -736,7 +742,7 @@ depends on its brand, region and powertrain):
 | `decimals` | `1` | rounding for numeric formatters |
 | `nullText` | `"—"` | shown for `null` / `undefined` |
 | `include` | `[]` | glob paths to show; empty = all |
-| `exclude` | `["vehicle.data.*", "vehicle.VIN"]` | glob paths to hide |
+| `exclude` | `["vehicle.data.*", "vehicle.daily_stats.*", "vehicle.VIN"]` | glob paths to hide (the car's energy log stays out of the table unless `include` names it) |
 | `hideWhenFalsy` | `[]` | glob paths whose row is dropped when the value is `false` / `0` / `null` / `""` / `"—"` (use for "only show when true / non-zero"). Set to `"*"` to drop **every** empty row — keeps the table tidy before the car's first sync |
 | `order` | `[]` | glob paths shown first, in listed order |
 | `combine` | `{}` | `{ primaryKey: [otherKey, …] }` — fold the other rows onto the primary one as a `"value · value"` suffix (e.g. `{ "vehicle.geocode": ["vehicle.location_last_updated_at"] }` → one `Location: address · 5 min ago` line). The folded keys never render as their own rows; if the primary is also empty the whole row is dropped |
@@ -755,7 +761,7 @@ depends on its brand, region and powertrain):
 | `visuals.location` | `{ enabled:false }` | "N mi from home" + address, optional static `map`, and a `reach:true` "how far can I drive" readout (`reachFactor` / `reachReservePct` / `reachRoundTrip` / `pois`) — see [Location](#location--map) |
 | `visuals.chargeCost` | `{ enabled:false }` | `pricePerKwh` / `currency` / `capacityKwh` power the live "cost this charge" line. `enabled:true` = est-to-target line; `log:true` = charge-session history widget (`logRows` 4, `logMonths` 3, `logRetentionDays` 180). `awayPricePerKwh` (with `location.homeLat/homeLon` set) costs sessions started away from home at a separate rate; `zoneRates` (`[{name,lat,lon,radiusKm,pricePerKwh}]`) gives a per-charger rate checked first; the log marks 🏠 / 📍 and splits the total |
 | `visuals.tripLog` | `{ enabled:false }` | auto-detected drives (odometer delta + SoC drop): distance, **mi/kWh**, and cost per trip + a rolling total (`days` 30, `rows` 4). Uses `chargeCost.pricePerKwh` / `capacityKwh` for the £/kWh maths. HA side: `sensor.<v>_last_trip` + `sensor.<v>_cost_per_mile` |
-| `visuals.analytics` | `{ enabled:false }` | **Observed range & efficiency** — real-world mi/% (or km/%, temperature- and speed-bucketed, plus a monthly trend), how far off Kia's own displayed range has actually run, home charging power by SoC band, and a trips/week usage profile — all derived from your own trip/charge history, never claiming "battery health" (the USA API has no true state-of-health). HA side: `sensor.<v>_observed_range` |
+| `visuals.analytics` | `{ enabled:false }` | **Observed range & efficiency** — real-world mi/% (or km/%, temperature- and speed-bucketed, plus a monthly trend), how far off Kia's own displayed range has actually run, home charging power by SoC band, and a trips/week usage profile — all derived from your own trip/charge history, never claiming "battery health" (the USA API has no true state-of-health). Cars that report their own energy log (EU-style regions, Canada, US Hyundai) also get a **car-measured efficiency** row. HA side: `sensor.<v>_observed_range` |
 | `visuals.drivingTimes` | `{ enabled:false }` | standalone **Driving times** panel — destination, live drive time, `via <roads>`, ETA coloured by traffic delay (`delayStops`), calendar time + arrival battery. `source: "homeassistant"` only; reads `sensor.<v>_range_reach`. `max` 8, `order` "grouped", `zones` (panel-only whitelist / `-exclude`), `showVia`, `showConsumption` |
 | `visuals.batteryDetail` | range + charge rate/current + 4 charge-time estimates | keys shown under the car and removed from the table |
 | `icons` | `{}` | key path → Font Awesome class, overrides the built-in row-icon map |

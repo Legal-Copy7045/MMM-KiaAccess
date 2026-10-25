@@ -14,6 +14,7 @@ The control commands are described by core/commands.json so the HA integration,
 the Lovelace card and this module all agree on names and arguments.
 """
 
+import dataclasses
 import datetime
 import enum
 import hashlib
@@ -239,7 +240,57 @@ def jsonable(value):
     # anything and silently fall back to its default.
     if isinstance(value, enum.Enum):
         return jsonable(value.value)
+    # library dataclasses (month_trip_info, day_trip_info, ...) as plain
+    # dicts, not their repr() -- "DailyDrivingStats(date=datetime..." strings
+    # used to leak into the payload, MQTT and the MM table
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return jsonable(dataclasses.asdict(value))
     return str(value)
+
+
+# the newest records kept per fetch -- EU sends ~30 days, CA / US Hyundai a
+# trip list; analytics' own merged log holds the longer history
+_ENERGY_LOG_MAX = 120
+
+
+def _energy_log(vehicle, imperial):
+    """vehicle.daily_stats (DailyDrivingStats: Wh, distance in its own unit)
+    -> [{at, date, kwh, drivingKwh, climateKwh, electronicsKwh,
+    batteryCareKwh, regenKwh, distanceKm}], oldest first. [] when the
+    region doesn't report it (Kia USA)."""
+    rows = []
+    for d in getattr(vehicle, "daily_stats", None) or []:
+        when = getattr(d, "date", None)
+        if not isinstance(when, datetime.datetime):
+            continue
+
+        def kwh(attr):
+            v = getattr(d, attr, None)
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
+                return None
+            return round(v / 1000.0, 3)
+
+        dist = getattr(d, "distance", None)
+        if isinstance(dist, (int, float)) and not isinstance(dist, bool) and math.isfinite(dist):
+            unit = str(getattr(d, "distance_unit", None) or "").strip().upper()
+            if unit in ("MI", "MILES", "MILE") or (not unit and imperial):
+                dist = dist * 1.609344
+            dist = round(dist, 2)
+        else:
+            dist = None
+        rows.append({
+            "at": when.replace(microsecond=0).isoformat(),
+            "date": when.date().isoformat(),
+            "kwh": kwh("total_consumed"),
+            "drivingKwh": kwh("engine_consumption"),
+            "climateKwh": kwh("climate_consumption"),
+            "electronicsKwh": kwh("onboard_electronics_consumption"),
+            "batteryCareKwh": kwh("battery_care_consumption"),
+            "regenKwh": kwh("regenerated_energy"),
+            "distanceKm": dist,
+        })
+    rows.sort(key=lambda r: r["at"])
+    return rows[-_ENERGY_LOG_MAX:]
 
 
 def _flatten_scalar_seq(val):
@@ -337,6 +388,11 @@ def dump_vehicle(vehicle, region=None):
             else:
                 # no unit = can't tell psi from kPa -- better no reading
                 out[base] = None
+
+    # The car's own energy log (EU-style regions, Canada, US Hyundai): one
+    # record per day (EU) or per trip (CA / US Hyundai), in kWh and km.
+    # Replaces whatever the generic copy above made of the library's list.
+    out["daily_stats"] = _energy_log(vehicle, imperial)
 
     # Domain-range guard: NaN/Infinity/coordinate-range hardening already
     # exists throughout the HA coordinator (_haversine_km, _zone_radius_m,

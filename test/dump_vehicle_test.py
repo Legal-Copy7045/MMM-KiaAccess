@@ -720,4 +720,31 @@ bt = kia_client.dump_vehicle(_Veh(ev_battery_temperature_min=77.0,
                                   _ev_battery_temperature_min_unit="°F"))
 assert approx(bt["ev_battery_temperature_min"], 25.0), bt["ev_battery_temperature_min"]
 
+# --- daily_stats: the car's energy log as clean records (kWh, km), not the
+# library dataclasses' repr() strings; [] when the region has none ---
+import datetime as _dt2  # noqa: E402
+from hyundai_kia_connect_api.Vehicle import DailyDrivingStats  # noqa: E402
+
+ds = kia_client.dump_vehicle(_Veh(daily_stats=[
+    DailyDrivingStats(date=_dt2.datetime(2026, 6, 2, 17, 40), total_consumed=5000,
+                      engine_consumption=4000, climate_consumption=600,
+                      onboard_electronics_consumption=300, battery_care_consumption=100,
+                      regenerated_energy=800, distance=20, distance_unit="mi"),
+    DailyDrivingStats(date=_dt2.datetime(2026, 6, 1), total_consumed=9000, distance=50,
+                      distance_unit="km"),
+    DailyDrivingStats(date=None, total_consumed=1),
+]), "EU")["daily_stats"]
+assert [r["at"] for r in ds] == ["2026-06-01T00:00:00", "2026-06-02T17:40:00"], ds
+assert ds[1] == {"at": "2026-06-02T17:40:00", "date": "2026-06-02", "kwh": 5.0,
+                 "drivingKwh": 4.0, "climateKwh": 0.6, "electronicsKwh": 0.3,
+                 "batteryCareKwh": 0.1, "regenKwh": 0.8, "distanceKm": 32.19}, ds[1]
+assert ds[0]["distanceKm"] == 50 and ds[0]["climateKwh"] is None
+# a missing distance unit on a USA account means miles
+us = kia_client.dump_vehicle(_Veh(daily_stats=[DailyDrivingStats(
+    date=_dt2.datetime(2026, 6, 1), total_consumed=1000, distance=10, distance_unit=None)]), "USA")
+assert us["daily_stats"][0]["distanceKm"] == 16.09
+assert kia_client.dump_vehicle(_Veh())["daily_stats"] == [], "Kia USA: no log"
+# other library dataclasses serialise as dicts, never repr() strings
+assert kia_client.jsonable(DailyDrivingStats(total_consumed=1))["total_consumed"] == 1
+
 print("dump_vehicle tests passed")

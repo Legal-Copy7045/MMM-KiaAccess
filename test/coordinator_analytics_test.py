@@ -34,10 +34,11 @@ class _FakeHass:
 
 
 class _FakeCoordinator:
-    def __init__(self, units, trips, sessions):
+    def __init__(self, units, trips, sessions, energy_log=None):
         self.hass = _FakeHass(units)
         self._trips = trips
         self._sessions = sessions
+        self._energy_log = energy_log or []
 
 
 trips = [
@@ -74,7 +75,39 @@ empty = _FakeCoordinator(IMPERIAL_SYSTEM, [], [])
 a3 = KiaAccessCoordinator.analytics.fget(empty)
 assert a3 == {
     "observedEfficiency": None, "rangeAccuracy": None,
-    "chargingPerformance": None, "drivingPatterns": None,
+    "chargingPerformance": None, "drivingPatterns": None, "carEnergy": None,
 }
+
+# ---- car-reported energy: a fetch's daily_stats records are merged into
+# the stored log, persisted, and surface as analytics' carEnergy ----
+import asyncio  # noqa: E402
+
+_saved = []
+
+
+class _FakeStore:
+    async def async_save(self, data):
+        _saved.append(data)
+
+
+ecoord = _FakeCoordinator(METRIC_SYSTEM, [], [])
+ecoord._open_trip = None
+ecoord._trips_store = _FakeStore()
+ecoord._save_trips_store = lambda: KiaAccessCoordinator._save_trips_store(ecoord)
+ecoord.vehicle = {"daily_stats": [
+    {"at": "2026-06-01T00:00:00", "date": "2026-06-01", "kwh": 10.0, "drivingKwh": 8.0,
+     "climateKwh": 2.0, "electronicsKwh": None, "batteryCareKwh": None, "regenKwh": 1.0,
+     "distanceKm": 60.0},
+]}
+asyncio.run(KiaAccessCoordinator._update_energy_log(ecoord))
+assert len(ecoord._energy_log) == 1 and _saved[-1]["energy"] == ecoord._energy_log
+asyncio.run(KiaAccessCoordinator._update_energy_log(ecoord))
+assert len(_saved) == 1, "an unchanged log isn't re-saved"
+car = KiaAccessCoordinator.analytics.fget(ecoord)["carEnergy"]
+assert car["unit"] == "km/kWh" and car["efficiency"] == 6.0, car
+ecoord.vehicle = {}  # Kia USA: no daily_stats -> nothing written
+asyncio.run(KiaAccessCoordinator._update_energy_log(ecoord))
+assert len(_saved) == 1
+print("-- car energy log merged, persisted, surfaced as carEnergy")
 
 print("all coordinator analytics tests passed")

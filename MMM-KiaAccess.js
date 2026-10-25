@@ -65,7 +65,7 @@ Module.register("MMM-KiaAccess", {
     decimals: 1,
     nullText: "—",
     include: [], // e.g. ["vehicle.ev_battery_percentage", "vehicle.*_door_is_open", "vehicle.odometer"]
-    exclude: ["vehicle.data.*", "vehicle.VIN"], // raw API dump + VIN hidden by default
+    exclude: ["vehicle.data.*", "vehicle.daily_stats.*", "vehicle.VIN"], // raw API dump, energy log + VIN hidden by default
     hideWhenFalsy: [], // paths/globs whose row is dropped when the value is
                        //   false / 0 / null / "" / "—"; use "*" (or [ "*" ]) to
                        //   drop EVERY empty row (tidy while the car hasn't synced)
@@ -907,7 +907,15 @@ Module.register("MMM-KiaAccess", {
     }
     const flat = this.utils.flatten(this.rawPayload);
     this.flatMap = flat;
-    let entries = this.utils.selectEntries(flat, this.config);
+    // the car's energy log is analytics input (up to ~120 records x 9
+    // fields), not table rows -- kept out even when a custom `exclude`
+    // replaces the default, unless `include` asks for it by name
+    const wantsLog = (this.config.include || []).some((p) => String(p).indexOf("daily_stats") !== -1);
+    const tableFlat = wantsLog ? flat : Object.keys(flat).reduce((o, k) => {
+      if (k.indexOf("vehicle.daily_stats.") !== 0) o[k] = flat[k];
+      return o;
+    }, {});
+    let entries = this.utils.selectEntries(tableFlat, this.config);
 
     // anything a widget already shows is dropped from the table so it isn't
     // said twice. battery widget → SoC + the batteryDetail readouts; car
@@ -1683,9 +1691,15 @@ Module.register("MMM-KiaAccess", {
     const acc = a.rangeAccuracy;
     const chg = a.chargingPerformance;
     const drv = a.drivingPatterns;
-    if (!eff && !acc && !chg && !drv) return null;
+    const car = a.carEnergy; // measured by the car -- not reported by Kia USA
+    if (!eff && !acc && !chg && !drv && !car) return null;
 
     const rows = [];
+    if (car && car.efficiency != null) {
+      const climate = car.breakdown && car.breakdown.climate != null
+        ? " · climate " + car.breakdown.climate + "%" : "";
+      rows.push(["Car-measured efficiency", car.efficiency + " " + car.unit + climate]);
+    }
     if (eff && eff.overall != null) {
       rows.push(["Observed efficiency", eff.overall + " " + eff.unit]);
     }

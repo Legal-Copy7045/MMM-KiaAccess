@@ -214,4 +214,108 @@ assert near(dp["avgTripDistance"], (40 + 20) / 2 * 0.621371, 0.5)
 assert near(dp["avgSpeed"], 50 * 0.621371, 1)
 assert dp["windowDays"] == 30
 
+# ---- merge_energy_log() / car_energy(): same fixture and expected numbers
+# as test/analytics.test.js ----
+fx = {
+  "stored": [
+    {
+      "at": "2025-08-01T00:00:00",
+      "date": "2025-08-01",
+      "kwh": 9.0,
+      "drivingKwh": 7.0,
+      "climateKwh": 1.0,
+      "electronicsKwh": 0.5,
+      "batteryCareKwh": 0.5,
+      "regenKwh": 1.0,
+      "distanceKm": 50
+    },
+    {
+      "at": "2026-05-02T00:00:00",
+      "date": "2026-05-02",
+      "kwh": 10.0,
+      "drivingKwh": 8.0,
+      "climateKwh": 1.0,
+      "electronicsKwh": 0.6,
+      "batteryCareKwh": 0.4,
+      "regenKwh": 1.5,
+      "distanceKm": 60
+    },
+    {
+      "at": "2026-05-20T00:00:00",
+      "date": "2026-05-20",
+      "kwh": 12.0,
+      "drivingKwh": 9.0,
+      "climateKwh": 2.0,
+      "electronicsKwh": 0.6,
+      "batteryCareKwh": 0.4,
+      "regenKwh": 2.0,
+      "distanceKm": 70
+    }
+  ],
+  "incoming": [
+    {
+      "at": "2026-05-20T00:00:00",
+      "date": "2026-05-20",
+      "kwh": 12.5,
+      "drivingKwh": 9.5,
+      "climateKwh": 2.0,
+      "electronicsKwh": 0.6,
+      "batteryCareKwh": 0.4,
+      "regenKwh": 2.0,
+      "distanceKm": 72
+    },
+    {
+      "at": "2026-06-01T08:15:00",
+      "date": "2026-06-01",
+      "kwh": 4.0,
+      "drivingKwh": 3.0,
+      "climateKwh": 0.8,
+      "electronicsKwh": 0.2,
+      "batteryCareKwh": None,
+      "regenKwh": 0.5,
+      "distanceKm": 25
+    },
+    {
+      "at": "2026-06-01T17:40:00",
+      "date": "2026-06-01",
+      "kwh": 5.0,
+      "drivingKwh": None,
+      "climateKwh": None,
+      "electronicsKwh": None,
+      "batteryCareKwh": None,
+      "regenKwh": None,
+      "distanceKm": 30
+    },
+    {
+      "at": "2026-06-03T09:00:00",
+      "date": "2026-06-03",
+      "kwh": 3.0,
+      "drivingKwh": 2.5,
+      "climateKwh": 0.3,
+      "electronicsKwh": 0.2,
+      "batteryCareKwh": 0.0,
+      "regenKwh": 0.4,
+      "distanceKm": None
+    }
+  ]
+}
+log = A.merge_energy_log(fx["stored"], fx["incoming"])
+assert [r["at"] for r in log] == [
+    "2025-08-01T00:00:00", "2026-05-02T00:00:00", "2026-05-20T00:00:00",
+    "2026-06-01T08:15:00", "2026-06-01T17:40:00", "2026-06-03T09:00:00",
+]
+assert log[2]["kwh"] == 12.5
+assert len(A.merge_energy_log(log, [], 30)) == 4
+e = A.car_energy(log, {"units": "imperial"})
+assert e["source"] == "car" and e["unit"] == "mi/kWh"
+assert e["daysReported"] == 3 and e["kwh"] == 24.5
+assert e["efficiency"] == 3.67 and e["whPerDistance"] == 272
+assert e["breakdown"] == {"driving": 77, "climate": 16, "electronics": 5, "batteryCare": 2}
+assert e["regenKwh"] == 2.9 and e["regenPct"] == 12
+assert [(x["month"], x["days"], x["efficiency"]) for x in e["monthlyTrend"]] == [
+    ("2025-08", 1, 3.45), ("2026-05", 2, 3.65), ("2026-06", 2, 3.8)]
+m = A.car_energy(log, {"units": "metric"})
+assert m["unit"] == "km/kWh" and m["efficiency"] == 5.91
+assert A.car_energy([], {}) is None
+
 print("all analytics tests passed")

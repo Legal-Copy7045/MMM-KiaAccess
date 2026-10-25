@@ -281,3 +281,110 @@ def driving_patterns(trips, opts=None):
         "avgTripDistance": _round(_to_display(total_km / len(recent), mi), 1),
         "avgSpeed": _round(_to_display(_avg(speeds_kmh), mi), 0) if speeds_kmh else None,
     }
+
+
+# ---- 5. car-reported energy (EU-style regions, Canada, US Hyundai) ------
+# Port of core/analytics.js mergeEnergyLog() / carEnergy() -- see there.
+
+ENERGY_LOG_KEEP_DAYS = 400
+CAR_ENERGY_WINDOW_DAYS = 30
+
+
+def _day_ms(date_str):
+    """"YYYY-MM-DD" as UTC midnight ms -- matches analytics.js dayMs()."""
+    try:
+        d = datetime.strptime(str(date_str)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return d.timestamp() * 1000
+
+
+def merge_energy_log(stored, incoming, keep_days=None):
+    by_at = {}
+    for r in list(stored or []) + list(incoming or []):
+        if r and r.get("at") and _day_ms(r.get("date")) is not None:
+            by_at[r["at"]] = r
+    rows = [by_at[k] for k in sorted(by_at)]
+    if not rows:
+        return []
+    newest = _day_ms(rows[-1]["date"])
+    cutoff = newest - (keep_days or ENERGY_LOG_KEEP_DAYS) * 864e5
+    return [r for r in rows if _day_ms(r["date"]) > cutoff]
+
+
+def _sum_of(rows, key):
+    total, seen = 0.0, False
+    for r in rows:
+        v = r.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+            total += v
+            seen = True
+    return total if seen else None
+
+
+def _efficiency_of(rows, mi):
+    both = [r for r in rows
+            if r.get("kwh") is not None and r["kwh"] > 0 and r.get("distanceKm") is not None]
+    kwh = _sum_of(both, "kwh")
+    km = _sum_of(both, "distanceKm")
+    if not kwh or not km:
+        return None
+    return {"kwh": kwh, "km": km, "efficiency": _round(_to_display(km, mi) / kwh, 2)}
+
+
+def car_energy(log, opts=None):
+    opts = opts or {}
+    mi = opts.get("units") != "metric"
+    rows = [r for r in (log or []) if r and _day_ms(r.get("date")) is not None]
+    if not rows:
+        return None
+    newest = _day_ms(rows[-1]["date"])
+    recent = [r for r in rows if _day_ms(r["date"]) > newest - CAR_ENERGY_WINDOW_DAYS * 864e5]
+
+    eff = _efficiency_of(recent, mi)
+    kwh = _sum_of(recent, "kwh")
+    parts = ("drivingKwh", "climateKwh", "electronicsKwh", "batteryCareKwh")
+    with_parts = [r for r in recent
+                  if r.get("kwh") is not None and r["kwh"] > 0
+                  and any(r.get(k) is not None for k in parts)]
+    part_base = _sum_of(with_parts, "kwh")
+    breakdown = None
+    if part_base:
+        def pct(k):
+            v = _sum_of(with_parts, k)
+            return None if v is None else _round((v / part_base) * 100, 0)
+        breakdown = {
+            "driving": pct("drivingKwh"),
+            "climate": pct("climateKwh"),
+            "electronics": pct("electronicsKwh"),
+            "batteryCare": pct("batteryCareKwh"),
+        }
+    regen = _sum_of(recent, "regenKwh")
+
+    by_month = {}
+    for r in rows:
+        by_month.setdefault(str(r["date"])[:7], []).append(r)
+    monthly_trend = []
+    for key in sorted(by_month):
+        e = _efficiency_of(by_month[key], mi)
+        monthly_trend.append({
+            "month": key,
+            "days": len({r["date"] for r in by_month[key]}),
+            "efficiency": e["efficiency"] if e else None,
+        })
+
+    return {
+        "source": "car",
+        "unit": "mi/kWh" if mi else "km/kWh",
+        "windowDays": CAR_ENERGY_WINDOW_DAYS,
+        "daysReported": len({r["date"] for r in recent}),
+        "kwh": _round(kwh, 1) if kwh is not None else None,
+        "distance": _round(_to_display(eff["km"], mi), 1) if eff else None,
+        "efficiency": eff["efficiency"] if eff else None,
+        "whPerDistance": _round((eff["kwh"] * 1000) / _to_display(eff["km"], mi), 0) if eff else None,
+        "whPerDistanceUnit": "Wh/mi" if mi else "Wh/km",
+        "breakdown": breakdown,
+        "regenKwh": _round(regen, 1) if regen is not None else None,
+        "regenPct": _round((regen / kwh) * 100, 0) if (regen is not None and kwh) else None,
+        "monthlyTrend": monthly_trend,
+    }
