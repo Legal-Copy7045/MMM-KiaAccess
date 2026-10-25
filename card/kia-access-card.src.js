@@ -237,11 +237,19 @@
   // windows -- only implemented for the EU-style API). Omitted region keeps
   // the old behaviour for region-free commands and hides region-limited
   // ones, since they'd only fail for a car we can't place.
-  function actionsGroupsHtml(canPlugIn, region) {
+  //
+  // `flat` (the vehicle's flattened attributes) hides a command whose
+  // `capability` flag the car explicitly reports false (valet mode, window
+  // control); unknown keeps the region rule.
+  function actionsGroupsHtml(canPlugIn, region, flat) {
     var reg = String(region || "").toUpperCase();
     var visible = BUTTON_COMMANDS.filter(function (c) {
       if (canPlugIn === false && c.category === "charge") return false;
       if (c.regions && c.regions.indexOf(reg) === -1) return false;
+      if (c.capability && flat) {
+        var cap = flat["vehicle." + c.capability];
+        if (cap === false || cap === "false" || cap === 0) return false;
+      }
       return true;
     });
     var seen = {};
@@ -1090,7 +1098,7 @@
         this._rangeMapSection(rmInp, hass) +
         "<div class='ka-actions'>" +
         climateHtml(this._clim(), this._tempUnit(), this._climBounds()) +
-        actionsGroupsHtml(state.canPlugIn, this._region) +
+        actionsGroupsHtml(state.canPlugIn, this._region, flat) +
         "</div>" +
         "<table class='ka-table'>" + rows + "</table>" +
         "</div></ha-card><style>" + STYLE + "</style>";

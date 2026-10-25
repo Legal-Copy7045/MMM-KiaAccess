@@ -2039,4 +2039,40 @@ try:
 except vol.Invalid:
     pass
 print("service schema helpers: days / step / time validated up front")
+# _try_login(): the library's login() returns True, an OTPRequest, or (since
+# 4.41; None before) False on failure -- False/None must be an auth error,
+# not fall through as a token-less "success"
+_cf = importlib.import_module(f"{pkg}.config_flow")
+_kc = importlib.import_module(f"{pkg}.kia_client")
+_fake_apiimpl = type(sys)("hyundai_kia_connect_api.ApiImpl")
+_fake_apiimpl.OTPRequest = type("OTPRequest", (), {})
+_fake_const = type(sys)("hyundai_kia_connect_api.const")
+_fake_const.OTP_NOTIFY_TYPE = lambda kind: kind
+_saved_mods = {k: sys.modules.get(k) for k in ("hyundai_kia_connect_api.ApiImpl", "hyundai_kia_connect_api.const")}
+sys.modules["hyundai_kia_connect_api.ApiImpl"] = _fake_apiimpl
+sys.modules["hyundai_kia_connect_api.const"] = _fake_const
+_orig_make_manager = _kc.make_manager
+try:
+    for _ret in (False, None):
+        _kc.make_manager = lambda job, _r=_ret: type("VM", (), {"login": lambda self: _r, "token": None})()
+        _lf = object.__new__(_cf.KiaAccessConfigFlow)
+        _lf._job = {"username": "u", "password": "p"}
+        try:
+            _lf._try_login()
+            raise AssertionError(f"login() -> {_ret!r} must be an auth failure")
+        except _kc.ClientError:
+            pass
+    _kc.make_manager = lambda job: type("VM", (), {"login": lambda self: True, "token": None})()
+    _lf = object.__new__(_cf.KiaAccessConfigFlow)
+    _lf._job = {"username": "u", "password": "p"}
+    _lf._try_login()  # True: no error
+finally:
+    _kc.make_manager = _orig_make_manager
+    for _k, _v in _saved_mods.items():
+        if _v is None:
+            sys.modules.pop(_k, None)
+        else:
+            sys.modules[_k] = _v
+print("config flow: a failed login (False / None) is an auth error, not a token-less success")
+
 print("ha_import_check: ok")

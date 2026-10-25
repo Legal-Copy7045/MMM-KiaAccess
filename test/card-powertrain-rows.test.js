@@ -138,6 +138,11 @@ assert.strictEqual(KiaAccessCard._hidePowertrainRow("odometer", "ICE"), false);
   assert.ok(eu.includes("data-cmd='close_windows'") && eu.includes("data-cmd='vent_windows'"), "EU: window buttons");
   const unknown = KiaAccessCard._actionsGroupsHtml(true);
   assert.ok(!unknown.includes("data-cmd='start_valet_mode'"), "unknown region: region-limited hidden");
+  const noValet = KiaAccessCard._actionsGroupsHtml(true, "EU", { "vehicle.supports_valet_mode": false });
+  assert.ok(!noValet.includes("data-cmd='start_valet_mode'"), "car reports no valet mode");
+  assert.ok(noValet.includes("data-cmd='close_windows'"), "other region-limited commands unaffected");
+  const unknownCap = KiaAccessCard._actionsGroupsHtml(true, "EU", { "vehicle.supports_valet_mode": null });
+  assert.ok(unknownCap.includes("data-cmd='start_valet_mode'"), "unknown capability keeps the button");
 }
 
 // ---- _swapVehicleCtx(): the vehicle selector parks one car's alert
