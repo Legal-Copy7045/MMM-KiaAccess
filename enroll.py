@@ -161,6 +161,9 @@ def main():
             return 1
         vm.verify_otp_and_complete_login(code)
         print("OTP verified.")
+    elif result is False or result is None:
+        print("Login failed — check the username, password and PIN.", file=sys.stderr)
+        return 1
     else:
         print(f"Unexpected login result: {result!r}", file=sys.stderr)
         return 1

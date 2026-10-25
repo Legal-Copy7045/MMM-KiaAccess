@@ -135,6 +135,19 @@ def test_hev_gets_no_charge_limit_numbers():
     print("-- HEV: no charge-limit number entities (no plug)")
 
 
+def test_capability_flags_hide_buttons():
+    """An EU car that reports supports_valet_mode / supports_window_control
+    False gets no such buttons; unknown (None / missing) keeps them."""
+    coordinator = _FakeCoordinator("EV", "EU")
+    coordinator.vehicle.update({"supports_valet_mode": False, "supports_window_control": None})
+    collected = []
+    asyncio.run(button_mod.async_setup_entry(_FakeHass(coordinator), _FakeEntry("e1"), collected.extend))
+    names = {e._attr_name for e in collected}
+    assert "Start valet mode" not in names and "Stop valet mode" not in names, names
+    assert "Close windows" in names, "unknown capability keeps the region rule"
+    print("-- buttons hidden when the car reports the capability false")
+
+
 def test_numeric_booleans():
     """The EV9 reports plugged-in as a connector code (4 while charging):
     any nonzero number is on, 0 off, a non-boolean string unknown."""
@@ -197,4 +210,5 @@ if __name__ == "__main__":
     test_region_specific_entities_start_disabled()
     test_region_limited_buttons_only_where_supported()
     test_numeric_booleans()
+    test_capability_flags_hide_buttons()
     print("all entity gating tests passed")

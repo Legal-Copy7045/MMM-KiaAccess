@@ -698,7 +698,7 @@ depends on its brand, region and powertrain):
 | `vehicle.air_control_is_on` / `defrost_is_on` / `steering_wheel_heater_is_on` | Climate |
 | `vehicle.air_temperature` / `outside_temperature` | Climate set-point / outside temp — always normalised to °C (the Kia US/CA API reports °F); the `temperatureC` formatter and the diagram then show °C or °F per `units` |
 | `vehicle.odometer`, `ev_driving_range`, `total_driving_range`, `next_service_distance` | Distances — always normalised to km (the Kia US/CA API reports miles); `distanceKm` / the HA `distance` device class then show mi or km |
-| `vehicle.tire_pressure_front_left` … `tire_pressure_rear_right` | Tyre pressures — normalised to kPa from the car's own psi / kPa / bar (Europe only for now) |
+| `vehicle.tire_pressure_front_left` … `tire_pressure_rear_right` | Tyre pressures — normalised to kPa from the car's own psi / kPa / bar (Europe and US Hyundai so far) |
 | `vehicle.ev_estimated_fast_charge_duration` / `_station_` / `_portable_` | Minutes to target on a DC rapid / AC / portable charger |
 | `vehicle.ev_charge_port_door_is_open` / `engine_is_running` / `dtc_count` | Charge-port door / engine (or EV "ready") / active fault codes |
 | `vehicle.tire_pressure_*_warning_is_on` | Tyre pressure warnings |

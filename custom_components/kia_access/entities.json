@@ -33,9 +33,9 @@
     { "key": "ev_off_peak_end_time", "domain": "sensor", "name": "Off-peak end", "icon": "mdi:clock-time-six-outline", "category": "diagnostic", "enabled_default": false },
     { "key": "ev_v2l_discharge_limit", "domain": "sensor", "name": "V2L discharge limit", "unit": "%", "icon": "mdi:power-plug-outline", "category": "diagnostic", "enabled_default": false },
     { "key": "dtc_count", "domain": "sensor", "name": "Fault codes", "icon": "mdi:car-wrench", "state_class": "measurement", "category": "diagnostic" },
-    { "key": "total_power_consumed", "domain": "sensor", "name": "Energy used", "device_class": "energy", "unit": "Wh", "state_class": "total", "category": "diagnostic", "enabled_default": false },
-    { "key": "total_power_regenerated", "domain": "sensor", "name": "Energy regenerated", "device_class": "energy", "unit": "Wh", "state_class": "total", "category": "diagnostic", "enabled_default": false },
-    { "key": "power_consumption_30d", "domain": "sensor", "name": "Consumption (30 days)", "unit": "Wh/km", "icon": "mdi:lightning-bolt", "state_class": "measurement", "category": "diagnostic", "enabled_default": false },
+    { "key": "total_power_consumed", "domain": "sensor", "name": "Energy used (90 days)", "device_class": "energy", "unit": "Wh", "state_class": "total", "category": "diagnostic", "enabled_default": false },
+    { "key": "total_power_regenerated", "domain": "sensor", "name": "Energy regenerated (90 days)", "device_class": "energy", "unit": "Wh", "state_class": "total", "category": "diagnostic", "enabled_default": false },
+    { "key": "power_consumption_30d", "domain": "sensor", "name": "Consumption (30-day average)", "unit": "Wh/km", "icon": "mdi:lightning-bolt", "state_class": "measurement", "category": "diagnostic", "enabled_default": false },
 
     { "key": "ev_battery_is_charging", "domain": "binary_sensor", "name": "Charging", "device_class": "battery_charging" },
     { "key": "ev_battery_is_plugged_in", "domain": "binary_sensor", "name": "Plugged in", "device_class": "plug" },

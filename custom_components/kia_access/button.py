@@ -21,7 +21,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import kia_client
 from .const import COMMANDS, DOMAIN
 from .entity import KiaAccessEntity
-from .vehicle_state import can_plug_in_for
+from .vehicle_state import can_plug_in_for, to_bool
 
 
 async def async_setup_entry(
@@ -50,6 +50,9 @@ async def async_setup_entry(
             # region-limited commands (valet mode, windows) only where the
             # library implements them -- elsewhere they could only fail
             and kia_client.command_allowed(spec, region)
+            # ...and not when the car itself reports it can't (valet mode /
+            # window control) -- unknown keeps the region rule
+            and to_bool(coordinator.vehicle.get(spec.get("capability"))) is not False
         ]
     )
 

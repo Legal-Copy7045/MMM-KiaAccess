@@ -525,8 +525,13 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         vm = kia_client.make_manager(self._job)
         res = vm.login()
         self._vm = vm
-        if res is True or not isinstance(res, OTPRequest):
+        if res is True:
             return kia_client.token_dict(vm)
+        if not isinstance(res, OTPRequest):
+            # hyundai_kia_connect_api returns False (None before 4.41) when
+            # the login neither succeeded nor asked for a code -- that used
+            # to fall through here as a "success" with no token
+            raise kia_client.ClientError("Kia login failed")
 
         kind = "SMS" if getattr(res, "has_sms", False) else "EMAIL"
         self._otp_dest = getattr(res, "sms", "") or getattr(res, "email", "")
