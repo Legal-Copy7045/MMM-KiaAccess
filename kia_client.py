@@ -181,6 +181,10 @@ REGION_INT = {
     "IN": 6, "INDIA": 6,
     "NZ": 7,
     "BR": 8, "BRAZIL": 8,
+    # Europe's newer CCI / GSPA platform (the "Kia" / "Hyundai" OneApp;
+    # kia_uvo calls it "Europe (Beta)"). Not Genesis yet -- the library
+    # refuses Genesis here with a clear error.
+    "EU-CCI": 9, "EU_CCI": 9, "EUCCI": 9,
 }
 BRAND_INT = {"KIA": 1, "HYUNDAI": 2, "GENESIS": 3}
 

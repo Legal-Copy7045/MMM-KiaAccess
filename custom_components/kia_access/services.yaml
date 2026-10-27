@@ -281,7 +281,7 @@ send_to_car:
 
 start_valet_mode:
   name: "Start valet mode"
-  description: "Start valet mode — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Start valet mode — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -293,7 +293,7 @@ start_valet_mode:
 
 stop_valet_mode:
   name: "Stop valet mode"
-  description: "Stop valet mode — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Stop valet mode — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -305,7 +305,7 @@ stop_valet_mode:
 
 close_windows:
   name: "Close windows"
-  description: "Close windows — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Close windows — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -317,7 +317,7 @@ close_windows:
 
 vent_windows:
   name: "Vent windows"
-  description: "Vent windows — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Vent windows — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -329,7 +329,7 @@ vent_windows:
 
 set_windows:
   name: "Set windows"
-  description: "Set windows — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Set windows — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -381,7 +381,7 @@ set_windows:
 
 set_charging_current:
   name: "Set AC charging current"
-  description: "Set AC charging current — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Set AC charging current — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -403,7 +403,7 @@ set_charging_current:
 
 set_v2l_limit:
   name: "Set V2L discharge limit"
-  description: "Set V2L discharge limit — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Set V2L discharge limit — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -424,7 +424,7 @@ set_v2l_limit:
 
 schedule_charging_and_climate:
   name: "Set charging & climate schedule"
-  description: "Set charging & climate schedule — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Set charging & climate schedule — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account
@@ -524,7 +524,7 @@ schedule_charging_and_climate:
 
 set_off_peak_charging:
   name: "Set off-peak charging"
-  description: "Set off-peak charging — Kia Access (EU / AU / NZ / IN / CN / BR vehicles only)"
+  description: "Set off-peak charging — Kia Access (EU / EU-CCI / AU / NZ / IN / CN / BR vehicles only)"
   fields:
     entry_id:
       name: Account

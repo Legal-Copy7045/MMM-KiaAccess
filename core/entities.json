@@ -71,6 +71,10 @@
     { "key": "ev_charge_port_door_is_open", "domain": "binary_sensor", "name": "Charge port door", "device_class": "door", "enabled_default": false },
     { "key": "engine_is_running", "domain": "binary_sensor", "name": "Engine running", "device_class": "running" },
     { "key": "oil_level_warning_is_on", "domain": "binary_sensor", "name": "Oil level low", "device_class": "problem", "category": "diagnostic", "enabled_default": false },
-    { "key": "ev_v2l_status", "domain": "binary_sensor", "name": "V2L active", "device_class": "running", "enabled_default": false }
+    { "key": "ev_v2l_status", "domain": "binary_sensor", "name": "V2L active", "device_class": "running", "enabled_default": false },
+    { "key": "hazard_lights_on", "domain": "binary_sensor", "name": "Hazard lights", "device_class": "light", "category": "diagnostic", "enabled_default": false },
+    { "key": "windshield_front_heater_is_on", "domain": "binary_sensor", "name": "Windscreen heater", "device_class": "running", "category": "diagnostic", "enabled_default": false },
+    { "key": "air_cleaning_is_on", "domain": "binary_sensor", "name": "Air cleaning", "device_class": "running", "category": "diagnostic", "enabled_default": false },
+    { "key": "auto_cut_battery_prewarning_on", "domain": "binary_sensor", "name": "12V auto-cut pre-warning", "device_class": "problem", "category": "diagnostic", "enabled_default": false }
   ]
 }

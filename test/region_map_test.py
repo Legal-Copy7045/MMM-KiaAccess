@@ -14,6 +14,7 @@ from hyundai_kia_connect_api.const import REGIONS  # noqa: E402
 expected = {
     "EU": "Europe", "CA": "Canada", "USA": "USA", "CN": "China",
     "AU": "Australia", "IN": "India", "NZ": "New Zealand", "BR": "Brazil",
+    "EU-CCI": "Europe (CCI/GSPA)",
 }
 for code, lib_name in expected.items():
     num = kia_client.REGION_INT[code]
@@ -21,7 +22,8 @@ for code, lib_name in expected.items():
 for alias, code in (("EUROPE", "EU"), ("INDIA", "IN"), ("BRAZIL", "BR"), ("US", "USA")):
     assert kia_client.REGION_INT[alias] == kia_client.REGION_INT[code], alias
 
-spec = {"regions": ["EU", "AU", "NZ", "IN", "CN", "BR"]}
+spec = {"regions": ["EU", "EU-CCI", "AU", "NZ", "IN", "CN", "BR"]}
+assert kia_client.command_allowed(spec, "EU-CCI") and kia_client.command_allowed(spec, "eu_cci")
 assert kia_client.command_allowed(spec, "EU")
 assert kia_client.command_allowed(spec, "europe"), "aliases count"
 assert not kia_client.command_allowed(spec, "USA")

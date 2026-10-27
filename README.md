@@ -89,7 +89,7 @@ time-boxed and falls back to the cache.
 ## Supported vehicles
 
 - **Brands** — Kia (Connect / UVO), Hyundai (Bluelink), Genesis
-- **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil
+- **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil. Europe has two: `EU`, and `EU-CCI` for the newer platform behind the current Kia / Hyundai app sign-in (try it if your car isn't found under `EU`; not Genesis yet)
 - **Powertrains** — EV, PHEV, HEV, ICE. A gas-only vehicle doesn't get EV-only
   diagram parts or the "EV battery low" alert. Anything that means "has a
   plug" — the "home and not plugged in" alert, charging buttons,
@@ -437,7 +437,7 @@ Then add to `~/MagicMirror/config/config.js` and restart MagicMirror:
     password: "••••••••",
     pin: "1234",
     brand: "KIA",            // KIA | HYUNDAI | GENESIS
-    region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
+    region: "USA",           // USA | CA | EU | EU-CCI | AU | CN | IN | NZ | BR
     visuals: { enabled: true }
     // include / labels / formatters / notifications / mqtt — see Configuration
   }
@@ -595,7 +595,7 @@ cache when the data actually changed, so a fast rate costs almost nothing.
     password: "••••••••",
     pin: "1234",
     brand: "KIA",            // KIA | HYUNDAI | GENESIS
-    region: "USA",           // USA | CA | EU | AU | CN | IN | NZ | BR
+    region: "USA",           // USA | CA | EU | EU-CCI | AU | CN | IN | NZ | BR
     vin: "",                 // blank = fine for a single-vehicle account; required if you have more than one
 
     // --- multiple cars on one account (optional) ---

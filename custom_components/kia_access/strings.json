@@ -11,6 +11,9 @@
           "region": "Region",
           "brand": "Brand",
           "geocode": "Reverse-geocode the parked location"
+        },
+        "data_description": {
+          "region": "EU-CCI is Europe's newer platform (the current Kia / Hyundai app sign-in) — pick it if your car isn't found under EU. Not available for Genesis yet."
         }
       },
       "otp": {
