@@ -105,7 +105,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-REGIONS = ["USA", "CA", "EU", "AU", "NZ", "IN", "BR", "CN"]
+REGIONS = ["USA", "CA", "EU", "EU-CCI", "AU", "NZ", "IN", "BR", "CN"]
 BRANDS = ["KIA", "HYUNDAI", "GENESIS"]
 
 # The options form's field groups (was one flat 22+-field wall in a single

@@ -17,7 +17,7 @@ Module.register("MMM-KiaAccess", {
     password: "",
     pin: "",
     brand: "KIA", // "KIA" | "HYUNDAI" | "GENESIS"
-    region: "USA", // "USA" | "CA" | "EU" | "AU" | "CN" | "IN" | "NZ" | "BR"
+    region: "USA", // "USA" | "CA" | "EU" | "EU-CCI" | "AU" | "CN" | "IN" | "NZ" | "BR"
     vin: "", // optional; first vehicle on the account is used when blank
 
     // Multiple cars on one account, shown by ONE module instance that
