@@ -8,6 +8,7 @@ number / switch / select entities and are folded in on every start.
 from __future__ import annotations
 
 from homeassistant.components.climate import (
+    ATTR_HVAC_MODE,
     ClimateEntity,
     ClimateEntityFeature,
     HVACMode,
@@ -109,7 +110,19 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
 
     async def async_set_temperature(self, **kwargs) -> None:
         temp = kwargs.get(ATTR_TEMPERATURE)
+        # climate.set_temperature can carry an hvac_mode: "off" with a
+        # temperature must not start the car's climate -- remember the
+        # temperature for next time and stop instead
+        if kwargs.get(ATTR_HVAC_MODE) == HVACMode.OFF:
+            if temp is not None:
+                await self.coordinator.async_set_pref(
+                    "last_temp_c", round(self._to_celsius(float(temp)), 1)
+                )
+            await self.coordinator.async_run_command("stop_climate", context=self._ctx())
+            return
         if temp is None:
+            if kwargs.get(ATTR_HVAC_MODE) is not None:
+                await self.async_set_hvac_mode(kwargs[ATTR_HVAC_MODE])
             return
         await self._start(self._to_celsius(float(temp)))
 

@@ -1435,7 +1435,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             if fetch_err is None:
                 try:
                     vehicle = account_poll.select_own_vehicle(
-                        result.get("vehicles") or [], self.entry.data.get(CONF_VIN, "")
+                        result.get("vehicles") or [], self.entry.data.get(CONF_VIN, ""),
+                        (result.get("meta") or {}).get("vehicleErrors"),
                     )
                 except kia_client.ClientError as err:
                     fetch_err = err

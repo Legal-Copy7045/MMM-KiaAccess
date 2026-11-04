@@ -16,7 +16,7 @@
     "hyundai_kia_connect_api"
   ],
   "requirements": [
-    "hyundai_kia_connect_api==4.41.4"
+    "hyundai_kia_connect_api==4.48.0"
   ],
-  "version": "2.117.0"
+  "version": "2.118.0"
 }

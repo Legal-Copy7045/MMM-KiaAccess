@@ -2074,5 +2074,15 @@ finally:
         else:
             sys.modules[_k] = _v
 print("config flow: a failed login (False / None) is an auth error, not a token-less success")
+# EU / EU-CCI sign-in failure with a password over 20 characters gets the
+# "try the first 20" hint; everything else the plain auth error
+_aek = _cf._auth_error_key
+assert _aek({"region": "EU", "password": "x" * 21}) == "auth_password_long"
+assert _aek({"region": "EU-CCI", "password": "x" * 25}) == "auth_password_long"
+assert _aek({"region": "EU", "password": "x" * 20}) == "auth"
+assert _aek({"region": "USA", "password": "x" * 30}) == "auth"
+_strings = json.load(open(os.path.join(ROOT, "custom_components/kia_access/strings.json"), encoding="utf-8"))
+assert "auth_password_long" in _strings["config"]["error"]
+print("config flow: long EU passwords get the 20-character hint")
 
 print("ha_import_check: ok")

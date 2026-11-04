@@ -89,7 +89,7 @@ time-boxed and falls back to the cache.
 ## Supported vehicles
 
 - **Brands** — Kia (Connect / UVO), Hyundai (Bluelink), Genesis
-- **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil. Europe has two: `EU`, and `EU-CCI` for the newer platform behind the current Kia / Hyundai app sign-in (try it if your car isn't found under `EU`; not Genesis yet)
+- **Regions** — USA, Canada, Europe, Australia, India, China, New Zealand, Brazil. Europe has two: `EU`, and `EU-CCI` for the newer platform behind the current Kia / Hyundai app sign-in (try it if your car isn't found under `EU`)
 - **Powertrains** — EV, PHEV, HEV, ICE. A gas-only vehicle doesn't get EV-only
   diagram parts or the "EV battery low" alert. Anything that means "has a
   plug" — the "home and not plugged in" alert, charging buttons,

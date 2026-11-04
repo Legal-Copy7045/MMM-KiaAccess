@@ -182,9 +182,9 @@ REGION_INT = {
     "IN": 6, "INDIA": 6,
     "NZ": 7,
     "BR": 8, "BRAZIL": 8,
-    # Europe's newer CCI / GSPA platform (the "Kia" / "Hyundai" OneApp;
-    # kia_uvo calls it "Europe (Beta)"). Not Genesis yet -- the library
-    # refuses Genesis here with a clear error.
+    # Europe's newer CCI / GSPA platform (the Kia / Hyundai / Genesis
+    # OneApp sign-in; kia_uvo calls it "Europe (Beta)"). Genesis since
+    # hyundai_kia_connect_api 4.48.
     "EU-CCI": 9, "EU_CCI": 9, "EUCCI": 9,
 }
 BRAND_INT = {"KIA": 1, "HYUNDAI": 2, "GENESIS": 3}
@@ -309,6 +309,19 @@ def _flatten_scalar_seq(val):
 _IMPERIAL_REGIONS = {"USA", "US"}
 
 
+# hyundai_kia_connect_api 4.48 moved these flat flags into vehicle.supports
+# (a VehicleSupports dataclass); the old names remain as properties that
+# raise a DeprecationWarning on every read. dump_vehicle() skips them in its
+# generic copy and rebuilds the same keys from vehicle.supports, so every
+# consumer (commands.json `capability`, the card, MQTT) keeps reading
+# supports_valet_mode etc. unchanged.
+_SUPPORTS_ALIASES = {
+    "supports_window_control": "window_control",
+    "supports_valet_mode": "valet_mode",
+    "supports_svm": "svm",
+}
+
+
 def dump_vehicle(vehicle, region=None):
     """Every readable public attribute + property off the Vehicle object.
 
@@ -316,8 +329,12 @@ def dump_vehicle(vehicle, region=None):
     without its unit -- see the normalisation block below.
     """
     out = {}
+    supports = getattr(vehicle, "supports", None)
     for attr in dir(vehicle):
         if attr.startswith("_"):
+            continue
+        if supports is not None and attr in _SUPPORTS_ALIASES:
+            out[attr] = getattr(supports, _SUPPORTS_ALIASES[attr], None)
             continue
         try:
             val = getattr(vehicle, attr)
@@ -397,6 +414,18 @@ def dump_vehicle(vehicle, region=None):
     # record per day (EU) or per trip (CA / US Hyundai), in kWh and km.
     # Replaces whatever the generic copy above made of the library's list.
     out["daily_stats"] = _energy_log(vehicle, imperial)
+
+    # EU-CCI charge-complete alarm: the library reports four preset flags
+    # (exactly one set, like a radio button); expose the active one
+    for flag, label in (("ev_charge_complete_alarm_before_10min", "10 min before"),
+                        ("ev_charge_complete_alarm_before_20min", "20 min before"),
+                        ("ev_charge_complete_alarm_before_30min", "30 min before"),
+                        ("ev_charge_complete_alarm_off", "off")):
+        if out.get(flag) is True:
+            out["ev_charge_complete_alarm"] = label
+            break
+    else:
+        out["ev_charge_complete_alarm"] = None
 
     # Domain-range guard: NaN/Infinity/coordinate-range hardening already
     # exists throughout the HA coordinator (_haversine_km, _zone_radius_m,
@@ -576,44 +605,67 @@ def _note_auth_failure(job, exc):
 
 
 def _refresh_cached_state(vm, job):
-    """vm.update_all_vehicles_with_cached_state(), behind the same auth-
-    failure circuit breaker connect() applies to check_and_refresh_token().
+    """Read Kia's cached state for the job's vehicle(s) -- all of them for an
+    allVehicles / no-VIN job, just the one for a VIN job -- behind the same
+    auth-failure circuit breaker connect() applies to check_and_refresh_token().
 
-    That call is where hyundai_kia_connect_api's _retry_on_auth_error wrapper
-    re-logs-in when the server rejects a session -- and it turns ANY failure
-    of that re-login (including an outright crash, e.g. upstream issue
-    Hyundai-Kia-Connect/hyundai_kia_connect_api#1313, "'int' object has no
-    attribute 'get'") into AuthenticationError("Re-login failed: ...").
-    connect() had already succeeded by then (the local token was fine), so
-    that failure used to bypass the breaker entirely: every poll re-tried the
-    failing login on the normal schedule, the exact pattern that gets an
-    account rate-limited or locked out.
+    Per vehicle, not vm.update_all_vehicles_with_cached_state(): that one
+    stops at the first vehicle that raises, so one car the backend no longer
+    serves (sold but still on the account, resCode 5031) used to fail the
+    fetch for every car on it. Now a vehicle-scoped failure (APIError, or an
+    AuthenticationError on that car's own call) is returned for just that
+    vehicle -- {vehicle key: message} -- and only raised when EVERY targeted
+    vehicle failed, which is the old behaviour for a single-car account. A
+    rate limit stays account-wide and raises at once.
 
-    Only AuthenticationError counts -- a timeout or bad payload is not a
-    rejected login and propagates untouched. An OTP-required response is not
-    a rejection either: it maps to OtpRequired exactly as in connect().
-    Success clears the failure history, which is why connect() no longer
-    does: only a completed API call proves the login is actually healthy."""
+    The update call is where hyundai_kia_connect_api's _retry_on_auth_error
+    wrapper re-logs-in when the server rejects a session -- and it turns ANY
+    failure of that re-login (including an outright crash, e.g. upstream
+    issue Hyundai-Kia-Connect/hyundai_kia_connect_api#1313) into
+    AuthenticationError("Re-login failed: ..."). connect() had already
+    succeeded by then, so that failure used to bypass the breaker entirely:
+    every poll re-tried the failing login on the normal schedule, the exact
+    pattern that gets an account rate-limited or locked out. Only
+    AuthenticationError counts -- a timeout or bad payload is not a rejected
+    login. An OTP-required response is not a rejection either: it maps to
+    OtpRequired exactly as in connect(). Success clears the failure history,
+    which is why connect() no longer does: only a completed API call proves
+    the login is actually healthy."""
+    targets = _select_vehicles(vm, job.get("vin", ""))  # all of them when no VIN
     try:
         from hyundai_kia_connect_api.exceptions import (
+            APIError,
             AuthenticationError,
             AuthenticationOTPRequired,
+            RateLimitingError,
         )
     except Exception:  # library stubbed/absent: nothing to classify against
-        vm.update_all_vehicles_with_cached_state()
-        return
-    try:
-        vm.update_all_vehicles_with_cached_state()
-    except AuthenticationOTPRequired as exc:
-        raise OtpRequired(ENROLL_HINT) from exc
-    except AuthenticationError as exc:
-        cooldown = _note_auth_failure(job, exc)
-        if cooldown is not None:
-            raise cooldown from exc
-        raise
+        for v in targets:
+            vm.update_vehicle_with_cached_state(v.id)
+        return {}
+
+    failed = {}
+    first_exc = None
+    for v in targets:
+        try:
+            vm.update_vehicle_with_cached_state(v.id)
+        except AuthenticationOTPRequired as exc:
+            raise OtpRequired(ENROLL_HINT) from exc
+        except RateLimitingError:
+            raise
+        except (AuthenticationError, APIError) as exc:
+            failed[_vehicle_key(v)] = f"{type(exc).__name__}: {exc}"
+            first_exc = first_exc or exc
+    if targets and len(failed) == len(targets):
+        if isinstance(first_exc, AuthenticationError):
+            cooldown = _note_auth_failure(job, first_exc)
+            if cooldown is not None:
+                raise cooldown from first_exc
+        raise first_exc
     path = _auth_state_file(job)
     if _load_auth_state(path):  # only touch disk when there's something to clear
         _save_auth_state(path, {})
+    return failed
 
 
 def connect(job, token_file=None):
@@ -786,14 +838,13 @@ def fetch(job, token_file=None):
         wake_vin = str(job.get("wakeVin") or "")
 
         def _do_refresh():
-            try:
-                if wake_vin:
-                    for v in _select_vehicles(vm, wake_vin):
-                        vm.force_refresh_vehicle_state(v.id)
-                else:
-                    vm.force_refresh_all_vehicles_states()
-            except Exception as exc:
-                err["e"] = exc
+            # one car at a time (force_refresh_all_vehicles_states() stops at
+            # the first failing car): the others still wake
+            for v in _select_vehicles(vm, wake_vin):  # all of them when no wakeVin
+                try:
+                    vm.force_refresh_vehicle_state(v.id)
+                except Exception as exc:  # noqa: BLE001
+                    err.setdefault("e", exc)
 
         th = threading.Thread(target=_do_refresh, daemon=True)
         th.start()
@@ -815,7 +866,7 @@ def fetch(job, token_file=None):
             )
         elif "e" in err:
             meta_note = f"live wake-up failed: {err['e']}"
-    _refresh_cached_state(vm, job)
+    failed = _refresh_cached_state(vm, job)
 
     selected = _select_vehicles(vm, job.get("vin", ""))
     if not selected:
@@ -840,9 +891,14 @@ def fetch(job, token_file=None):
             "config to pick one (reads need an explicit target, same as "
             "control commands)"
         )
-    vehicles = [dump_vehicle(v, job.get("region", "USA")) for v in selected]
+    # a vehicle whose own refresh failed is left out (its data is unknown)
+    # and named in meta.vehicleErrors, so its consumer fails just that one
+    vehicles = [dump_vehicle(v, job.get("region", "USA"))
+                for v in selected if _vehicle_key(v) not in failed]
 
     meta = {}
+    if failed:
+        meta["vehicleErrors"] = failed
     if meta_note:
         meta["note"] = meta_note
     if enrolled_at:
