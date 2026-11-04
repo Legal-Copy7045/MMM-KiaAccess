@@ -106,6 +106,20 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 REGIONS = ["USA", "CA", "EU", "EU-CCI", "AU", "NZ", "IN", "BR", "CN"]
+
+# Some European accounts only hold the first 20 password characters (the
+# app truncates longer ones when saving -- hyundai_kia_connect_api #1979),
+# so a failed EU sign-in with a longer password says to try those 20.
+_EU_PASSWORD_LIMIT = 20
+
+
+def _auth_error_key(job: dict) -> str:
+    if (
+        str(job.get(CONF_REGION, "")).upper() in ("EU", "EU-CCI")
+        and len(job.get("password") or "") > _EU_PASSWORD_LIMIT
+    ):
+        return "auth_password_long"
+    return "auth"
 BRANDS = ["KIA", "HYUNDAI", "GENESIS"]
 
 # The options form's field groups (was one flat 22+-field wall in a single
@@ -328,7 +342,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # no exc_info: the traceback can run through library frames that
                 # hold the auth request — a one-line reason is enough here
                 _LOGGER.debug("Kia reauth failed: %s", type(err).__name__)
-                errors["base"] = "auth"
+                errors["base"] = _auth_error_key(self._job)
             else:
                 return self._finish(result)
 
@@ -367,7 +381,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_otp()
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Kia reconfigure failed: %s", type(err).__name__)
-                errors["base"] = "auth"
+                errors["base"] = _auth_error_key(self._job)
             else:
                 return self._finish(result)
 
@@ -399,7 +413,7 @@ class KiaAccessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_otp()
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Kia login failed: %s", type(err).__name__)
-                errors["base"] = "auth"
+                errors["base"] = _auth_error_key(self._job)
             else:
                 return await self._after_login(result)
 

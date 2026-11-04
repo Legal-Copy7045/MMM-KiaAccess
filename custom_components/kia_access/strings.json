@@ -13,7 +13,7 @@
           "geocode": "Reverse-geocode the parked location"
         },
         "data_description": {
-          "region": "EU-CCI is Europe's newer platform (the current Kia / Hyundai app sign-in) — pick it if your car isn't found under EU. Not available for Genesis yet."
+          "region": "EU-CCI is Europe's newer platform (the current Kia / Hyundai / Genesis app sign-in) — pick it if your car isn't found under EU."
         }
       },
       "otp": {
@@ -49,7 +49,8 @@
     },
     "error": {
       "auth": "Could not sign in — check the email, password, PIN and region.",
-      "otp": "That code was not accepted. Try again."
+      "otp": "That code was not accepted. Try again.",
+      "auth_password_long": "Could not sign in. Your password is longer than 20 characters — some European Kia / Hyundai / Genesis accounts only accept the first 20 (the app cuts longer passwords when saving them). Try just the first 20 characters."
     },
     "abort": {
       "already_configured": "This account is already set up.",

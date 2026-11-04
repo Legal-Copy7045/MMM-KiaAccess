@@ -14,6 +14,7 @@ class _Veh:
     """Stand-in for hyundai_kia_connect_api.Vehicle — only what dump_vehicle reads."""
 
     data = {}
+    id = "V0"  # the per-vehicle library calls take it
 
     def __init__(self, **kw):
         for k, v in kw.items():
@@ -118,10 +119,10 @@ class _VM:
     def __init__(self):
         self.woke = False
 
-    def force_refresh_all_vehicles_states(self):
+    def force_refresh_vehicle_state(self, vid):
         self.woke = True
 
-    def update_all_vehicles_with_cached_state(self):
+    def update_vehicle_with_cached_state(self, vid):
         pass
 
 
@@ -130,7 +131,7 @@ def _run_fetch(job):
     orig_connect = kia_client.connect
     orig_select = kia_client._select_vehicles
     kia_client.connect = lambda *a, **k: (vm, None)
-    kia_client._select_vehicles = lambda *a, **k: [_Veh(last_updated_at="x")]
+    kia_client._select_vehicles = lambda *a, **k: [_Veh(id="V1", last_updated_at="x")]
     try:
         kia_client.fetch(job)
     finally:
@@ -206,11 +207,12 @@ class _SlowVM:
 
     def __init__(self):
         self.cached_state_read = False
+        self.vehicles = {"V1": _Veh(id="V1")}
 
-    def force_refresh_all_vehicles_states(self):
+    def force_refresh_vehicle_state(self, vid):
         time.sleep(0.3)  # still "running" well past the 0.05s timeout below
 
-    def update_all_vehicles_with_cached_state(self):
+    def update_vehicle_with_cached_state(self, vid):
         # must never be called while the background thread above is still alive
         self.cached_state_read = True
 
@@ -278,8 +280,8 @@ assert kia_client._vehicle_key_dict({"VIN": "REALVIN2", "id": "vehicle-id-000"})
 def _run_fetch_real_select(job, vehicles):
     vm = _VMWithVehicles(vehicles)
     vm.token = None
-    vm.force_refresh_all_vehicles_states = lambda: None
-    vm.update_all_vehicles_with_cached_state = lambda: None
+    vm.force_refresh_vehicle_state = lambda vid: None
+    vm.update_vehicle_with_cached_state = lambda vid: None
     orig_connect = kia_client.connect
     kia_client.connect = lambda *a, **k: (vm, None)
     try:
@@ -333,7 +335,7 @@ class _CmdVM:
     def __init__(self, vehicles):
         self._vehicles = {v.VIN: v for v in vehicles}
 
-    def update_all_vehicles_with_cached_state(self):
+    def update_vehicle_with_cached_state(self, vid):
         pass
 
     @property
@@ -693,9 +695,6 @@ class _WakeVM(_CmdVM):
     def force_refresh_vehicle_state(self, vid):
         self.woken.append(vid)
 
-    def force_refresh_all_vehicles_states(self):
-        self.woken.append("ALL")
-
 
 def _fetch_with(vm, job):
     orig = kia_client.connect
@@ -713,7 +712,48 @@ assert "VINB" in res["meta"]["warning"] and "VINA" not in res["meta"]["warning"]
 assert res["meta"]["emptyVehicles"] == ["VINB"]
 wvm2 = _WakeVM([_CmdVeh("VINA"), _CmdVeh("VINB")])
 _fetch_with(wvm2, {"allVehicles": True, "refresh": True, "forceRefreshTimeout": 5})
-assert wvm2.woken == ["ALL"], "no wakeVin: whole account, as before"
+assert sorted(wvm2.woken) == ["VINA", "VINB"], "no wakeVin: every car, one at a time"
+
+# --- one car the backend no longer serves (sold, resCode 5031) must not
+# take the rest of the account down: it's reported in meta.vehicleErrors
+# and left out; only when EVERY car fails does the fetch itself fail ---
+from hyundai_kia_connect_api.exceptions import APIError, RateLimitingError  # noqa: E402
+
+
+class _PartialVM(_CmdVM):
+    def __init__(self, vehicles, bad):
+        super().__init__(vehicles)
+        self.bad = bad
+
+    def update_vehicle_with_cached_state(self, vid):
+        if vid in self.bad:
+            raise self.bad[vid]
+
+
+pvm = _PartialVM([_CmdVeh("VINA", last_updated_at="x"), _CmdVeh("VINB")],
+                 {"VINB": APIError("5031 vehicle not served")})
+res = _fetch_with(pvm, {"allVehicles": True, "refresh": False})
+assert [v["VIN"] for v in res["vehicles"]] == ["VINA"], res["vehicles"]
+assert "5031" in res["meta"]["vehicleErrors"]["VINB"]
+try:
+    _fetch_with(_PartialVM([_CmdVeh("VINA")], {"VINA": APIError("down")}),
+                {"allVehicles": True, "refresh": False})
+    raise AssertionError("every car failing must fail the fetch")
+except APIError:
+    pass
+try:
+    _fetch_with(_PartialVM([_CmdVeh("VINA", last_updated_at="x"), _CmdVeh("VINB")],
+                           {"VINB": RateLimitingError("slow down")}),
+                {"allVehicles": True, "refresh": False})
+    raise AssertionError("a rate limit is account-wide")
+except RateLimitingError:
+    pass
+# a VIN job only refreshes its own car -- a sibling's failure can't touch it
+res = _fetch_with(_PartialVM([_CmdVeh("VINA", last_updated_at="x"), _CmdVeh("VINB")],
+                             {"VINB": APIError("down")}),
+                  {"vin": "VINA", "refresh": False})
+assert [v["VIN"] for v in res["vehicles"]] == ["VINA"] and "vehicleErrors" not in res["meta"]
+
 
 # battery temperatures get the same °F -> °C treatment as the others
 bt = kia_client.dump_vehicle(_Veh(ev_battery_temperature_min=77.0,
@@ -746,5 +786,26 @@ assert us["daily_stats"][0]["distanceKm"] == 16.09
 assert kia_client.dump_vehicle(_Veh())["daily_stats"] == [], "Kia USA: no log"
 # other library dataclasses serialise as dicts, never repr() strings
 assert kia_client.jsonable(DailyDrivingStats(total_consumed=1))["total_consumed"] == 1
+
+# --- capability flags: library 4.48 moved them to vehicle.supports and made
+# the flat names warn; dump_vehicle() reads the new home, keeps the old keys,
+# and raises no DeprecationWarning ---
+import warnings  # noqa: E402
+from hyundai_kia_connect_api import Vehicle as _RealVehicle  # noqa: E402
+
+_rv = _RealVehicle(id="R1")
+if hasattr(_rv, "supports"):
+    _rv.supports.valet_mode = False
+    _rv.supports.window_control = True
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        _rd = kia_client.dump_vehicle(_rv, "EU")
+    assert _rd["supports_valet_mode"] is False and _rd["supports_window_control"] is True, _rd
+    assert _rd["supports"]["window_control"] is True
+
+# EU-CCI charge-complete alarm: four preset flags -> the active one
+assert kia_client.dump_vehicle(_Veh(ev_charge_complete_alarm_before_20min=True,
+                                    ev_charge_complete_alarm_off=False))["ev_charge_complete_alarm"] == "20 min before"
+assert kia_client.dump_vehicle(_Veh())["ev_charge_complete_alarm"] is None
 
 print("dump_vehicle tests passed")

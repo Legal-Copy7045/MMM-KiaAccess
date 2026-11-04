@@ -137,7 +137,7 @@ class AccountPoller:
             return payload
 
 
-def select_own_vehicle(vehicles: list[dict], vin: str) -> dict:
+def select_own_vehicle(vehicles: list[dict], vin: str, errors: dict | None = None) -> dict:
     """Pick THIS coordinator's own vehicle out of an AccountPoller's
     all-vehicles fetch result. Mirrors kia_client._no_match_error()'s
     diagnostic shape (naming the configured VIN and what the account
@@ -145,6 +145,17 @@ def select_own_vehicle(vehicles: list[dict], vin: str) -> dict:
     to run inside kia_client._select_vehicles() before every coordinator
     called fetch() with its own VIN directly."""
     vin = str(vin or "").strip().upper()
+    # kia_client.fetch() leaves out a car whose own refresh failed and names
+    # it in meta.vehicleErrors -- fail THIS coordinator with that reason
+    # (only this car's entities go unavailable), not a misleading "no
+    # vehicle matches" error
+    errors = errors or {}
+    if vin and vin in errors:
+        raise kia_client.ClientError(f"Kia couldn't refresh this vehicle: {errors[vin]}")
+    if not vin and not vehicles and len(errors) == 1:
+        raise kia_client.ClientError(
+            f"Kia couldn't refresh this vehicle: {next(iter(errors.values()))}"
+        )
     if vin:
         for v in vehicles:
             # see kia_client._vehicle_key()'s docstring: falls back to the

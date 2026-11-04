@@ -187,6 +187,28 @@ const { freshHelper, tmpCacheDir } = require("./fresh-node-helper.js");
     assert.strictEqual(onPayloadCalls.length, 0);
   }
 
+  // one car's own refresh failed (meta.vehicleErrors): the other car is
+  // processed, the failed one gets fail() with the reason -- not counted
+  // as missing from the account
+  {
+    const fails = [];
+    const origFail = helper.fail;
+    helper.fail = (id, cfg, msg) => fails.push({ id, msg });
+    const before = onPayloadCalls.length;
+    helper._handleBridgeClose(
+      acctId, config, true, 0,
+      JSON.stringify({ ok: true, vehicles: [{ VIN: "VIN_A" }],
+        meta: { vehicleErrors: { VIN_B: "APIError: 5031" } } }), "", () => {}
+    );
+    helper.fail = origFail;
+    assert.strictEqual(onPayloadCalls.length, before + 1, "VIN_A still processed");
+    assert.strictEqual(fails.length, 1);
+    assert.strictEqual(fails[0].id, helper.identifierFor({ ...config, vin: "VIN_B" }));
+    assert.ok(/5031/.test(fails[0].msg));
+    const miss = helper.accountMissStreak[acctId] || {};
+    assert.ok(!miss.VIN_B, "a failed refresh is not 'gone from the account'");
+  }
+
   // empty vehicles array -> reportOnce, nothing processed
   {
     const reports = [];

@@ -260,4 +260,15 @@ asyncio.run(wake_poller.async_fetch({**job, "vin": "CARB", "refresh": False}))
 assert _seen[-1]["wakeVin"] == "", "a cache read wakes nobody"
 account_poll.kia_client.fetch = _fake_fetch
 
+# a car whose own refresh failed (kia_client meta.vehicleErrors) fails
+# just its coordinator, with the real reason
+try:
+    select_own_vehicle([_v("VIN1")], "VIN2", {"VIN2": "APIError: 5031"})
+    raise AssertionError("expected the per-vehicle error")
+except kia_client.ClientError as err:
+    assert "5031" in str(err), err
+assert select_own_vehicle([_v("VIN1")], "VIN1", {"VIN2": "APIError: 5031"})["VIN"] == "VIN1", (
+    "a sibling's failure doesn't touch this car"
+)
+
 print("account_poll_test: ok")

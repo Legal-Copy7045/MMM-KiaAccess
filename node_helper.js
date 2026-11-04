@@ -694,6 +694,19 @@ module.exports = NodeHelper.create({
         });
       });
 
+      // A car whose own refresh failed (sold but still on the account,
+      // resCode 5031, ...) is left out of result.vehicles and named in
+      // meta.vehicleErrors: fail just that car, with the reason, instead of
+      // counting it as gone from the account (which would retire it).
+      const vehicleErrors = (result.meta && result.meta.vehicleErrors) || {};
+      Object.keys(vehicleErrors).forEach((key) => {
+        const vin = String(key).toUpperCase();
+        if (!configuredVins.has(vin)) return;
+        seenVins.add(vin);
+        this.fail(this.identifierFor(Object.assign({}, config, { vin })), config,
+          "Kia couldn't refresh this vehicle: " + vehicleErrors[key]);
+      });
+
       // The account genuinely returned vehicles this poll, but NONE of them
       // matched anything in config.vehicles -- this is a fetch that
       // "succeeded" (result.ok, non-empty result.vehicles) while silently

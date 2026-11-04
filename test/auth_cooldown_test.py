@@ -38,7 +38,7 @@ class _FakeToken:
         return raw
 
 
-# "refresh": what update_all_vehicles_with_cached_state() does -- None (ok),
+# "refresh": what update_vehicle_with_cached_state() does -- None (ok),
 # "auth" (the library's _retry_on_auth_error wrapper's
 # AuthenticationError("Re-login failed: ..."), raised AFTER connect()
 # already succeeded), "otp", or "other" (a non-auth failure).
@@ -55,7 +55,11 @@ class _FakeVehicleManager:
         if _CONTROL["fail"]:
             raise Exception("simulated: 'int' object has no attribute 'get'")
 
-    def update_all_vehicles_with_cached_state(self):
+    @property
+    def vehicles(self):
+        return {"V1": type("V", (), {"id": "V1", "VIN": "V1"})()}
+
+    def update_vehicle_with_cached_state(self, vehicle_id):
         _CONTROL["refresh_calls"] += 1
         mode = _CONTROL["refresh"]
         if mode == "auth":
@@ -74,6 +78,8 @@ _token_mod.Token = _FakeToken
 _exceptions_mod = types.ModuleType("hyundai_kia_connect_api.exceptions")
 _exceptions_mod.AuthenticationOTPRequired = _AuthenticationOTPRequired
 _exceptions_mod.AuthenticationError = _AuthenticationError
+_exceptions_mod.APIError = type("APIError", (Exception,), {})
+_exceptions_mod.RateLimitingError = type("RateLimitingError", (_exceptions_mod.APIError,), {})
 sys.modules["hyundai_kia_connect_api"] = _fake_pkg
 sys.modules["hyundai_kia_connect_api.Token"] = _token_mod
 sys.modules["hyundai_kia_connect_api.exceptions"] = _exceptions_mod
