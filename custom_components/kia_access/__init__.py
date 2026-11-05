@@ -370,13 +370,22 @@ async def _ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None:
         # guarded helper internally, but we need self.data populated first
         # too, for the dedup check right after
         await resources._async_ensure_loaded()  # noqa: SLF001
-        # no query string here: the static path already disables caching
-        # (register_static_path(..., cache_headers=False) above), so this
-        # entry keeps working across future version bumps without edits
-        if any(item.get(CONF_URL) == url for item in resources.async_items()):
+        # Versioned, like the add_extra_js_url copy: without it the browser /
+        # the HA app kept serving its cached copy of the plain URL after a
+        # HACS update, and since this resource loads first and the card only
+        # defines itself once, the OLD card stayed on screen. An existing
+        # entry (versioned or not) is rewritten to the current version.
+        versioned = f"{url}?v={VERSION}"
+        for item in resources.async_items():
+            if str(item.get(CONF_URL) or "").split("?", 1)[0] != url:
+                continue
+            if item.get(CONF_URL) != versioned:
+                await resources.async_update_item(
+                    item["id"], {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: versioned}
+                )
             return
         await resources.async_create_item(
-            {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: url}
+            {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: versioned}
         )
     except Exception:  # noqa: BLE001
         _LOGGER.debug(

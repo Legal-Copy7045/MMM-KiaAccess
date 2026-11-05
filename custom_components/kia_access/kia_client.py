@@ -101,6 +101,53 @@ def _save_auth_state(path, state) -> None:
         pass
 
 
+_LIBRARY_VERSION = None
+
+
+def _library_version() -> str:
+    """The installed hyundai_kia_connect_api version ("" if unknown)."""
+    global _LIBRARY_VERSION
+    if _LIBRARY_VERSION is None:
+        try:
+            from importlib.metadata import version
+            _LIBRARY_VERSION = version("hyundai_kia_connect_api")
+        except Exception:  # noqa: BLE001
+            _LIBRARY_VERSION = ""
+    return _LIBRARY_VERSION
+
+
+def _attempt_key(job) -> str:
+    """Fingerprint of what a login attempt is made WITH: the password, PIN
+    and library version (hashed -- never stored in the clear). The cooldown
+    is about not repeating the SAME failing login; a corrected password or
+    an updated library is a new attempt and must not wait out a cooldown
+    the old one earned (issue #2: a library update that fixed the login
+    still sat behind 30+ minutes of "cooling down")."""
+    raw = "|".join([str(job.get("password") or ""), str(job.get("pin") or ""), _library_version()])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _state_for_attempt(path, job) -> dict:
+    """The auth state for this account -- cleared (and the file reset) when
+    it was recorded for a different password / PIN / library version."""
+    state = _load_auth_state(path)
+    if state and state.get("attemptKey") not in (None, _attempt_key(job)):
+        _save_auth_state(path, {})
+        return {}
+    return state
+
+
+# EU sign-in fingerprint gate rejections (header missing / bad signature /
+# timestamp out of window): the library's app signature is out of date
+_FINGERPRINT_CODES = ("9035", "9036", "9037")
+_FINGERPRINT_HINT = (
+    " Codes 9035-9037 mean Kia / Hyundai's European sign-in rejected the "
+    "app signature: update hyundai_kia_connect_api -- in Home Assistant "
+    "update Kia Access in HACS; in MagicMirror run `git pull && npm install` "
+    "in the module folder -- then restart."
+)
+
+
 def _cooldown_remaining_sec(state, now=None) -> float:
     """0 if not currently in a cooldown window, else seconds left in it."""
     now = time.time() if now is None else now
@@ -586,7 +633,8 @@ def _note_auth_failure(job, exc):
     "cooling down" ClientError to raise once the breaker has tripped, else
     None (a sub-threshold failure -- the caller re-raises the original)."""
     path = _auth_state_file(job)
-    new_state = _record_auth_failure(_load_auth_state(path))
+    new_state = _record_auth_failure(_state_for_attempt(path, job))
+    new_state["attemptKey"] = _attempt_key(job)
     _save_auth_state(path, new_state)
     # remaining > 0, not merely "cooldownUntil is set": a cooldown that has
     # already EXPIRED leaves its old cooldownUntil in the state file, and
@@ -596,11 +644,13 @@ def _note_auth_failure(job, exc):
     if remaining <= 0:
         return None
     mins = int(remaining // 60) + 1
+    hint = _FINGERPRINT_HINT if any(c in str(exc) for c in _FINGERPRINT_CODES) else ""
     return ClientError(
         f"authentication failed {AUTH_FAILURE_THRESHOLD} times in a "
         f"row ({exc}) -- cooling down for ~{mins} min instead of "
         "continuing to retry, to avoid making a likely account "
-        "lockout worse. This will clear and retry normally on its own."
+        "lockout worse. This will clear and retry normally on its own, "
+        "or straight away once the password or library changes." + hint
     )
 
 
@@ -704,7 +754,7 @@ def connect(job, token_file=None):
         geocode_api_use_email=geocode,
     )
 
-    remaining = _cooldown_remaining_sec(_load_auth_state(_auth_state_file(job)))
+    remaining = _cooldown_remaining_sec(_state_for_attempt(_auth_state_file(job), job))
     if remaining > 0:
         mins = int(remaining // 60) + 1
         # Refuses even the attempt -- no call to Kia's servers happens at

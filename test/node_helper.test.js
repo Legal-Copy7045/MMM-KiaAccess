@@ -1142,6 +1142,14 @@ async function testRangeMapRace() {
   );
 }
 
+// ---- _ensureLibrary(): a user-chosen pythonBin is their own environment --
+// never checked or upgraded, never holds back a fetch ----
+{
+  const helper = freshHelper();
+  assert.strictEqual(helper._ensureLibrary("/opt/custom/python3"), "ok");
+  assert.strictEqual(helper._libState, "ok", "decided once per process");
+}
+
 testRangeMapRace()
   .then(() => console.log("all node_helper tests passed"))
   .catch((err) => { console.error(err); process.exitCode = 1; });

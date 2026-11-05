@@ -427,6 +427,13 @@ cd MMM-KiaAccess
 npm install          # runs setup_python.js: builds ./venv and installs the Python dep
 ```
 
+**Updating:** `cd ~/MagicMirror/modules/MMM-KiaAccess && git pull && npm install`,
+then restart MagicMirror. The `npm install` matters: it updates the Kia / Hyundai
+library in `./venv` to the version the release needs. Brands change their sign-in
+servers from time to time, and an old library then fails every login. Since
+v2.119.1 the module also notices an out-of-date library on startup and installs
+the right one itself, but `npm install` is still the clean way to update.
+
 Then add to `~/MagicMirror/config/config.js` and restart MagicMirror:
 
 ```js

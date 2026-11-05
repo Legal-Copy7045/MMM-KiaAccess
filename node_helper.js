@@ -15,7 +15,7 @@
  */
 const NodeHelper = require("node_helper");
 const Log = require("logger");
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
@@ -79,6 +79,26 @@ function resolvePython(configured) {
       : path.join(__dirname, "venv", "bin", "python3");
   if (fs.existsSync(venv)) return venv;
   return configured || process.env.PYTHON || "python3";
+}
+
+/** The hyundai_kia_connect_api version requirements.txt pins ("" if none). */
+function pinnedLibraryVersion() {
+  try {
+    const m = /^hyundai_kia_connect_api==([^\s#]+)/m.exec(
+      fs.readFileSync(path.join(__dirname, "requirements.txt"), "utf8")
+    );
+    return m ? m[1] : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+/** The version installed for this Python ("" if missing / unknown). */
+function installedLibraryVersion(pythonBin) {
+  const r = spawnSync(pythonBin, ["-c",
+    "import importlib.metadata as m; print(m.version('hyundai_kia_connect_api'))"],
+  { encoding: "utf8", timeout: 30000 });
+  return r.status === 0 ? String(r.stdout || "").trim() : "";
 }
 
 module.exports = NodeHelper.create({
@@ -568,6 +588,19 @@ module.exports = NodeHelper.create({
           ? 45
           : Number(config.forceRefreshTimeout) || 0
     };
+
+    // The bundled venv's library must match requirements.txt: `git pull`
+    // alone updates the pin but not the venv, and an out-of-date library
+    // is exactly what broke every EU login on 2026-10-14 (issue #2: the
+    // sign-in started requiring an app signature only newer releases send).
+    if (this._ensureLibrary(pythonBin) === "updating") {
+      this.inFlight[id] = false;
+      return this._reportServe(id, config, rotating, {
+        stale: true,
+        note: "updating the Kia/Hyundai library to the version this release needs — one moment",
+        retryAfterMs: 60 * 1000
+      });
+    }
 
     let stdout = "";
     let stderr = "";
@@ -1196,6 +1229,53 @@ module.exports = NodeHelper.create({
   _reportFailure(id, config, rotating, message) {
     if (!rotating) return this.fail(id, config, message);
     this._eachConfiguredVehicle(config, (vid) => this.fail(vid, config, message));
+  },
+
+  // Checks once per process that the bundled venv (built by setup_python.js)
+  // has the hyundai_kia_connect_api version requirements.txt pins, and if
+  // not, installs it in the background -- so updating the module with just
+  // `git pull` still ends up on the right library. Leaves a user-chosen
+  // pythonBin alone (their environment, their upgrades). Returns "ok",
+  // "updating" (fetches wait) or "failed" (fetches carry on with whatever
+  // is installed; the log says to run `npm install`).
+  _ensureLibrary(pythonBin) {
+    if (this._libState) return this._libState;
+    const venvPython = resolvePython(null);
+    if (pythonBin !== venvPython || !fs.existsSync(venvPython)) return (this._libState = "ok");
+    const want = pinnedLibraryVersion();
+    const have = installedLibraryVersion(venvPython);
+    if (!want || have === want) return (this._libState = "ok");
+    Log.info("[MMM-KiaAccess] hyundai_kia_connect_api " + (have || "(missing)") + " installed, " +
+      want + " needed — installing it now (this release's `npm install` step)");
+    this._libState = "updating";
+    let child;
+    try {
+      child = spawn(venvPython, ["-m", "pip", "install", "-r", path.join(__dirname, "requirements.txt")],
+        { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      this._libState = "failed";
+      Log.warn("[MMM-KiaAccess] could not update hyundai_kia_connect_api: " + e.message +
+        " — run `npm install` in the module folder");
+      return this._libState;
+    }
+    let err = "";
+    child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
+    child.on("error", (e) => {
+      this._libState = "failed";
+      Log.warn("[MMM-KiaAccess] could not update hyundai_kia_connect_api: " + e.message +
+        " — run `npm install` in the module folder");
+    });
+    child.on("close", (code) => {
+      if (code === 0 && installedLibraryVersion(venvPython) === want) {
+        this._libState = "ok";
+        Log.info("[MMM-KiaAccess] hyundai_kia_connect_api " + want + " installed");
+      } else {
+        this._libState = "failed";
+        Log.warn("[MMM-KiaAccess] updating hyundai_kia_connect_api to " + want + " failed — run " +
+          "`npm install` in the module folder. " + err.trim().split("\n").slice(-3).join(" "));
+      }
+    });
+    return this._libState;
   },
 
   // Same idea as _reportFailure(), for a non-error "serve what we have"
