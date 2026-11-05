@@ -203,4 +203,19 @@ const V = require("../core/visuals.js");
   assert.notStrictEqual(a.match(/id="(bd[^"]+)"/)[1], b.match(/id="(bd[^"]+)"/)[1], "EV9 SVG ids must differ between diagrams");
 }
 
+// ---- EV9 padlock: centred in its ring in both states (no sideways nudge),
+// open shackle distinct from closed ----
+{
+  const lock = (locked) => {
+    const svg = V.carDiagramEV9({ locked, batteryPct: 50 });
+    const m = /translate\(100 59\)[^]*?<g transform="translate\(([-\d.]+) ([-\d.]+)\)"><path d="([^"]+)"/.exec(svg);
+    return { x: Number(m[1]), d: m[3] };
+  };
+  const shut = lock(true), open = lock(false), unknown = lock(null);
+  assert.strictEqual(shut.x, 0, "locked padlock centred");
+  assert.strictEqual(open.x, 0, "unlocked padlock centred");
+  assert.notStrictEqual(open.d, shut.d, "unlocked draws the lifted shackle");
+  assert.strictEqual(unknown.d, shut.d, "unknown draws closed (in the neutral colour)");
+}
+
 console.log("all visuals tests passed");

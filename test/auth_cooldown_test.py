@@ -305,4 +305,61 @@ with tempfile.TemporaryDirectory() as tmpdir:
     except Exception as e:
         assert "cooling down" not in str(e).lower()
 
+# ---- issue #2: a cooldown earned by one password / PIN / library version
+# must not hold back a corrected one -- and a fingerprint-gate rejection
+# (9035) says to update the library ----
+def _trip(job):
+    err = None
+    for _ in range(K.AUTH_FAILURE_THRESHOLD):
+        try:
+            K.fetch(dict(job, refresh=False))
+        except K.ClientError as e:
+            err = e
+        except _AuthenticationError:
+            pass
+        _NOW["t"] += 5
+    return err
+
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _CONTROL["refresh"] = "auth"
+    assert "cooling down" in str(_trip(JOB)).lower()
+    # same password: refused without contacting Kia
+    calls = _CONTROL["calls"]
+    try:
+        K.fetch(dict(JOB, refresh=False))
+        raise AssertionError("same password must still be cooling down")
+    except K.ClientError as e:
+        assert "cooling down" in str(e).lower()
+    assert _CONTROL["calls"] == calls
+    # corrected password: a new attempt goes straight through
+    _CONTROL["refresh"] = None
+    K.fetch(dict(JOB, password="the-right-one", refresh=False))
+    assert _CONTROL["calls"] == calls + 1, "a changed password must not wait out the cooldown"
+    # an updated library counts as a new attempt too
+    _CONTROL["refresh"] = "auth"
+    assert "cooling down" in str(_trip(JOB)).lower()
+    K._LIBRARY_VERSION = "9.9.9"
+    _CONTROL["refresh"] = None
+    K.fetch(dict(JOB, refresh=False))
+    K._LIBRARY_VERSION = None
+
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _orig_update = _FakeVehicleManager.update_vehicle_with_cached_state
+
+    def _gate(self, vehicle_id):
+        raise _AuthenticationError(
+            'CCI token exchange failed: HTTP 400 -- {"code":"9035","message":"Unusual activity"}'
+        )
+
+    _FakeVehicleManager.update_vehicle_with_cached_state = _gate
+    try:
+        msg = str(_trip(JOB))
+    finally:
+        _FakeVehicleManager.update_vehicle_with_cached_state = _orig_update
+    assert "9035" in msg and "npm install" in msg and "HACS" in msg, msg
+
 print("all auth_cooldown tests passed")

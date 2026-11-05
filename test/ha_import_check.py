@@ -898,6 +898,50 @@ import asyncio  # noqa: E402
 assert hasattr(init, "_ensure_lovelace_resource")
 _fake_hass = type("H", (), {"data": {}})()
 asyncio.run(init._ensure_lovelace_resource(_fake_hass, "/kia_access/kia-access-card.js"))
+
+# ...and with a storage-mode resource collection: a new entry is created
+# VERSIONED, an old one (plain URL, or an earlier ?v=) is rewritten to the
+# current version -- the plain cached URL kept the old card on screen after
+# a HACS update
+from homeassistant.components.lovelace.const import LOVELACE_DATA  # noqa: E402
+from homeassistant.components.lovelace.resources import ResourceStorageCollection  # noqa: E402
+
+
+class _FakeResources(ResourceStorageCollection):
+    def __init__(self, items):  # noqa: D107 -- skip the real store wiring
+        self._items = {str(i): dict(it, id=str(i)) for i, it in enumerate(items)}
+        self.created, self.updated = [], []
+
+    async def _async_ensure_loaded(self):
+        pass
+
+    def async_items(self):
+        return list(self._items.values())
+
+    async def async_create_item(self, data):
+        self.created.append(data)
+
+    async def async_update_item(self, item_id, updates):
+        self.updated.append((item_id, updates))
+
+
+def _run_resources(items):
+    res = _FakeResources(items)
+    hass = type("H", (), {"data": {LOVELACE_DATA: type("L", (), {"resources": res})()}})()
+    asyncio.run(init._ensure_lovelace_resource(hass, "/kia_access/kia-access-card.js"))
+    return res
+
+
+_want = "/kia_access/kia-access-card.js?v=" + init.VERSION
+_r = _run_resources([])
+assert _r.created and _r.created[0]["url"] == _want, _r.created
+_r = _run_resources([{"url": "/kia_access/kia-access-card.js", "res_type": "module"}])
+assert _r.updated == [("0", {"res_type": "module", "url": _want})] and not _r.created, (_r.updated, _r.created)
+_r = _run_resources([{"url": "/kia_access/kia-access-card.js?v=1.0.0", "res_type": "module"}])
+assert _r.updated and _r.updated[0][1]["url"] == _want
+_r = _run_resources([{"url": _want, "res_type": "module"}, {"url": "/other/card.js", "res_type": "module"}])
+assert not _r.updated and not _r.created, "already current: untouched"
+print("lovelace resource: versioned, and upgraded on each new release")
 assert os.path.exists(
     os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
 ), "card bundle not vendored"

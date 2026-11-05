@@ -1454,15 +1454,23 @@ g.KiaAccessCommands={
         pulse("fill-opacity", "0.15", "0.75") + "</rect>" +
         '<rect x="78" y="34" width="44" height="22" rx="5" fill="' + COL.bad + '" opacity="0.25" filter="url(#gw' + uid + ')"/>'
       : '<rect x="80" y="36" width="40" height="18" rx="4" fill="#1f242a" stroke="#3a4048" stroke-width="1.2"/>';
-    // lock badge: a padlock on the hood -- shackle closed (locked / unknown) or lifted and swung open (unlocked)
-    var shackle = s.locked === false
-      ? "M 2.7 -0.2 V -3.3 A 2.7 2.7 0 0 0 -2.7 -3.3 V -2.4"
-      : "M -2.7 -0.2 V -2.6 A 2.7 2.7 0 0 1 2.7 -2.6 V -0.2";
+    // lock badge: a padlock on the hood, centred in its ring. Locked: the
+    // shackle closed into the body. Unlocked: the shackle lifted, its left
+    // leg still seated and the right leg clear of the body -- the familiar
+    // open-padlock shape (the first version shifted the whole icon off-centre
+    // and left the free leg floating mid-air, so it read as broken, not open).
+    // Unknown lock state draws closed, in the neutral outline colour.
+    var unlocked = s.locked === false;
+    var shackle = unlocked
+      ? "M -2.5 0.4 V -3.7 A 2.5 2.5 0 0 1 2.5 -3.7 V -2.5"
+      : "M -2.5 0.4 V -2.4 A 2.5 2.5 0 0 1 2.5 -2.4 V 0.4";
     var lockBadge =
       '<g transform="translate(100 59)"><circle r="8" fill="#000" stroke="' + lockCol + '" stroke-width="1.4"/>' +
-      '<g transform="translate(' + (s.locked === false ? '0.9 1.1' : '0 0.9') + ')"><path d="' + shackle + '" stroke="' + lockCol + '" stroke-width="1.5" fill="none" stroke-linecap="round"/>' +
-      '<rect x="-4" y="-0.4" width="8" height="6" rx="1.3" fill="' + lockCol + '"/>' +
-      '<circle cx="0" cy="2.3" r="0.95" fill="#000"/></g></g>';
+      '<g transform="translate(0 ' + (unlocked ? "0.3" : "-0.35") + ')">' +
+      '<path d="' + shackle + '" stroke="' + lockCol + '" stroke-width="1.5" fill="none" stroke-linecap="round"/>' +
+      '<rect x="-4" y="0" width="8" height="5.6" rx="1.2" fill="' + lockCol + '"/>' +
+      '<circle cx="0" cy="2.3" r="0.9" fill="#000"/>' +
+      '<rect x="-0.35" y="2.6" width="0.7" height="1.6" rx="0.3" fill="#000"/></g></g>';
 
     // ---- glass: windscreen, side glass, panoramic roof, rails ----
     var glass =
