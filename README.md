@@ -260,6 +260,8 @@ API, not from Kia. So:
    type: custom:kia-access-card
    # entity: sensor.<vehicle>_status   # optional; auto-detected otherwise
    # temperature_unit: F               # optional; "C" / "F" — otherwise follows HA
+   # car_style: classic                # optional; "ev9" (default, the EV9 likeness) or
+   #                                   # "classic" (the original diagram)
    # rows:                             # optional; picks which details-table rows
    #   - ev_battery_percentage         # show (an explicit allow-list, by `key` --
    #   - odometer                      # see core/entities.json for every key);
@@ -788,6 +790,10 @@ visuals: {
   enabled: true,
   car: true,          // top-down SUV diagram, front at the top (fixed size —
                       //   the car never moves or resizes between states)
+  carStyle: "ev9",    // "ev9" (default): an EV9 likeness -- arches, Star Map
+                      //   lamps, glass roof with the battery glowing up through
+                      //   it, padlock on the hood. "classic": the original
+                      //   drawing. Both show every state below.
   battery: true,      // a small vertical battery toward the rear of the cabin
                       //   (terminal to the front), filling bottom-up, coloured
                       //   green/amber/red, % shown underneath, animated bolt
@@ -864,7 +870,7 @@ values, so it stays complete even for rows that never appear in the table.
 
 #### Every state, visually
 
-Every diagram state and every optional widget:
+Every diagram state, in both car styles (EV9, the default, and classic), and every optional widget:
 
 ![Car diagram states and widgets](docs/car-states.png)
 

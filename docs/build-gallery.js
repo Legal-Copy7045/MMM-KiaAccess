@@ -119,12 +119,14 @@ p.sub{color:#8a8f94;font-size:13px;margin:0 0 22px}
 h2{font-weight:600;font-size:13px;color:#9aa0a6;letter-spacing:.06em;text-transform:uppercase;
    margin:26px 0 12px;border-bottom:1px solid #1e1f22;padding-bottom:6px}
 .grid{display:flex;flex-wrap:wrap;gap:20px}
-.card{background:#0b0b0c;border:1px solid #16171a;border-radius:10px;padding:14px 16px 10px;width:200px}
+.card{background:#0b0b0c;border:1px solid #16171a;border-radius:10px;padding:12px 12px 10px;width:200px}
+.card.two{width:330px}.pair{display:flex;gap:6px}.pair>div{flex:1}
+.lb{font-size:10px;color:#6b7075;text-align:center;margin-bottom:2px}.lb.ev{color:#4fc3f7}
 .card svg{display:block;margin:0 auto;max-width:100%;height:auto}
 .t{font-size:12.5px;color:#e8eaed;margin-top:8px;text-align:center}
 </style></head><body>
 <h1>MMM-KiaAccess — car diagram states &amp; widgets</h1>
-<p class="sub">Every state the top-down diagram can present, plus the optional widgets.
+<p class="sub">Every state the top-down diagram can present, in both styles (EV9, the default, and classic), plus the optional widgets.
 Front of the car is up. Animations play live here; car-states.png is a snapshot.</p>
 <div id="out"></div>
 <script>${visuals}</script>
@@ -134,7 +136,7 @@ const groups = ${groupsJson};
 const out = document.getElementById("out");
 function section(title){ const h=document.createElement("h2"); h.textContent=title; out.appendChild(h);
   const g=document.createElement("div"); g.className="grid"; out.appendChild(g); return g; }
-function card(g, name, html){ const c=document.createElement("div"); c.className="card";
+function card(g, name, html, two){ const c=document.createElement("div"); c.className="card"+(two?" two":"");
   c.innerHTML = html + '<div class="t">' + name + '</div>'; g.appendChild(c); }
 
 for (const [title, cards] of groups) {
@@ -144,9 +146,10 @@ for (const [title, cards] of groups) {
     // both) -- it's an o{} render option, not a vehicle state flag, but
     // it's simplest to author each card as one flat object above and split
     // it out here rather than thread a second options object through GROUPS.
-    const opts = { width: 200 };
+    const opts = { width: 150 };
     if (state.powertrain) opts.powertrain = state.powertrain;
-    card(g, name, V.carDiagram(state, opts));
+    card(g, name, '<div class="pair"><div><div class="lb ev">EV9 (default)</div>' + V.carDiagram(state, opts) +
+      '</div><div><div class="lb">classic</div>' + V.carDiagram(state, Object.assign({ style: "classic" }, opts)) + "</div></div>", true);
   }
 }
 

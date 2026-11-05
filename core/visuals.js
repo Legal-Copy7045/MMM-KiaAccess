@@ -640,7 +640,7 @@
    *     and `width` scales to keep the car the same size. `critical:true` still
    *     works as a shorthand for one unlabelled critical alert;
    *   flashing (bool) -> pulses head + tail lights amber (find-the-car / hazards)
-   * @param {object} o { width, battery:false to omit the centre cell(s),
+   * @param {object} o { style:"ev9" (default) | "classic", width, battery:false to omit the centre cell(s),
    *   powertrain:"ev" (default) | "hybrid" | "gas" -- selects a drive
    *   battery, a fuel tank, or a smaller pair of both side by side,
    *   tempUnit:"C"|"F" for the two on-diagram temperatures }
@@ -650,6 +650,8 @@
   function carDiagram(s, o) {
     s = s || {};
     o = o || {};
+    // the EV9 likeness is the default; style:"classic" keeps the original drawing
+    if (o.style !== "classic") return carDiagramEV9(s, o);
     // Canvas centred on the car body (centre x100, viewBox -32..232). Charger
     // strip lives at x 200..228. The warning badge is icon-only (its reasons go
     // in the module status bar); the viewBox only gains a few px on the right so
@@ -895,6 +897,268 @@
     );
   }
 
+  /**
+   * EV9-style top-down diagram: the same state flags, options and canvas as
+   * carDiagram() (so every state it can show, this shows too, in the same
+   * places), drawn as a likeness of the Kia EV9: flared wheel arches and
+   * treaded tyres, Star Map pixel lamps front and rear, raked windscreen,
+   * panoramic glass roof with rails and side glass, a glowing body edge in
+   * the lock colour, and (EV) the drive battery as a level glowing up through
+   * the roof glass. Gas/hybrid keep the centre cells from mainPowerCell().
+   * The default since v2.119.0; carDiagram(s, { style: "classic" }) draws the original.
+   */
+  function carDiagramEV9(s, o) {
+    s = s || {};
+    o = o || {};
+    var alertsIn = Array.isArray(s.alerts)
+      ? s.alerts
+      : (s.critical === true ? [{ level: "critical", label: "" }] : []);
+    var vbW = 264 + alertExtra(alertsIn);
+    var VB = "-32 0 " + vbW + " 330";
+    var w = Math.round((o.width || 190) * vbW / 264);
+    var uid = "e" + (++_uidSeq).toString(36);
+    var pt = o.powertrain === "hybrid" || o.powertrain === "gas" ? o.powertrain : "ev";
+
+    var lockCol = s.locked === true ? COL.ok : s.locked === false ? COL.bad : COL.outline;
+    var exporting = s.v2l === true || s.v2x === true;
+    var plugged = s.charging === true || s.plugged === true || exporting;
+    var flow = s.charging === true ? COL.ok : exporting ? COL.accent : COL.warn;
+    var port = s.charging === true ? COL.ok : exporting ? COL.accent : s.plugged === true ? COL.warn : COL.dim;
+    var tyre = function (k) { return s["tyre" + k] === true || s.tyreAny === true; };
+    var flashAnim = '<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.45;1" dur="0.55s" repeatCount="5"/>';
+
+    var defs =
+      "<defs>" +
+      '<linearGradient id="bd' + uid + '" x1="0" x2="1"><stop offset="0" stop-color="#14171b"/><stop offset=".5" stop-color="#2a2f36"/><stop offset="1" stop-color="#14171b"/></linearGradient>' +
+      '<linearGradient id="gl' + uid + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2935"/><stop offset="1" stop-color="#0a0e13"/></linearGradient>' +
+      '<filter id="gw' + uid + '" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3.5"/></filter>' +
+      '<clipPath id="rf' + uid + '"><rect x="58" y="96" width="84" height="146" rx="11"/></clipPath>' +
+      "</defs>";
+
+    // ---- body: boxy, squared nose, flared arches over each wheel ----
+    var BODY =
+      "M 64 22 H 136 Q 158 23 160 46 L 161 56 Q 165 60 165 66 V 90 Q 165 96 161 99 " +
+      "L 160 224 Q 165 228 165 234 V 258 Q 165 264 161 267 L 160 286 Q 158 304 138 304 " +
+      "H 62 Q 42 304 40 286 L 39 267 Q 35 264 35 258 V 234 Q 35 228 39 224 " +
+      "L 40 99 Q 35 96 35 90 V 66 Q 35 60 39 56 L 40 46 Q 42 23 64 22 Z";
+    var glow = '<path d="' + BODY + '" fill="none" stroke="' + lockCol + '" stroke-width="7" opacity="0.32" filter="url(#gw' + uid + ')"/>';
+    var body =
+      '<path d="' + BODY + '" fill="url(#bd' + uid + ')" stroke="' + lockCol + '" stroke-width="2.6"/>' +
+      // shoulder highlights
+      '<path d="M 47 100 Q 44 165 47 262 M 153 100 Q 156 165 153 262" stroke="#fff" stroke-width="0.8" opacity="0.08" fill="none"/>';
+
+    // ---- tyres: treaded, poking out under the arches ----
+    var tyreG = function (x, y, warn) {
+      var c = warn ? COL.bad : "#3a3e44";
+      var g = '<rect x="' + x + '" y="' + y + '" width="13" height="32" rx="4.5" fill="#0b0c0e" stroke="' + c + '" stroke-width="' + (warn ? 2.2 : 1.2) + '"/>';
+      for (var i = 1; i < 6; i++) g += '<path d="M ' + (x + 2.5) + " " + (y + i * 5.4) + " h 8" + '" stroke="#1d2024" stroke-width="1.6"/>';
+      if (warn) g += '<text x="' + (x + 6.5) + '" y="' + (y + 21) + '" text-anchor="middle" font-size="15" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:2.5px">!</text>';
+      return g;
+    };
+    var wheels = tyreG(26, 62, tyre("FL")) + tyreG(161, 62, tyre("FR")) + tyreG(26, 230, tyre("RL")) + tyreG(161, 230, tyre("RR"));
+
+    // ---- Star Map lamps: pixel columns at each corner + a bar across the nose / tail ----
+    var px = function (x, y, on, col, n, dir) {
+      var g = "";
+      for (var i = 0; i < n; i++) {
+        var yy = y + dir * i * 5.2;
+        g += '<rect x="' + x + '" y="' + yy + '" width="3.6" height="3.6" rx="0.9" fill="' + (on ? col : "none") +
+          '" stroke="' + (on ? col : COL.dim) + '" stroke-width="0.9" opacity="' + (on ? (1 - i * 0.12) : 0.9) + '"/>';
+      }
+      return g;
+    };
+    var hOn = s.headlights === true, tOn = s.carOn === true;
+    var head =
+      px(44, 30, hOn, "#eef6ff", 5, 1) + px(152.4, 30, hOn, "#eef6ff", 5, 1) +
+      '<path d="M 58 25.5 H 142" stroke="' + (hOn ? "#eef6ff" : COL.dim) + '" stroke-width="' + (hOn ? 1.8 : 1) + '"/>' +
+      (hOn ? '<path d="M 58 25.5 H 142" stroke="#eef6ff" stroke-width="5" opacity="0.35" filter="url(#gw' + uid + ')"/>' : "");
+    var tail =
+      px(43.5, 296, tOn, COL.bad, 4, -1) + px(152.9, 296, tOn, COL.bad, 4, -1) +
+      '<path d="M 58 300.5 H 142" stroke="' + (tOn ? COL.bad : COL.dim) + '" stroke-width="' + (tOn ? 1.8 : 1) + '"/>' +
+      (tOn ? '<path d="M 58 300.5 H 142" stroke="' + COL.bad + '" stroke-width="5" opacity="0.35" filter="url(#gw' + uid + ')"/>' : "");
+    var flash = s.flashing === true
+      ? '<g fill="' + COL.warn + '" opacity="0">' + flashAnim +
+        '<rect x="42" y="27" width="8" height="26" rx="2"/><rect x="150" y="27" width="8" height="26" rx="2"/>' +
+        '<rect x="41" y="278" width="8" height="22" rx="2"/><rect x="151" y="278" width="8" height="22" rx="2"/>' +
+        '<rect x="58" y="24" width="84" height="3.5" rx="1.5"/><rect x="58" y="299" width="84" height="3.5" rx="1.5"/></g>'
+      : "";
+
+    // ---- hood, frunk (small, as on the car), lock badge ----
+    var hood =
+      '<path d="M 70 30 L 66 62 M 130 30 L 134 62" stroke="#000" stroke-width="1.2" opacity="0.5"/>' +
+      '<path d="M 71 30 L 67 62 M 129 30 L 133 62" stroke="#fff" stroke-width="0.6" opacity="0.12"/>';
+    var frunk = s.hood === true
+      ? '<rect x="80" y="36" width="40" height="18" rx="4" fill="' + COL.bad + '" fill-opacity="0.55" stroke="' + COL.bad + '" stroke-width="1.8">' +
+        pulse("fill-opacity", "0.15", "0.75") + "</rect>" +
+        '<rect x="78" y="34" width="44" height="22" rx="5" fill="' + COL.bad + '" opacity="0.25" filter="url(#gw' + uid + ')"/>'
+      : '<rect x="80" y="36" width="40" height="18" rx="4" fill="#1f242a" stroke="#3a4048" stroke-width="1.2"/>';
+    // lock badge: a padlock on the hood -- shackle closed (locked / unknown) or lifted and swung open (unlocked)
+    var shackle = s.locked === false
+      ? "M 2.7 -0.2 V -3.3 A 2.7 2.7 0 0 0 -2.7 -3.3 V -2.4"
+      : "M -2.7 -0.2 V -2.6 A 2.7 2.7 0 0 1 2.7 -2.6 V -0.2";
+    var lockBadge =
+      '<g transform="translate(100 59)"><circle r="8" fill="#000" stroke="' + lockCol + '" stroke-width="1.4"/>' +
+      '<g transform="translate(' + (s.locked === false ? '0.9 1.1' : '0 0.9') + ')"><path d="' + shackle + '" stroke="' + lockCol + '" stroke-width="1.5" fill="none" stroke-linecap="round"/>' +
+      '<rect x="-4" y="-0.4" width="8" height="6" rx="1.3" fill="' + lockCol + '"/>' +
+      '<circle cx="0" cy="2.3" r="0.95" fill="#000"/></g></g>';
+
+    // ---- glass: windscreen, side glass, panoramic roof, rails ----
+    var glass =
+      '<path d="M 56 92 L 144 92 L 132 66 Q 100 60 68 66 Z" fill="url(#gl' + uid + ')" stroke="#3a4552" stroke-width="1"/>' +
+      '<path d="M 70 70 L 76 88" stroke="#fff" stroke-width="1" opacity="0.15"/>' +
+      '<path d="M 49 100 Q 47 170 50 244" stroke="#0d131a" stroke-width="5.5" fill="none" stroke-linecap="round"/>' +
+      '<path d="M 151 100 Q 153 170 150 244" stroke="#0d131a" stroke-width="5.5" fill="none" stroke-linecap="round"/>' +
+      '<rect x="58" y="96" width="84" height="146" rx="11" fill="url(#gl' + uid + ')" stroke="#3a4552" stroke-width="1"/>' +
+      '<rect x="54" y="98" width="2.6" height="142" rx="1.3" fill="#4a5059"/><rect x="143.4" y="98" width="2.6" height="142" rx="1.3" fill="#4a5059"/>';
+
+    // ---- EV: the drive battery glowing up through the roof (rear two-thirds, clear of the airflow) ----
+    var roofBatt = "";
+    if (pt === "ev" && o.battery !== false) {
+      var pct = s.batteryPct, has = !(pct == null || isNaN(pct));
+      var frac = has ? Math.max(0, Math.min(1, Number(pct) / 100)) : 0;
+      var top = 150, bot = 242, fh = (bot - top) * frac, bc = batteryColor(pct);
+      roofBatt =
+        '<g clip-path="url(#rf' + uid + ')">' +
+        '<linearGradient id="bt' + uid + '" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="' + bc + '" stop-opacity=".95"/><stop offset="1" stop-color="' + bc + '" stop-opacity=".35"/></linearGradient>' +
+        '<rect x="58" y="' + (bot - fh) + '" width="84" height="' + fh + '" fill="url(#bt' + uid + ')"/>' +
+        (s.charging === true
+          ? '<rect x="58" y="' + (bot - fh - 4) + '" width="84" height="4" fill="#fff" opacity=".4">' + pulse("opacity", "0.1", "0.6", 1.6) + "</rect>"
+          : "") +
+        '<path d="M 58 150 H 142" stroke="#3a4552" stroke-width="0.8" stroke-dasharray="2 2"/>' +
+        [173, 196, 219].map(function (y) { return '<path d="M 58 ' + y + ' H 142" stroke="#000" stroke-width="1.2" opacity="0.4"/>'; }).join("") +
+        '<path d="M 66 100 L 92 238" stroke="#fff" stroke-width="5" opacity="0.04"/></g>' +
+        '<text x="100" y="' + (s.charging === true ? 196 : 204) + '" text-anchor="middle" font-size="22" font-weight="700" fill="' + COL.text +
+        '" style="paint-order:stroke;stroke:#000;stroke-width:3px">' + (has ? Math.round(pct) + "%" : "—") + "</text>" +
+        (s.charging === true
+          ? '<path d="M 103 203 l -8 13 h 6 l -3 11 l 10 -15 h -6 z" fill="' + COL.text + '" stroke="#000" stroke-width="0.6">' +
+            pulse("opacity", "0.35", "1", 1.5) + "</path>"
+          : "");
+    }
+    var cells = pt === "ev" ? battery12v(s.car12vPct) : mainPowerCell(s, o);
+
+    // ---- sunroof: the front pane of the panoramic glass ----
+    var sun = s.sunroof === true
+      ? '<rect x="72" y="112" width="56" height="30" rx="6" fill="' + COL.bad + '" fill-opacity="0.18" stroke="' + COL.bad + '" stroke-width="2.4">' +
+        pulse("stroke-opacity", "0.25", "1") + "</rect>"
+      : '<rect x="72" y="112" width="56" height="30" rx="6" fill="none" stroke="#4a5562" stroke-width="1.1"/>';
+
+    // ---- doors: seam + handle shut; open swings ~45deg on the front hinge; window open pulses the side glass ----
+    var doorG = function (open, win, x, y, h, side) {
+      // side: -1 left, +1 right; x = the body edge
+      var g = "";
+      if (open === true) {
+        var ang = side < 0 ? 45 : -45, rx = side < 0 ? x - 7 : x;
+        g += '<g transform="rotate(' + ang + " " + x + " " + y + ')">' +
+          '<rect x="' + (rx - 1) + '" y="' + y + '" width="9" height="' + h + '" rx="4" fill="' + COL.bad + '" opacity="0.3" filter="url(#gw' + uid + ')"/>' +
+          '<rect x="' + rx + '" y="' + y + '" width="7" height="' + h + '" rx="2.5" fill="' + COL.bad + '" fill-opacity="0.55" stroke="' + COL.bad + '" stroke-width="1.6">' +
+          pulse("fill-opacity", "0.2", "0.8") + "</rect></g>";
+      } else {
+        g += '<path d="M ' + x + " " + (y + 1) + " v " + (h - 2) + '" stroke="#4a5059" stroke-width="1.4"/>' +
+          '<path d="M ' + (x - side * 4) + " " + (y + h * 0.55) + " h " + (-side * 6) + '" stroke="#6a717a" stroke-width="1.6" stroke-linecap="round"/>';
+      }
+      if (win === true && open !== true) {
+        var gx = side < 0 ? 47 : 149;
+        g += '<path d="M ' + gx + " " + (y + 3) + " v " + (h - 6) + '" stroke="' + COL.bad + '" stroke-width="10" stroke-linecap="round" opacity="0.35" filter="url(#gw' + uid + ')"/>' +
+          '<path d="M ' + gx + " " + (y + 3) + " v " + (h - 6) + '" stroke="' + COL.bad + '" stroke-width="6" stroke-linecap="round">' +
+          pulse("stroke-opacity", "0.35", "1") + "</path>";
+      }
+      return g;
+    };
+    var doors =
+      doorG(s.doorFL, s.winFL, 40, 112, 44, -1) + doorG(s.doorRL, s.winRL, 40, 162, 46, -1) +
+      doorG(s.doorFR, s.winFR, 160, 112, 44, 1) + doorG(s.doorRR, s.winRR, 160, 162, 46, 1);
+
+    // ---- mirrors (and the mirror-heater indicator) ----
+    var mFill = s.mirrorHeat === true ? COL.heat : "#2a2f35";
+    var mAnim = s.mirrorHeat === true ? pulse("opacity", "0.4", "1", 1.4) : "";
+    var mirrors =
+      '<path d="M 40 98 l -10 2 q -3 4 0 8 l 10 0 z" fill="' + mFill + '" stroke="#4a5059" stroke-width="0.8">' + mAnim + "</path>" +
+      '<path d="M 160 98 l 10 2 q 3 4 0 8 l -10 0 z" fill="' + mFill + '" stroke="#4a5059" stroke-width="0.8">' + mAnim + "</path>";
+
+    // ---- liftgate: rear glass + tailgate; open drops back and glows red ----
+    var lift = s.trunk === true
+      ? '<rect x="' + LG_X + '" y="' + (LG_Y + 6) + '" width="' + LG_W + '" height="' + LG_H + '" rx="8" fill="' + COL.bad + '" opacity="0.25" filter="url(#gw' + uid + ')"/>' +
+        '<rect x="' + LG_X + '" y="' + (LG_Y + 6) + '" width="' + LG_W + '" height="' + LG_H + '" rx="8" fill="' + COL.bad + '" fill-opacity="0.55" stroke="' + COL.bad + '" stroke-width="1.8">' +
+        pulse("fill-opacity", "0.15", "0.75") + "</rect>"
+      : '<path d="M 62 250 H 138 L 142 270 H 58 Z" fill="url(#gl' + uid + ')" stroke="#3a4552" stroke-width="1"/>' +
+        '<rect x="58" y="272" width="84" height="12" rx="4" fill="#1f242a" stroke="#3a4048" stroke-width="1"/>';
+
+    // ---- climate: same airflow, set-point and steering-wheel heater as the original ----
+    var climCol = s.climate === "heat" ? COL.heat : s.climate === "cool" ? COL.accent : COL.text;
+    var tUnit = o.tempUnit === "F" ? "F" : "C";
+    var setT = tempStr(s.airTempC, tUnit), outT = tempStr(s.outsideTempC, tUnit);
+    var setpoint = s.climate && setT
+      ? '<text x="100" y="87" text-anchor="middle" font-size="17" font-weight="700" fill="' + climCol + '" style="paint-order:stroke;stroke:#000;stroke-width:3.5px">' + setT + "</text>"
+      : "";
+    var steer = s.steerHeat === true
+      ? '<circle cx="80" cy="107" r="6" fill="none" stroke="' + COL.heat + '" stroke-width="2.4">' + pulse("opacity", "0.35", "1", 1.4) + "</circle>"
+      : "";
+    var outside = outT
+      ? '<g transform="translate(-27 18) scale(1.28)">' +
+        '<path d="M 4 1.5 a 2.4 2.4 0 0 1 2.4 2.4 v 5.4 a 3.5 3.5 0 1 1 -4.8 0 V 3.9 A 2.4 2.4 0 0 1 4 1.5 z" fill="none" stroke="' + COL.dim + '" stroke-width="1.2"/>' +
+        '<path d="M 4 5.5 V 12" stroke="' + COL.dim + '" stroke-width="2.2" stroke-linecap="round"/><circle cx="4" cy="12" r="2.4" fill="' + COL.dim + '"/>' +
+        '<text x="13" y="11.5" font-size="12.5" font-weight="600" fill="' + COL.text + '">' + outT + "</text></g>"
+      : "";
+
+    // ---- charger, cable and energy flow (right strip) + live kW/A, as the original ----
+    var charger = "";
+    var cableD = "M 162 274 C 186 274 190 250 202 252";
+    if (plugged) {
+      var live = s.charging === true || exporting;
+      charger =
+        '<path id="cbl' + uid + '" d="' + cableD + '" fill="none" stroke="' + (live ? flow : COL.dim) + '" stroke-width="3" stroke-linecap="round" opacity="0.6"/>' +
+        '<rect x="200" y="228" width="28" height="48" rx="5" fill="#17181a" stroke="' + COL.outline + '" stroke-width="2"/>' +
+        '<rect x="205" y="234" width="17" height="11" rx="2" fill="' + COL.glass + '"/>' +
+        '<path d="M 216 249 l -6 9 h 5 l -3 8 l 8 -11 h -5 z" fill="' + COL.text + '" opacity="0.85"/>' +
+        '<circle cx="205" cy="270" r="3" fill="' + flow + '">' + (live ? '<animate attributeName="opacity" values="0.3;1;0.3" dur="1.4s" repeatCount="indefinite"/>' : "") + "</circle>";
+      if (live) {
+        var kp = s.charging === true ? "1;0" : "0;1";
+        for (var p = 0; p < 3; p++) {
+          charger += '<circle r="2.6" fill="' + flow + '"><animateMotion dur="1.4s" begin="' + (p * 0.47).toFixed(2) +
+            's" repeatCount="indefinite" keyPoints="' + kp + '" keyTimes="0;1" calcMode="linear"><mpath href="#cbl' + uid +
+            '" xlink:href="#cbl' + uid + '"/></animateMotion></circle>';
+        }
+      }
+    }
+    var chargeInfo = "";
+    if (s.charging === true) {
+      var kwNum = Number(s.chargeKw), kwBig = kwNum >= 100;
+      var kw = isFinite(kwNum) && kwNum > 0 ? (kwBig ? Math.round(kwNum) : Math.round(kwNum * 10) / 10) + "kW" : null;
+      var aNum = Number(s.chargeAmps), amps = null;
+      if (isFinite(aNum) && aNum > 0) amps = Math.round(aNum) + "A";
+      else if (kw && kwNum <= AC_MAX_KW) {
+        var est = Math.round((kwNum * 1000) / (kwNum < AC_LEVEL1_BELOW_KW ? AC_LEVEL1_V : AC_NOMINAL_V));
+        if (est >= 1) amps = "~" + est + "A";
+      }
+      var rows = [];
+      if (kw) rows.push([kw, COL.ok, kwBig ? 10 : 11]);
+      if (amps) rows.push([amps, COL.text, 11]);
+      if (rows.length) {
+        chargeInfo = '<g transform="translate(214 289)" text-anchor="middle" style="paint-order:stroke;stroke:#000;stroke-width:3px">' +
+          rows.map(function (r, i) { return '<text x="0" y="' + (i * 12.5) + '" font-size="' + r[2] + '" font-weight="700" fill="' + r[1] + '">' + esc(r[0]) + "</text>"; }).join("") + "</g>";
+      }
+    }
+    var portG =
+      (s.charging === true
+        ? '<circle cx="155" cy="274" r="5" fill="none" stroke="' + COL.ok + '" stroke-width="2"><animate attributeName="r" values="4;13" dur="1.5s" repeatCount="indefinite"/>' +
+          '<animate attributeName="opacity" values="0.75;0" dur="1.5s" repeatCount="indefinite"/></circle>'
+        : "") +
+      '<circle cx="155" cy="274" r="4.4" fill="' + port + '" stroke="#000" stroke-width="0.8"/>';
+
+    return (
+      '<svg class="kiaaccess-car kiaaccess-car-ev9" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="' + VB +
+      '" width="' + w + '" role="img" aria-label="Vehicle status, front at top">' +
+      defs + glow + wheels + body + mirrors + hood + head + tail + flash + frunk +
+      glass + roofBatt + sun + lift +
+      (s.defrost === true ? frontHeat() + rearHeatLines() : "") +
+      (s.rearHeat === true && s.defrost !== true ? rearHeatLines() : "") +
+      (s.climate ? airWaves(climCol) : "") + setpoint + steer +
+      doors + lockBadge + cells + charger + chargeInfo + portG +
+      (alertsIn.length ? alertBadge(alertsIn) : "") + outside +
+      "</svg>"
+    );
+  }
+
   // ---- row icons (Font Awesome 6, bundled with MagicMirror) ----
 
   var DEFAULT_ICONS = {
@@ -1057,6 +1321,7 @@
     COL: COL,
     batteryGauge: batteryGauge,
     carDiagram: carDiagram,
+    carDiagramEV9: carDiagramEV9,
     verticalBattery: verticalBattery,
     verticalFuelTank: verticalFuelTank,
     powerTile: powerTile,

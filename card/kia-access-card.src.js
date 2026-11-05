@@ -989,9 +989,11 @@
       // own copy of the engine_type mapping comment, in the same file.
       // the API reports temperatures in °C; the diagram and the climate panel
       // share one unit choice (card config, else the HA unit system)
+      // car_style: "ev9" (default, the EV9 likeness) | "classic" (the original drawing)
       var diagram = V.carDiagram(state, {
         width: 230, battery: true, tempUnit: this._tempUnit(),
-        powertrain: state.powertrain
+        powertrain: state.powertrain,
+        style: this._config && this._config.car_style === "classic" ? "classic" : "ev9"
       });
 
       var name = st.attributes.vehicle_name || st.attributes.friendly_name || "Kia";

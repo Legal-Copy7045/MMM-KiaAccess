@@ -112,6 +112,7 @@ Module.register("MMM-KiaAccess", {
     visuals: {
       enabled: false,
       car: true, // top-down SUV diagram (doors / frunk / tailgate / charge port / tyres).
+      carStyle: "ev9", // "ev9" = the EV9 likeness (default) | "classic" = the original drawing
                  //   owns lock, 12V %, climate set-point, outside temp — those
                  //   rows are dropped from the table
       battery: true, // vertical battery in the centre of the car (charge % + charging bolt).
@@ -2062,7 +2063,8 @@ Module.register("MMM-KiaAccess", {
           width: this.visWidth(),
           battery: vis.battery !== false,
           tempUnit: this.config.units === "metric" ? "C" : "F",
-          powertrain: s.powertrain
+          powertrain: s.powertrain,
+          style: vis.carStyle === "classic" ? "classic" : "ev9"
         });
         panel.appendChild(c);
       }
