@@ -9,10 +9,16 @@ const V = require("../core/visuals.js");
 // never passes o.powertrain. ----
 {
   const s = { locked: true, batteryPct: 78, carOn: false, car12vPct: 88 };
-  const withoutOpt = V.carDiagram(s, { width: 200 });
-  const withEvOpt = V.carDiagram(s, { width: 200, powertrain: "ev" });
-  assert.strictEqual(withoutOpt, withEvOpt, "omitting powertrain must render identically to powertrain:'ev'");
-  assert.ok(withoutOpt.includes(">78%<"), "EV diagram must still show the drive battery %");
+  // each diagram gets its own SVG ids (several can share a page), so compare with them masked
+  const ids = (svg) => svg.replace(/\b(bd|gl|gw|rf|bt|cbl)([ek])[0-9a-z]+\b/g, "$1$2#");
+  for (const style of ["ev9", "classic"]) {
+    const withoutOpt = ids(V.carDiagram(s, { width: 200, style }));
+    const withEvOpt = ids(V.carDiagram(s, { width: 200, powertrain: "ev", style }));
+    assert.strictEqual(withoutOpt, withEvOpt, style + ": omitting powertrain must render identically to powertrain:'ev'");
+    assert.ok(withoutOpt.includes(">78%<"), style + ": EV diagram must still show the drive battery %");
+  }
+  assert.ok(V.carDiagram(s).includes("kiaaccess-car-ev9"), "the EV9 style is the default");
+  assert.ok(!V.carDiagram(s, { style: "classic" }).includes("kiaaccess-car-ev9"), 'style:"classic" draws the original');
 }
 
 // ---- o.battery === false must still suppress the centre cell(s)
@@ -159,6 +165,42 @@ const V = require("../core/visuals.js");
   // no power reading -> nothing to estimate from; not charging -> no readout at all
   assert.strictEqual(amps(draw({ charging: true })), null);
   assert.strictEqual(amps(draw({ charging: false, chargeKw: 7.4 })), null);
+}
+
+
+// ---- EV9 style: every state flag the classic diagram shows must change the EV9 drawing too ----
+{
+  const ids = (svg) => svg.replace(/\b(bd|gl|gw|rf|bt|cbl)([ek])[0-9a-z]+\b/g, "$1$2#");
+  const base = { locked: true, batteryPct: 78, carOn: false, headlights: false };
+  const ev9 = (extra, o) => ids(V.carDiagramEV9(Object.assign({}, base, extra), Object.assign({ width: 200 }, o || {})));
+  const plain = ev9({});
+  const flags = {
+    unlocked: { locked: false }, lockUnknown: { locked: null }, doorFL: { doorFL: true }, doorFR: { doorFR: true },
+    doorRL: { doorRL: true }, doorRR: { doorRR: true }, winFL: { winFL: true }, winRR: { winRR: true },
+    hood: { hood: true }, trunk: { trunk: true }, sunroof: { sunroof: true }, headlights: { headlights: true },
+    carOn: { carOn: true }, tyreFL: { tyreFL: true }, tyreAny: { tyreAny: true }, defrost: { defrost: true },
+    rearHeat: { rearHeat: true }, mirrorHeat: { mirrorHeat: true }, steerHeat: { steerHeat: true },
+    heat: { climate: "heat" }, cool: { climate: "cool" }, climOn: { climate: "on" }, flashing: { flashing: true },
+    plugged: { plugged: true }, charging: { charging: true }, v2l: { v2l: true }, v12: { car12vPct: 60 },
+    outside: { outsideTempC: 3 }, alert: { alerts: [{ level: "warning", label: "Door" }] }, lowBatt: { batteryPct: 8 }
+  };
+  for (const [name, extra] of Object.entries(flags)) {
+    assert.notStrictEqual(ev9(extra), plain, "EV9 style must show " + name);
+  }
+  // the same readouts as the classic diagram
+  assert.ok(ev9({ charging: true, chargeKw: 7.4 }).includes(">7.4kW<") && ev9({ charging: true, chargeKw: 7.4 }).includes(">~31A<"), "EV9: kW and estimated amps");
+  assert.ok(ev9({ climate: "heat", airTempC: 21 }, { tempUnit: "C" }).includes("21°"), "EV9: climate set-point");
+  assert.ok(ev9({ outsideTempC: 3 }, { tempUnit: "C" }).includes("3°"), "EV9: outside temperature");
+  assert.ok(ev9({ car12vPct: 71 }).includes(">71%<"), "EV9: 12V battery");
+  assert.ok(ev9({ batteryPct: null }).includes(">—<"), "EV9: unknown battery shows a dash");
+  assert.ok(!ev9({ batteryPct: 63 }, { battery: false }).includes(">63%<"), "EV9: battery:false omits the drive battery");
+  // gas / hybrid keep the classic centre cells
+  assert.ok(ev9({ fuelPct: 62, batteryPct: null }, { powertrain: "gas" }).includes(">62%<"), "EV9: gas shows the fuel level");
+  const hy = ev9({ batteryPct: 64, fuelPct: 71 }, { powertrain: "hybrid" });
+  assert.ok(hy.includes(">64%<") && hy.includes(">71%<"), "EV9: hybrid shows both cells");
+  // ids are unique per diagram, so two cars can share a page
+  const a = V.carDiagramEV9(base), b = V.carDiagramEV9(base);
+  assert.notStrictEqual(a.match(/id="(bd[^"]+)"/)[1], b.match(/id="(bd[^"]+)"/)[1], "EV9 SVG ids must differ between diagrams");
 }
 
 console.log("all visuals tests passed");
