@@ -13,6 +13,9 @@ function freshHelper(cacheDir) {
   const helper = loadNodeHelper();
   helper.sendSocketNotification = () => {}; // overridden per-test where the calls matter
   helper.start();
+  // the bundled-library check (_ensureLibrary) is about the real install;
+  // tests mustn't depend on the local ./venv's version or start pip
+  helper._libState = "ok";
   if (cacheDir) helper.cacheDir = cacheDir;
   return helper;
 }

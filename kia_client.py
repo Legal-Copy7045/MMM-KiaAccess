@@ -461,6 +461,12 @@ def dump_vehicle(vehicle, region=None):
     # Replaces whatever the generic copy above made of the library's list.
     out["daily_stats"] = _energy_log(vehicle, imperial)
 
+    # charging-connector lock (EU CCS2): the enum's name, not its number
+    lock_state = getattr(vehicle, "ev_connector_lock_state", None)
+    out["ev_connector_lock_state"] = (
+        lock_state.name.lower() if isinstance(lock_state, enum.Enum) else None
+    )
+
     # EU-CCI charge-complete alarm: the library reports four preset flags
     # (exactly one set, like a radio button); expose the active one
     for flag, label in (("ev_charge_complete_alarm_before_10min", "10 min before"),

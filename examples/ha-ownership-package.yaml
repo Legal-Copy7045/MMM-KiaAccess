@@ -184,7 +184,7 @@ template:
       - name: "Kia lease excess cost projected"
         unique_id: kia_lease_excess_cost_projected
         unit_of_measurement: "USD"
-        icon: mdi:cash-alert
+        icon: mdi:cash-clock
         availability: "{{ states('sensor.kia_lease_projected_total') not in ['unknown', 'unavailable', 'none', 'None', none] }}"
         state: >
           {% set rate = 0.25 %}

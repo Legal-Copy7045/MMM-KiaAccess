@@ -1146,6 +1146,7 @@ async function testRangeMapRace() {
 // never checked or upgraded, never holds back a fetch ----
 {
   const helper = freshHelper();
+  helper._libState = undefined; // run the real check (freshHelper pre-sets it)
   assert.strictEqual(helper._ensureLibrary("/opt/custom/python3"), "ok");
   assert.strictEqual(helper._libState, "ok", "decided once per process");
 }
