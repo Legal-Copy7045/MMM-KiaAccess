@@ -38,6 +38,7 @@ g.KiaAccessEntities={
     { "key": "total_power_consumed", "domain": "sensor", "name": "Energy used (90 days)", "device_class": "energy", "unit": "Wh", "state_class": "total", "category": "diagnostic", "enabled_default": false },
     { "key": "total_power_regenerated", "domain": "sensor", "name": "Energy regenerated (90 days)", "device_class": "energy", "unit": "Wh", "state_class": "total", "category": "diagnostic", "enabled_default": false },
     { "key": "power_consumption_30d", "domain": "sensor", "name": "Consumption (30-day average)", "unit": "Wh/km", "icon": "mdi:lightning-bolt", "state_class": "measurement", "category": "diagnostic", "enabled_default": false },
+    { "key": "ev_connector_lock_state", "domain": "sensor", "name": "Charging connector lock", "icon": "mdi:ev-plug-type2", "category": "diagnostic", "enabled_default": false },
     { "key": "ev_charge_complete_alarm", "domain": "sensor", "name": "Charge-complete alarm", "icon": "mdi:bell-ring-outline", "category": "diagnostic", "enabled_default": false },
     { "key": "ev_v2l_discharge_remain_time", "domain": "sensor", "name": "V2L time remaining", "device_class": "duration", "unit": "min", "category": "diagnostic", "enabled_default": false },
     { "key": "ev_v2l_discharge_dte", "domain": "sensor", "name": "V2L range remaining (raw)", "icon": "mdi:road-variant", "category": "diagnostic", "enabled_default": false },

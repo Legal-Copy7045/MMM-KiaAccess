@@ -808,4 +808,11 @@ assert kia_client.dump_vehicle(_Veh(ev_charge_complete_alarm_before_20min=True,
                                     ev_charge_complete_alarm_off=False))["ev_charge_complete_alarm"] == "20 min before"
 assert kia_client.dump_vehicle(_Veh())["ev_charge_complete_alarm"] is None
 
+# charging-connector lock: the enum's readable name, None when unreported
+from hyundai_kia_connect_api.const import CHARGING_CONNECTOR_LOCK_STATE  # noqa: E402
+
+assert kia_client.dump_vehicle(_Veh(ev_connector_lock_state=CHARGING_CONNECTOR_LOCK_STATE.LOCKED))[
+    "ev_connector_lock_state"] == "locked"
+assert kia_client.dump_vehicle(_Veh())["ev_connector_lock_state"] is None
+
 print("dump_vehicle tests passed")
