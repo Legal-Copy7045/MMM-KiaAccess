@@ -942,6 +942,38 @@ assert _r.updated and _r.updated[0][1]["url"] == _want
 _r = _run_resources([{"url": _want, "res_type": "module"}, {"url": "/other/card.js", "res_type": "module"}])
 assert not _r.updated and not _r.created, "already current: untouched"
 print("lovelace resource: versioned, and upgraded on each new release")
+# _register_frontend(): the card is served WITH cache headers (the HA app
+# no longer re-downloads 240 KB on every start), and everything that loads
+# it does so through the versioned URL, so a release still busts the cache
+import homeassistant.components.frontend as _fe_mod  # noqa: E402
+
+
+async def _done(value):
+    return value
+
+_static, _extra = [], []
+
+
+class _FakeHttp:
+    async def async_register_static_paths(self, configs):
+        _static.extend(configs)
+
+
+_orig_extra = _fe_mod.add_extra_js_url
+_fe_mod.add_extra_js_url = lambda hass, url: _extra.append(url)
+init._FRONTEND_REGISTERED = False
+try:
+    asyncio.run(init._register_frontend(type("H", (), {
+        "data": {}, "http": _FakeHttp(),
+        "async_add_executor_job": staticmethod(lambda fn, *a: _done(fn(*a))),
+    })()))
+finally:
+    _fe_mod.add_extra_js_url = _orig_extra
+    init._FRONTEND_REGISTERED = False
+assert len(_static) == 1 and _static[0].cache_headers is True, _static
+assert _static[0].url_path == init.CARD_URL
+assert _extra == [init.CARD_URL + "?v=" + init.VERSION], _extra
+print("frontend: card cached by the browser, loaded through the versioned URL")
 assert os.path.exists(
     os.path.join(ROOT, "custom_components/kia_access/frontend/kia-access-card.js")
 ), "card bundle not vendored"

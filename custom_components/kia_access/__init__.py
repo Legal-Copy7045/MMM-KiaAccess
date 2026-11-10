@@ -300,6 +300,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 CARD_URL = f"/{DOMAIN}/kia-access-card.js"
+# what the frontend actually loads: the card is served with long-lived cache
+# headers, so the version in the URL is what busts the cache on an update
+CARD_URL_VERSIONED = f"{CARD_URL}?v={VERSION}"
 _CARD_PATH = os.path.join(os.path.dirname(__file__), "frontend", "kia-access-card.js")
 
 
@@ -312,19 +315,24 @@ async def _register_frontend(hass: HomeAssistant) -> None:
         _LOGGER.warning("Kia Access card bundle missing at %s", _CARD_PATH)
         return
     try:
+        # cache_headers=True: browsers and the HA app keep the 240 KB bundle
+        # instead of re-downloading it on every start. Every URL that loads
+        # it carries ?v=<version> (CARD_URL_VERSIONED, below), so a new
+        # release is a new URL and is fetched fresh.
         try:
             from homeassistant.components.http import StaticPathConfig
 
             await hass.http.async_register_static_paths(
-                [StaticPathConfig(CARD_URL, _CARD_PATH, False)]
+                [StaticPathConfig(CARD_URL, _CARD_PATH, True)]
             )
         except ImportError:  # HA < 2024.7
-            hass.http.register_static_path(CARD_URL, _CARD_PATH, False)
+            hass.http.register_static_path(CARD_URL, _CARD_PATH, True)
 
         from homeassistant.components.frontend import add_extra_js_url
 
-        # version query string busts the browser cache after a HACS update
-        add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+        # versioned: with cache headers on, the version is what makes a HACS
+        # update load the new card
+        add_extra_js_url(hass, CARD_URL_VERSIONED)
     except Exception as err:  # noqa: BLE001
         # leave _FRONTEND_REGISTERED False so the next entry setup retries
         _LOGGER.warning("Could not auto-register Kia Access card: %s", err)
@@ -370,11 +378,12 @@ async def _ensure_lovelace_resource(hass: HomeAssistant, url: str) -> None:
         # guarded helper internally, but we need self.data populated first
         # too, for the dedup check right after
         await resources._async_ensure_loaded()  # noqa: SLF001
-        # Versioned, like the add_extra_js_url copy: without it the browser /
-        # the HA app kept serving its cached copy of the plain URL after a
-        # HACS update, and since this resource loads first and the card only
-        # defines itself once, the OLD card stayed on screen. An existing
-        # entry (versioned or not) is rewritten to the current version.
+        # Versioned, like the add_extra_js_url copy -- required now the card
+        # is served with cache headers: the plain URL would stay cached, and
+        # since this resource loads first and the card only defines itself
+        # once, the OLD card would stay on screen after a HACS update. An
+        # existing entry (plain or an older version) is rewritten to the
+        # current version.
         versioned = f"{url}?v={VERSION}"
         for item in resources.async_items():
             if str(item.get(CONF_URL) or "").split("?", 1)[0] != url:

@@ -97,6 +97,7 @@ def make_coordinator(entry, hass, poller):
     c._command_lock = asyncio.Lock()
     c._timers_store = _FakeStore({})
     c._geo_cache = {}
+    c._geo_miss = {}
     c._geo_store = _FakeStore({"geo": {}})
     c._cal_pois = []
     c._static_pois = []

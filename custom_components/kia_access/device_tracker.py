@@ -48,10 +48,10 @@ class KiaAccessDeviceTracker(KiaAccessEntity, TrackerEntity):
     def location_accuracy(self) -> int:
         return 0  # the Kia API doesn't report a GPS accuracy
 
-    @property
-    def battery_level(self) -> int | None:
-        pct = _num(self.coordinator.vehicle.get("ev_battery_percentage"))
-        return round(pct) if pct is not None else None
+    # No battery_level here: overriding it on BaseTrackerEntity is
+    # deprecated (Home Assistant warns it stops working). The drive battery
+    # is its own sensor (ev_battery_percentage, "EV battery"); fuel and 12V
+    # have theirs.
 
     @property
     def available(self) -> bool:
