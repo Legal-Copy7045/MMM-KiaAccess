@@ -66,6 +66,39 @@ CHARGER_POWER_ACTIVE_THRESHOLD_W = 50
 # within well under this window.
 CHARGER_START_SETTLE_SECONDS = 90
 
+# a calendar / static-destination address that failed to geocode isn't
+# looked up again for this long (see _geocode_cached)
+GEO_MISS_TTL_SEC = 24 * 3600
+
+# Calendar locations that aren't places: online meetings and links. Matched
+# on the whole location text (lower-cased), so an address that merely
+# contains one of these words in a street name isn't caught.
+_ONLINE_EXACT = frozenset({
+    "teams", "microsoft teams", "zoom", "google meet", "meet", "webex",
+    "skype", "facetime", "online", "virtual", "remote",
+})
+_ONLINE_PHRASES = (
+    "microsoft teams", "teams meeting", "teams.microsoft.com", "zoom meeting",
+    "zoom.us", "google meet", "meet.google.com", "webex", "skype meeting",
+    "gotomeeting", "goto meeting", "whereby.com", "chime.aws",
+)
+
+
+def is_online_location(location: str) -> bool:
+    """True for a calendar location that's an online meeting or a link --
+    "Microsoft Teams Meeting", "Zoom", a meet.google.com / webex link,
+    anything starting http(s):// or www. -- which can't be driven to, so
+    geocoding it is pointless (and used to fail, and retry, every refresh)."""
+    text = " ".join(str(location or "").lower().split())
+    if not text:
+        return False
+    if text.startswith(("http://", "https://", "www.")) or "://" in text:
+        return True
+    if text in _ONLINE_EXACT:
+        return True
+    return any(p in text for p in _ONLINE_PHRASES)
+
+
 # A failed poll right after a good one is retried this soon (once) instead
 # of after a whole scan_interval -- see _update_failed().
 QUICK_RETRY_SECONDS = 60
@@ -168,6 +201,8 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
         # _emit_alerts() whenever either value actually changes.
         self._timers_store = Store(hass, 1, f"{DOMAIN}_timers_{entry.entry_id}")
         self._geo_cache: dict = {}
+        # failed lookups: key -> {"at", "sig", "reason"} -- see _geocode_cached
+        self._geo_miss: dict = {}
         self._geo_store = Store(hass, 1, f"{DOMAIN}_geocache_{entry.entry_id}")
         self._cal_pois: list[dict] = []
         self._static_pois: list[dict] = []
@@ -244,14 +279,19 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
     async def async_load_prefs(self) -> None:
         data = await self._prefs_store.async_load() or {}
         self.climate_prefs = {**DEFAULT_CLIMATE_PREFS, **data}
-        raw = (await self._geo_store.async_load() or {}).get("geo", {})
+        stored = await self._geo_store.async_load() or {}
+        raw = stored.get("geo", {})
+        self._geo_miss = {
+            k: v for k, v in (stored.get("miss") or {}).items()
+            if isinstance(v, dict) and time.time() - float(v.get("at") or 0) < GEO_MISS_TTL_SEC
+        }
         # older versions cached `None` (or a 3-tuple) on a failed geocode, which
         # then stuck forever — keep only clean [lat, lon] pairs
         self._geo_cache = {
             k: [v[0], v[1]] for k, v in raw.items() if self._valid_ll(v)
         }
         if len(self._geo_cache) != len(raw):
-            await self._geo_store.async_save({"geo": self._geo_cache})
+            await self._save_geo()
         self._route_budget = await self._route_store.async_load() or {}
         tmdata = await self._timers_store.async_load() or {}
         self._home_unplugged_since = tmdata.get("home_unplugged_since")
@@ -635,12 +675,29 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             raise RuntimeError("no match")
         return hit["lat"], hit["lon"]
 
+    async def _note_geo_miss(self, key: str, sig: str, reason: str) -> None:
+        self._geo_miss[key] = {"at": time.time(), "sig": sig, "reason": reason[:200]}
+        await self._save_geo()
+
+    async def _save_geo(self) -> None:
+        now = time.time()
+        self._geo_miss = {
+            k: v for k, v in self._geo_miss.items()
+            if now - float(v.get("at") or 0) < GEO_MISS_TTL_SEC
+        }
+        await self._geo_store.async_save({"geo": self._geo_cache, "miss": self._geo_miss})
+
     async def _geocode_cached(self, address: str):
         """address -> (lat, lon). Tries the routing provider's geocoder first
         (Nominatim increasingly blocks generic clients), then Nominatim.
-        Successful lookups persist; failures are NOT cached and the reason is
+        Successful lookups persist. Online-meeting locations and links are
+        skipped without a lookup; a failure is remembered for GEO_MISS_TTL_SEC
+        (per geocoder set) so it isn't retried every refresh. Reasons are
         stashed on _cal_status. Returns [lat, lon] or None."""
         key = " ".join(address.lower().split())[:200]
+        if is_online_location(address):
+            self._cal_status.setdefault("skipped_online", []).append(address[:80])
+            return None
         if key in self._geo_cache:
             ll = self._geo_cache[key]
             if self._valid_ll(ll):
@@ -665,6 +722,18 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             chain.append((provider, rkey))
         elif rkey and not gkey:
             chain.append(("geoapify", rkey))
+        # a lookup that failed recently, with the same geocoders configured,
+        # isn't retried until GEO_MISS_TTL_SEC passes -- calendar refreshes run
+        # every minute, and each retry used to cost three provider calls and a
+        # warning (adding / changing a geocoding key changes `sig`, so that
+        # retries straight away)
+        sig = "|".join(p for p, _ in chain) + ("|keys" if (gkey or rkey) else "")
+        miss = self._geo_miss.get(key)
+        if miss and miss.get("sig") == sig and time.time() - float(miss.get("at") or 0) < GEO_MISS_TTL_SEC:
+            self._cal_status.setdefault("geocode_errors", []).append(
+                f"{address!r}: not retried until 24 h after it last failed ({miss.get('reason')})"
+            )
+            return None
         attempts: list[str] = []
         latlon = None
         via = None
@@ -690,8 +759,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
 
         if latlon is None:
             msg = f"{address!r}: " + "; ".join(attempts)
-            _LOGGER.warning("Kia Access: could not geocode %s", msg)
+            _LOGGER.warning(
+                "Kia Access: could not geocode %s -- not retrying it for 24 h", msg
+            )
             self._cal_status.setdefault("geocode_errors", []).append(msg)
+            await self._note_geo_miss(key, sig, "; ".join(attempts) or "no match")
             return None
 
         lat, lon = latlon
@@ -702,9 +774,11 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
             self._cal_status.setdefault("geocode_errors", []).append(
                 f"{address!r}: too far from home ({round(lat, 3)},{round(lon, 3)})"
             )
+            await self._note_geo_miss(key, sig, "too far from home")
             return None
         self._geo_cache[key] = [lat, lon]
-        await self._geo_store.async_save({"geo": self._geo_cache})
+        self._geo_miss.pop(key, None)
+        await self._save_geo()
         self._cal_status.setdefault("geocoded_ok", []).append(
             {"address": address, "lat": round(lat, 4), "lon": round(lon, 4),
              "via": via}
@@ -803,6 +877,14 @@ class KiaAccessCoordinator(DataUpdateCoordinator):
                 if not loc:
                     self._cal_status["seen"].append(
                         {"summary": summary[:40], "location": None, "result": "no location"}
+                    )
+                    continue
+                if is_online_location(loc):
+                    # a Teams / Zoom / Meet / Webex meeting or a link: nowhere
+                    # to drive to, so no lookup, and not counted as a place
+                    self._cal_status["seen"].append(
+                        {"summary": summary[:40], "location": loc[:80],
+                         "result": "online meeting -- skipped"}
                     )
                     continue
                 self._cal_status["with_location"] += 1

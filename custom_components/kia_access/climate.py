@@ -23,6 +23,11 @@ from .entity import KiaAccessEntity
 
 _TRUE = {True, "true", "True", 1, "1", "on", "yes"}
 
+# Home Assistant's native climate temperature API (native_temperature_unit /
+# native_current_temperature / native_target_temperature). Releases before it
+# only know the plain names -- see the aliases at the end of this file.
+_NATIVE_API = hasattr(ClimateEntity, "native_temperature_unit")
+
 
 def _num(x):
     try:
@@ -51,15 +56,19 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "climate")
+        # The car's own unit (USA sends °F, everywhere else incl. Canada °C).
+        # It follows the entry's region, which can't change without the entry
+        # reloading, so it's set once. Home Assistant converts for display.
+        unit = coordinator.climate_temp_unit()
+        if _NATIVE_API:
+            self._attr_native_temperature_unit = unit
+        else:
+            self._attr_temperature_unit = unit
 
-    # ---- units / bounds (region-aware: USA sends °F, Canada °C) ----
-    @property
-    def temperature_unit(self) -> str:
-        return self.coordinator.climate_temp_unit()
-
+    # ---- units / bounds ----
     @property
     def _fahrenheit(self) -> bool:
-        return self.temperature_unit == UnitOfTemperature.FAHRENHEIT
+        return self.coordinator.climate_temp_unit() == UnitOfTemperature.FAHRENHEIT
 
     @property
     def min_temp(self) -> float:
@@ -74,15 +83,19 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
         return 1 if self._fahrenheit else 0.5
 
     # ---- state ----
+    # In the native unit above. Home Assistant 2026.x+ reads these native_*
+    # names (the old current_temperature / target_temperature / temperature_
+    # unit overrides are deprecated, removed in 2027.11); older releases get
+    # them through the aliases at the bottom of this file.
     @property
-    def current_temperature(self):
+    def native_current_temperature(self):
         c = _num(self.coordinator.vehicle.get("air_temperature"))  # payload is °C
         if c is None:
             return None
         return round(c * 9 / 5 + 32) if self._fahrenheit else c
 
     @property
-    def target_temperature(self):
+    def native_target_temperature(self):
         c = self.coordinator.climate_prefs.get("last_temp_c")
         if c is None:
             return None
@@ -141,3 +154,14 @@ class KiaAccessClimate(KiaAccessEntity, ClimateEntity):
         await self.coordinator.async_run_command(
             "stop_climate", context=self._ctx()
         )
+
+
+if not _NATIVE_API:
+    # Home Assistant before the native climate API reads the plain names.
+    # Attached only there: on current releases overriding them is deprecated.
+    KiaAccessClimate.current_temperature = property(
+        lambda self: self.native_current_temperature
+    )
+    KiaAccessClimate.target_temperature = property(
+        lambda self: self.native_target_temperature
+    )

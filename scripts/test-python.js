@@ -52,7 +52,8 @@ const HASS_TESTS = [
   "test/entity_gating_test.py",
   "test/service_authorization_test.py",
   "test/map_keys_test.py",
-  "test/coordinator_routing_budget_test.py"
+  "test/coordinator_routing_budget_test.py",
+  "test/coordinator_geocode_test.py"
 ];
 
 function run(file) {

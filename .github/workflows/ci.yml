@@ -131,6 +131,8 @@ jobs:
         run: python test/map_keys_test.py
       - name: Coordinator routing budget
         run: python test/coordinator_routing_budget_test.py
+      - name: Calendar geocoding (online meetings, miss cache)
+        run: python test/coordinator_geocode_test.py
 
   hacs:
     runs-on: ubuntu-latest
