@@ -1,6 +1,6 @@
 /* Kia Access - interactive range map card (custom:kia-range-map-card).
  *
- * A Leaflet map (loaded from cdnjs) centred on the car, showing the reachable
+ * A Leaflet map (served by the integration itself) centred on the car, showing the reachable
  * driving area as a polygon you can pan / zoom, with a one-way / round-trip
  * toggle and markers for the zones you could reach. The shape is a real
  * road-network isochrone when the reach is <= ~100 km (Geoapify, needs an API
@@ -15,18 +15,19 @@
   var RNG = self.KiaAccessRange;
   var ISO = self.KiaAccessIsoline;
 
+  // Leaflet ships with the integration (custom_components/kia_access/
+  // frontend/leaflet/, the unmodified leaflet@1.9.4 dist files) and is
+  // served by Home Assistant itself at LEAFLET_URL in __init__.py -- this
+  // script runs inside the HA dashboard's own origin, where `hass` and the
+  // user's auth token live, so it never loads code from the internet.
+  // Subresource Integrity is kept as a second check: the hashes are the
+  // published SRI values for the leaflet@1.9.4 release files,
+  // so a modified copy is refused. Upgrading Leaflet means new files, a new
+  // version here and in LEAFLET_URL, and new hashes, together.
   var LEAFLET_VER = "1.9.4";
-  var LEAFLET_JS = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/" + LEAFLET_VER + "/leaflet.js";
-  var LEAFLET_CSS = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/" + LEAFLET_VER + "/leaflet.css";
-  // Subresource Integrity for the pinned version above -- this script runs
-  // inside the HA dashboard's own origin, where `hass` and the user's auth
-  // token live, so a CDN or DNS compromise serving different bytes under
-  // this same URL would be a full HA account takeover, not just a broken
-  // map. Hashes are cdnjs' own published SRI values for leaflet@1.9.4
-  // (https://api.cdnjs.com/libraries/leaflet/1.9.4?fields=sri), verified
-  // against a freshly downloaded copy of both files before pinning here --
-  // bump both the version above and these hashes together if Leaflet is
-  // ever upgraded.
+  var LEAFLET_BASE = "/kia_access/leaflet-" + LEAFLET_VER + "/";
+  var LEAFLET_JS = LEAFLET_BASE + "leaflet.js";
+  var LEAFLET_CSS = LEAFLET_BASE + "leaflet.css";
   var LEAFLET_JS_SRI = "sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg==";
   var LEAFLET_CSS_SRI = "sha512-Zcn6bjR/8RZbLEpLIeOwNtzREBAJnUKESxces60Mpoj+2okopSAcSUIUOseddDm0cxnGQzxIR7vJgsLZbdLE3w==";
 
@@ -38,7 +39,6 @@
       var s = document.createElement("script");
       s.src = LEAFLET_JS;
       s.integrity = LEAFLET_JS_SRI;
-      s.crossOrigin = "anonymous";
       s.onload = function () { resolve(self.L); };
       s.onerror = function () { _jsPromise = null; reject(new Error("could not load Leaflet")); };
       document.head.appendChild(s);
@@ -279,7 +279,6 @@
       css.rel = "stylesheet";
       css.href = LEAFLET_CSS;
       css.integrity = LEAFLET_CSS_SRI;
-      css.crossOrigin = "anonymous";
       root.innerHTML =
         "<ha-card><div class='krm-wrap'>" +
         "<div id='krm-map' style='height:" + h + "px'></div>" +
@@ -307,7 +306,7 @@
         self0._L = L;
         self0._map = L.map(el, { zoomSnap: 0.5 });
         // `inp` was captured back at the TOP of this render, before
-        // loadLeafletJs() (a CDN script fetch) resolved -- the map-keys
+        // loadLeafletJs() (a script fetch) resolved -- the map-keys
         // websocket call kicked off in that same _inputs() call is a local
         // round-trip to hass's own backend, and in practice almost always
         // resolves FIRST. When it does, self0._fetchedKeys is already
@@ -326,7 +325,7 @@
       }).catch(function (e) {
         root.innerHTML =
           "<ha-card><div class='krm-msg'>Range map: " + esc(e.message) +
-          " (Leaflet is loaded from cdnjs — check the browser can reach it).</div>" +
+          " (Leaflet is served by the Kia Access integration — restart Home Assistant after updating it).</div>" +
           "</ha-card><style>" + STYLE + "</style>";
         self0._built = false;
       });

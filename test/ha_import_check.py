@@ -970,8 +970,13 @@ try:
 finally:
     _fe_mod.add_extra_js_url = _orig_extra
     init._FRONTEND_REGISTERED = False
-assert len(_static) == 1 and _static[0].cache_headers is True, _static
-assert _static[0].url_path == init.CARD_URL
+assert all(c.cache_headers is True for c in _static), _static
+_paths = {c.url_path: c.path for c in _static}
+assert set(_paths) == {init.CARD_URL, init.LEAFLET_URL}, _static
+# Leaflet is served from the integration's own folder (no CDN), and the
+# files the card loads are actually there
+assert os.path.isfile(os.path.join(_paths[init.LEAFLET_URL], "leaflet.js"))
+assert os.path.isfile(os.path.join(_paths[init.LEAFLET_URL], "leaflet.css"))
 assert _extra == [init.CARD_URL + "?v=" + init.VERSION], _extra
 print("frontend: card cached by the browser, loaded through the versioned URL")
 assert os.path.exists(

@@ -304,6 +304,12 @@ CARD_URL = f"/{DOMAIN}/kia-access-card.js"
 # headers, so the version in the URL is what busts the cache on an update
 CARD_URL_VERSIONED = f"{CARD_URL}?v={VERSION}"
 _CARD_PATH = os.path.join(os.path.dirname(__file__), "frontend", "kia-access-card.js")
+# Leaflet (the range map's map library) ships with the integration and is
+# served from Home Assistant itself: the dashboard never loads code from the
+# internet. The folder name carries the Leaflet version, so a future upgrade
+# is a new URL even with cache headers on.
+LEAFLET_URL = f"/{DOMAIN}/leaflet-1.9.4"
+_LEAFLET_DIR = os.path.join(os.path.dirname(__file__), "frontend", "leaflet")
 
 
 async def _register_frontend(hass: HomeAssistant) -> None:
@@ -323,10 +329,14 @@ async def _register_frontend(hass: HomeAssistant) -> None:
             from homeassistant.components.http import StaticPathConfig
 
             await hass.http.async_register_static_paths(
-                [StaticPathConfig(CARD_URL, _CARD_PATH, True)]
+                [
+                    StaticPathConfig(CARD_URL, _CARD_PATH, True),
+                    StaticPathConfig(LEAFLET_URL, _LEAFLET_DIR, True),
+                ]
             )
         except ImportError:  # HA < 2024.7
             hass.http.register_static_path(CARD_URL, _CARD_PATH, True)
+            hass.http.register_static_path(LEAFLET_URL, _LEAFLET_DIR, True)
 
         from homeassistant.components.frontend import add_extra_js_url
 

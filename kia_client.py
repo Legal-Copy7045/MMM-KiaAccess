@@ -17,6 +17,7 @@ import dataclasses
 import datetime
 import enum
 import hashlib
+import hmac
 import json
 import logging
 import math
@@ -94,8 +95,14 @@ def _load_auth_state(path) -> dict:
 
 def _save_auth_state(path, state) -> None:
     try:
-        with open(path, "w", encoding="utf-8") as fh:
+        # owner-only, like the token file: it holds the attempt fingerprint
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(state, fh)
+        try:
+            os.chmod(path, 0o600)  # a file an older version created 0644
+        except OSError:
+            pass
     except OSError:
         pass
 
@@ -115,24 +122,43 @@ def _library_version() -> str:
     return _LIBRARY_VERSION
 
 
-def _attempt_key(job) -> str:
+# PBKDF2 work factor for the attempt fingerprint below. It's checked at
+# most once per poll, and only while failed logins are on record.
+_ATTEMPT_KDF_ITERATIONS = 200_000
+
+
+def _attempt_key(job, salt: str) -> str:
     """Fingerprint of what a login attempt is made WITH: the password, PIN
-    and library version (hashed -- never stored in the clear). The cooldown
-    is about not repeating the SAME failing login; a corrected password or
-    an updated library is a new attempt and must not wait out a cooldown
-    the old one earned (issue #2: a library update that fixed the login
-    still sat behind 30+ minutes of "cooling down")."""
+    and library version. The cooldown is about not repeating the SAME
+    failing login; a corrected password or an updated library is a new
+    attempt and must not wait out a cooldown the old one earned (issue #2:
+    a library update that fixed the login still sat behind 30+ minutes of
+    "cooling down").
+
+    It's written to the auth state file, so it's a salted, deliberately slow
+    password hash (PBKDF2-HMAC-SHA256, random per-file salt), not a plain
+    digest: the file can't be used to test password guesses quickly."""
     raw = "|".join([str(job.get("password") or ""), str(job.get("pin") or ""), _library_version()])
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return hashlib.pbkdf2_hmac(
+        "sha256", raw.encode("utf-8"), bytes.fromhex(salt), _ATTEMPT_KDF_ITERATIONS
+    ).hex()
 
 
 def _state_for_attempt(path, job) -> dict:
     """The auth state for this account -- cleared (and the file reset) when
-    it was recorded for a different password / PIN / library version."""
+    it was recorded for a different password / PIN / library version, or by
+    an older version that stored an unsalted fingerprint."""
     state = _load_auth_state(path)
-    if state and state.get("attemptKey") not in (None, _attempt_key(job)):
-        _save_auth_state(path, {})
-        return {}
+    key = state.get("attemptKey") if state else None
+    if key is not None:
+        salt = state.get("attemptSalt")
+        try:
+            same = bool(salt) and hmac.compare_digest(str(key), _attempt_key(job, str(salt)))
+        except ValueError:  # a salt that isn't hex
+            same = False
+        if not same:
+            _save_auth_state(path, {})
+            return {}
     return state
 
 
@@ -639,7 +665,9 @@ def _note_auth_failure(job, exc):
     None (a sub-threshold failure -- the caller re-raises the original)."""
     path = _auth_state_file(job)
     new_state = _record_auth_failure(_state_for_attempt(path, job))
-    new_state["attemptKey"] = _attempt_key(job)
+    salt = new_state.get("attemptSalt") or os.urandom(16).hex()
+    new_state["attemptSalt"] = salt
+    new_state["attemptKey"] = _attempt_key(job, salt)
     _save_auth_state(path, new_state)
     # remaining > 0, not merely "cooldownUntil is set": a cooldown that has
     # already EXPIRED leaves its old cooldownUntil in the state file, and

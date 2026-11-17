@@ -362,4 +362,41 @@ with tempfile.TemporaryDirectory() as tmpdir:
         _FakeVehicleManager.update_vehicle_with_cached_state = _orig_update
     assert "9035" in msg and "npm install" in msg and "HACS" in msg, msg
 
+# ---- the attempt fingerprint on disk is a salted, slow hash (CodeQL
+# py/weak-sensitive-data-hashing): no plain digest of the password, a
+# per-file salt, owner-only file, and an old unsalted key is discarded ----
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import stat as _stat  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    _reset(tmpdir)
+    _CONTROL["refresh"] = "auth"
+    _trip(JOB)
+    path = K._auth_state_file(JOB)
+    with open(path, encoding="utf-8") as fh:
+        saved = json.load(fh)
+    raw = "|".join(["pw", "", K._library_version()])
+    assert len(saved.get("attemptSalt", "")) == 32, saved
+    assert saved["attemptKey"] == hashlib.pbkdf2_hmac(
+        "sha256", raw.encode(), bytes.fromhex(saved["attemptSalt"]), K._ATTEMPT_KDF_ITERATIONS
+    ).hex()
+    assert hashlib.sha256(raw.encode()).hexdigest()[:16] not in json.dumps(saved), \
+        "the old unsalted digest must not be stored"
+    assert K._ATTEMPT_KDF_ITERATIONS >= 100_000
+    if os.name == "posix":
+        assert _stat.S_IMODE(os.stat(path).st_mode) == 0o600, oct(os.stat(path).st_mode)
+    # a second, unrelated file gets its own salt
+    other = dict(JOB, username="someone@else.com")
+    _trip(other)
+    with open(K._auth_state_file(other), encoding="utf-8") as fh:
+        assert json.load(fh)["attemptSalt"] != saved["attemptSalt"]
+    # a state file written by an older version (unsalted key) is reset
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"attemptKey": hashlib.sha256(raw.encode()).hexdigest()[:16],
+                   "cooldownUntil": _NOW["t"] + 3600}, fh)
+    assert K._state_for_attempt(path, JOB) == {}
+    with open(path, encoding="utf-8") as fh:
+        assert json.load(fh) == {}
+
 print("all auth_cooldown tests passed")
