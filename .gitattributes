@@ -1,3 +1,5 @@
 # normalise line endings so the CI "gallery not stale" check is stable
 * text=auto eol=lf
 *.png binary
+# vendored Leaflet: kept byte-for-byte as released (the card checks its SRI hash)
+custom_components/kia_access/frontend/leaflet/** -text
