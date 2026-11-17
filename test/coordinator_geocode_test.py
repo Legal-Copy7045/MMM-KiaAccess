@@ -221,6 +221,7 @@ check(sum(1 for s in cal._cal_status["seen"] if "online" in s["result"]) == 2,
       "online meetings shown as skipped")
 
 if failures:
-    print(f"\n{len(failures)} failure(s)")
+    print()
+    print(f"{len(failures)} failure(s)")
     sys.exit(1)
 print("coordinator_geocode_test: all checks passed")
