@@ -223,6 +223,94 @@ def test_fuel_economy_unit_follows_the_car():
     print("-- fuel economy sensors carry the car's own unit")
 
 
+def test_tyre_pressure_kept_while_parked():
+    """kia_uvo #1930: some backends send no tyre pressures while the car is
+    parked. The four tyre sensors keep the last real reading (marked
+    `retained`, with when it was taken), take a fresh one as soon as it
+    comes, and restore the stored kPa value after an HA restart."""
+    from homeassistant.components.sensor import SensorExtraStoredData
+    from homeassistant.core import State
+
+    tyre_keys = {e["key"] for e in ENTITIES if e.get("retain_last")}
+    assert tyre_keys == {"tire_pressure_front_left", "tire_pressure_front_right",
+                         "tire_pressure_rear_left", "tire_pressure_rear_right"}, tyre_keys
+    made = {e._key: type(e) for e in _setup(sensor_mod, "EV") if hasattr(e, "_key")}
+    for key in tyre_keys:
+        assert made[key] is sensor_mod.KiaAccessRetainedSensor, key
+    assert made["ev_battery_percentage"] is sensor_mod.KiaAccessSensor
+
+    spec = next(e for e in ENTITIES if e["key"] == "tire_pressure_front_left")
+    coordinator = _FakeCoordinator("EV", "AU")
+    coordinator.vehicle.update(tire_pressure_front_left=250.0,
+                               last_updated_at="2026-11-20T08:15:00+11:00")
+    ent = sensor_mod.KiaAccessRetainedSensor(coordinator, spec)
+    ent.async_write_ha_state = lambda: None
+    assert ent.native_value == 250
+    assert ent.extra_state_attributes == {
+        "last_reported": "2026-11-20T08:15:00+11:00", "retained": False}
+
+    coordinator.vehicle.update(tire_pressure_front_left=None,
+                               last_updated_at="2026-11-20T18:00:00+11:00")
+    ent._handle_coordinator_update()
+    assert ent.native_value == 250, "parked: last reading kept"
+    assert ent.extra_state_attributes == {
+        "last_reported": "2026-11-20T08:15:00+11:00", "retained": True}
+
+    coordinator.vehicle.update(tire_pressure_front_left=241.3,
+                               last_updated_at="2026-11-21T07:30:00+11:00")
+    ent._handle_coordinator_update()
+    assert ent.native_value == 241.3
+    assert ent.extra_state_attributes["retained"] is False
+    assert ent.extra_state_attributes["last_reported"] == "2026-11-21T07:30:00+11:00"
+
+    # restart while parked: restore the stored native (kPa) value, not the
+    # state string (that is in the user's display unit, here psi)
+    async def _noop(self):
+        return None
+    sensor_mod.KiaAccessSensor.async_added_to_hass = _noop
+    try:
+        cold = _FakeCoordinator("EV", "AU")
+        cold.vehicle["tire_pressure_front_left"] = None
+        ent2 = sensor_mod.KiaAccessRetainedSensor(cold, spec)
+
+        async def _data():
+            return SensorExtraStoredData(241.3, "kPa")
+
+        async def _state():
+            return State("sensor.x", "35.0", {"last_reported": "2026-11-21T07:30:00+11:00",
+                                              "unit_of_measurement": "psi"})
+        ent2.async_get_last_sensor_data = _data
+        ent2.async_get_last_state = _state
+        assert ent2.native_value is None
+        asyncio.run(ent2.async_added_to_hass())
+        assert ent2.native_value == 241.3, ent2.native_value
+        assert ent2.extra_state_attributes == {
+            "last_reported": "2026-11-21T07:30:00+11:00", "retained": True}
+
+        # a live reading at startup wins over the stored one
+        live = _FakeCoordinator("EV", "AU")
+        live.vehicle["tire_pressure_front_left"] = 238.0
+        ent3 = sensor_mod.KiaAccessRetainedSensor(live, spec)
+        ent3.async_get_last_sensor_data = _data
+        ent3.async_get_last_state = _state
+        asyncio.run(ent3.async_added_to_hass())
+        assert ent3.native_value == 238
+
+        # nothing stored (first install): stays unknown
+        empty = sensor_mod.KiaAccessRetainedSensor(_FakeCoordinator("EV", "AU"), spec)
+
+        async def _none():
+            return None
+        empty.async_get_last_sensor_data = _none
+        empty.async_get_last_state = _none
+        asyncio.run(empty.async_added_to_hass())
+        assert empty.native_value is None
+        assert empty.extra_state_attributes == {"last_reported": None, "retained": False}
+    finally:
+        del sensor_mod.KiaAccessSensor.async_added_to_hass
+    print("-- tyre pressures: last reading kept while parked and restored after restart")
+
+
 if __name__ == "__main__":
     test_gas_vehicle_gets_no_charging_buttons()
     test_ev_vehicle_gets_charging_buttons()
@@ -238,4 +326,5 @@ if __name__ == "__main__":
     test_numeric_booleans()
     test_capability_flags_hide_buttons()
     test_fuel_economy_unit_follows_the_car()
+    test_tyre_pressure_kept_while_parked()
     print("all entity gating tests passed")

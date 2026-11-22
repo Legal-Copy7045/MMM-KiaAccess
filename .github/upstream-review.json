@@ -3,10 +3,5 @@
   "kia_uvo": "v4.1.0",
   "hyundai_kia_connect_api": "5.3.1",
   "reviewed_at": "2026-11-22",
-  "open_alerts": [
-    {
-      "version": "kia_uvo v4.1.0",
-      "summary": "Tyre pressure sensors keep the last known reading while parked and restore it after an HA restart (kia_uvo #1930). Changes existing sensor behaviour; not built."
-    }
-  ]
+  "open_alerts": []
 }

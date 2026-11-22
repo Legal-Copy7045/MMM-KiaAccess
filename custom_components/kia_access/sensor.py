@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import RestoreSensor, SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL, EntityCategory, UnitOfLength
 from homeassistant.core import HomeAssistant, callback
@@ -56,7 +56,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
     entities: list = [
-        KiaAccessSensor(coordinator, spec)
+        (KiaAccessRetainedSensor if spec.get("retain_last") else KiaAccessSensor)(coordinator, spec)
         for spec in ENTITIES
         if spec["domain"] == "sensor"
     ]
@@ -120,6 +120,66 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
             return int(num) if num.is_integer() else num
         except (TypeError, ValueError):
             return val
+
+
+class KiaAccessRetainedSensor(KiaAccessSensor, RestoreSensor):
+    """A catalogue sensor (`retain_last: true`) whose reading some backends
+    only send while the car is on -- tyre pressures on AU/NZ CCS2 come back
+    as a no-data sentinel (None) while parked. Shows the last real reading
+    instead of dropping to unknown, restores it after an HA restart, and
+    says when it was taken (`last_reported`) so a stale pressure is visible.
+    Follows kia_uvo #1930."""
+
+    def __init__(self, coordinator, spec: dict) -> None:
+        super().__init__(coordinator, spec)
+        self._last_value = None
+        self._last_reported = None
+        self._remember()
+
+    def _current(self):
+        return KiaAccessSensor.native_value.fget(self)
+
+    def _remember(self) -> None:
+        val = self._current()
+        if val is not None:
+            self._last_value = val
+            v = self.coordinator.vehicle or {}
+            self._last_reported = str(v.get("last_updated_at") or "") or \
+                dt_util.utcnow().replace(microsecond=0).isoformat()
+
+    @property
+    def native_value(self):
+        val = self._current()
+        return val if val is not None else self._last_value
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "last_reported": self._last_reported,
+            "retained": self._current() is None and self._last_value is not None,
+        }
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._remember()
+        super()._handle_coordinator_update()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self._last_value is not None:
+            return  # a live reading beats a restored one
+        # the stored native value, in the sensor's own unit (kPa) -- not the
+        # state string, which is in whatever display unit the user picked
+        data = await self.async_get_last_sensor_data()
+        if data is None or data.native_value is None:
+            return
+        try:
+            self._last_value = float(data.native_value)
+        except (TypeError, ValueError):
+            return
+        last = await self.async_get_last_state()
+        if last is not None:
+            self._last_reported = last.attributes.get("last_reported")
 
 
 class KiaAccessSeatSensor(KiaAccessEntity, SensorEntity):
