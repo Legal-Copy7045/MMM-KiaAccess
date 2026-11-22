@@ -80,6 +80,12 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
         super().__init__(coordinator, spec["key"])
         self._attr_name = spec["name"]
         self._attr_native_unit_of_measurement = spec.get("unit")
+        # `unit_key`: the car reports this reading's unit itself (fuel
+        # economy: km/L, L/100km, MPG, ...). Keep the last unit seen so a
+        # poll that leaves it out doesn't flip HA's unit (and statistics)
+        # back to none.
+        self._unit_key = spec.get("unit_key")
+        self._last_unit = None
         if spec.get("device_class"):
             self._attr_device_class = spec["device_class"]
         if spec.get("state_class"):
@@ -92,6 +98,15 @@ class KiaAccessSensor(KiaAccessEntity, SensorEntity):
             # only some regions/models report it -- don't add an "unknown"
             # entity to every device; the user can enable it
             self._attr_entity_registry_enabled_default = False
+
+    @property
+    def native_unit_of_measurement(self):
+        if not self._unit_key:
+            return self._attr_native_unit_of_measurement
+        unit = self.coordinator.vehicle.get(self._unit_key)
+        if isinstance(unit, str) and unit.strip():
+            self._last_unit = unit.strip()
+        return self._last_unit
 
     @property
     def native_value(self):

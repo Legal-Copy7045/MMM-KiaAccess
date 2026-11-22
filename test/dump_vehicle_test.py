@@ -815,4 +815,16 @@ assert kia_client.dump_vehicle(_Veh(ev_connector_lock_state=CHARGING_CONNECTOR_L
     "ev_connector_lock_state"] == "locked"
 assert kia_client.dump_vehicle(_Veh())["ev_connector_lock_state"] is None
 
+# fuel economy units (library 5.2): the car's unit code comes through as
+# a readable label on each average_fuel_economy_*_unit key
+_fv = _RealVehicle(id="F1")
+_fv.average_fuel_economy_drive = 5.4
+_fv.average_fuel_economy_unit = 1
+_fd = kia_client.dump_vehicle(_fv, "EU")
+assert _fd["average_fuel_economy_drive"] == 5.4
+for _k in ("drive", "after_refuel", "accumulated"):
+    assert _fd[f"average_fuel_economy_{_k}_unit"] == "L/100km", _fd
+_fv.average_fuel_economy_unit = None
+assert kia_client.dump_vehicle(_fv, "EU")["average_fuel_economy_drive_unit"] is None
+
 print("dump_vehicle tests passed")

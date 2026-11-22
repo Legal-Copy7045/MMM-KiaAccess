@@ -197,6 +197,32 @@ def test_region_specific_entities_start_disabled():
     print("-- region/model-specific catalogue entities are created disabled")
 
 
+def test_fuel_economy_unit_follows_the_car():
+    """hyundai_kia_connect_api 5.2 translates the car's fuel-economy unit
+    code (average_fuel_economy_*_unit); the sensor shows it, keeps the last
+    one through a poll that leaves it out, and fixed-unit sensors are
+    unaffected."""
+    coordinator = _FakeCoordinator("PHEV")
+    spec = next(e for e in ENTITIES if e["key"] == "average_fuel_economy_drive")
+    ent = sensor_mod.KiaAccessSensor(coordinator, spec)
+    assert ent.native_unit_of_measurement is None, "no unit reported yet"
+    coordinator.vehicle["average_fuel_economy_drive_unit"] = "L/100km"
+    coordinator.vehicle["average_fuel_economy_drive"] = 5.4
+    assert ent.native_unit_of_measurement == "L/100km"
+    assert ent.native_value == 5.4
+    coordinator.vehicle["average_fuel_economy_drive_unit"] = None
+    assert ent.native_unit_of_measurement == "L/100km", "last unit kept"
+    coordinator.vehicle["average_fuel_economy_drive_unit"] = "MPG"
+    assert ent.native_unit_of_measurement == "MPG"
+    for key in ("average_fuel_economy_after_refuel", "average_fuel_economy_accumulated"):
+        s = next(e for e in ENTITIES if e["key"] == key)
+        assert s.get("unit_key") == key + "_unit", key
+    soc = sensor_mod.KiaAccessSensor(
+        coordinator, next(e for e in ENTITIES if e["key"] == "ev_battery_percentage"))
+    assert soc.native_unit_of_measurement == "%"
+    print("-- fuel economy sensors carry the car's own unit")
+
+
 if __name__ == "__main__":
     test_gas_vehicle_gets_no_charging_buttons()
     test_ev_vehicle_gets_charging_buttons()
@@ -211,4 +237,5 @@ if __name__ == "__main__":
     test_region_limited_buttons_only_where_supported()
     test_numeric_booleans()
     test_capability_flags_hide_buttons()
+    test_fuel_economy_unit_follows_the_car()
     print("all entity gating tests passed")
