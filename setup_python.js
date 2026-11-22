@@ -1,11 +1,13 @@
 /* Sets up Python for kia_bridge.py.
  *
- *   1. Find the newest usable python3 (>= 3.12) — system, pyenv, or a
+ *   1. Find the newest usable python3 (>= 3.13) — system, pyenv, or a
  *      previously-downloaded standalone build.
- *   2. If none is >= 3.12, download a self-contained CPython 3.12 from
+ *   2. If none is >= 3.13, download a self-contained CPython 3.13 from
  *      astral-sh/python-build-standalone (no compiler needed) into
  *      ./python-standalone/.
- *   3. Build ./venv from it and install requirements.txt.
+ *   3. Build ./venv from it and install requirements.txt. A venv built
+ *      from an older Python (e.g. 3.12, before hyundai_kia_connect_api 5.3)
+ *      is replaced.
  *
  * node_helper.js auto-uses ./venv/bin/python3 when it exists.
  * Safe to re-run. Never hard-fails npm install — prints guidance instead.
@@ -26,9 +28,9 @@ const ROOT = __dirname;
 const VENV = path.join(ROOT, "venv");
 const STANDALONE = path.join(ROOT, "python-standalone");
 const IS_WIN = process.platform === "win32";
-const MIN = [3, 12]; // hyundai_kia_connect_api now requires python_requires >= 3.12
+const MIN = [3, 13]; // hyundai_kia_connect_api >= 5.3.0 requires python_requires >= 3.13
 const PBS_RELEASE = process.env.MMM_KIA_PBS_RELEASE || "20260901";
-const PBS_PY = "3.12.14";
+const PBS_PY = "3.13.15";
 
 const venvPython = () =>
   IS_WIN ? path.join(VENV, "Scripts", "python.exe") : path.join(VENV, "bin", "python3");
@@ -40,10 +42,16 @@ function ver(bin) {
       stdio: ["ignore", "pipe", "ignore"]
     }).trim();
     const [maj, min] = out.split(/\s+/).map(Number);
-    return { bin, maj, min, str: `${maj}.${min}`, ok: maj > 3 || (maj === 3 && min >= MIN[1]) };
+    return { bin, maj, min, str: `${maj}.${min}`, ok: meetsMin(maj, min) };
   } catch (e) {
     return null;
   }
+}
+
+// pure: does Python maj.min satisfy MIN? (node_helper.js uses it too, to
+// explain a pip failure in a venv that's too old for the pinned library)
+function meetsMin(maj, min) {
+  return maj > MIN[0] || (maj === MIN[0] && min >= MIN[1]);
 }
 
 function ge(a, b) {
@@ -52,7 +60,7 @@ function ge(a, b) {
 
 function candidates() {
   const names = [
-    "python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3", "python"
+    "python3.15", "python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3", "python"
   ];
   const list = [];
   if (process.env.MMM_KIA_PYTHON) list.push(process.env.MMM_KIA_PYTHON);
@@ -252,8 +260,8 @@ async function main() {
 
   if (!best || !ge(best, { maj: MIN[0], min: MIN[1] })) {
     console.log(
-      "[MMM-KiaAccess] Could not obtain Python >= 3.12. Options:\n" +
-        "  - install python3.12 (pyenv, or your distro), then re-run `npm install`\n" +
+      `[MMM-KiaAccess] Could not obtain Python >= ${MIN[0]}.${MIN[1]}. Options:\n` +
+        `  - install python${MIN[0]}.${MIN[1]} (pyenv, or your distro), then re-run \`npm install\`\n` +
         "  - set MMM_KIA_PYTHON=/path/to/python3 and re-run\n" +
         "  - see the README 'Python version' section"
     );
@@ -303,4 +311,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { parseSha256Sums, sha256File };
+module.exports = { parseSha256Sums, sha256File, meetsMin, MIN };

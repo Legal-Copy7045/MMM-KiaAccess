@@ -5,10 +5,6 @@
   "reviewed_at": "2026-11-22",
   "open_alerts": [
     {
-      "version": "hyundai_kia_connect_api 5.3.0",
-      "summary": "Library 5.3.0+ drops Python 3.12 (needs 3.13+). We are held at 5.2.1; following kia_uvo 4.1.0 (5.3.1) means raising the MagicMirror bridge's minimum Python and auto-provisioned CPython to 3.13."
-    },
-    {
       "version": "kia_uvo v4.1.0",
       "summary": "Tyre pressure sensors keep the last known reading while parked and restore it after an HA restart (kia_uvo #1930). Changes existing sensor behaviour; not built."
     }

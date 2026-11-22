@@ -5,8 +5,8 @@
 # CHANGELOG, update this pin, re-run `npm run test:all`, and update
 # manifest.json's matching `requirements` entry in the same commit.
 #
-# hyundai_kia_connect_api >= 4.31.0 requires Python >= 3.12; on an older
-# Python this pin will fail to resolve rather than silently installing an
-# older, untested release — see the "Python version" section of the
-# README (use a venv with python3.12+, or let `npm install` provision one).
-hyundai_kia_connect_api==5.2.1
+# hyundai_kia_connect_api >= 5.3.0 requires Python >= 3.13 (4.31-5.2: 3.12);
+# on an older Python this pin will fail to resolve rather than silently
+# installing an older, untested release — see the "Python version" section
+# of the README (use a venv with python3.13+, or let `npm install` provision one).
+hyundai_kia_connect_api==5.3.1

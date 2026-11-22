@@ -16,6 +16,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const exporter = require("../exporter.js");
 const { freshHelper, tmpCacheDir } = require("./fresh-node-helper.js");
 
@@ -1149,6 +1150,39 @@ async function testRangeMapRace() {
   helper._libState = undefined; // run the real check (freshHelper pre-sets it)
   assert.strictEqual(helper._ensureLibrary("/opt/custom/python3"), "ok");
   assert.strictEqual(helper._libState, "ok", "decided once per process");
+}
+
+// ---- _ensureLibrary(): a venv built from Python 3.12 can't install
+// hyundai_kia_connect_api 5.3+ (needs 3.13) -- say so and point at
+// `npm install` instead of starting a pip run that can only fail ----
+if (process.platform !== "win32") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kia-old-venv-"));
+  const fakePy = path.join(dir, "python3");
+  const marker = path.join(dir, "pip-ran");
+  fs.writeFileSync(fakePy, [
+    "#!/bin/sh",
+    'case "$2" in',
+    '  *version_info*) echo "3 12" ;;',
+    '  *importlib*) echo "0.0.1" ;;',
+    '  *) touch "' + marker + '" ;;',
+    "esac",
+    ""
+  ].join("\n"), { mode: 0o755 });
+  const logs = [];
+  const Log = require("./stubs/logger.js");
+  const origWarn = Log.warn;
+  Log.warn = (m) => logs.push(String(m));
+  try {
+    const helper = freshHelper();
+    helper._libState = undefined;
+    assert.strictEqual(helper._ensureLibrary(fakePy, fakePy), "failed");
+    assert.ok(!fs.existsSync(marker), "no pip run for a venv that's too old");
+    assert.ok(logs.some((m) => /needs Python >= 3\.13/.test(m) && /Python 3\.12/.test(m) &&
+      /npm install/.test(m)), logs.join("\n"));
+  } finally {
+    Log.warn = origWarn;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 testRangeMapRace()

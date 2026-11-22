@@ -12,24 +12,24 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
-const { parseSha256Sums, sha256File } = require("../setup_python.js");
+const { parseSha256Sums, sha256File, meetsMin, MIN } = require("../setup_python.js");
 
 // ---- parseSha256Sums: real-world SHA256SUMS format from
 // python-build-standalone releases -- "<64 hex chars>  <filename>" per
 // line, one file per supported platform triple ----
 {
   const sums = [
-    "72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c  cpython-3.12.14+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-    "577b4bec0793ad1ff0cbff9adbd0df078eddde38a4c41bf5d83ad381a85ee39d  cpython-3.12.14+20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "8a689a077337bea6d1c4bc0b7df1d52fcaa28f5f67e50df8bf417c1e3f9d8874  cpython-3.13.15+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e  cpython-3.13.15+20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
     ""
   ].join("\n");
   assert.strictEqual(
-    parseSha256Sums(sums, "cpython-3.12.14+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"),
-    "72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c"
+    parseSha256Sums(sums, "cpython-3.13.15+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"),
+    "8a689a077337bea6d1c4bc0b7df1d52fcaa28f5f67e50df8bf417c1e3f9d8874"
   );
   assert.strictEqual(
-    parseSha256Sums(sums, "cpython-3.12.14+20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"),
-    "577b4bec0793ad1ff0cbff9adbd0df078eddde38a4c41bf5d83ad381a85ee39d"
+    parseSha256Sums(sums, "cpython-3.13.15+20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"),
+    "01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e"
   );
 }
 
@@ -77,6 +77,22 @@ const { parseSha256Sums, sha256File } = require("../setup_python.js");
   assert.notStrictEqual(sha256File(tmp), expected, "a corrupted file must not produce the same digest");
 
   fs.rmSync(tmp, { force: true });
+}
+
+// ---- minimum Python: hyundai_kia_connect_api 5.3+ needs 3.13, so a 3.12
+// interpreter (or venv built from one) must be rejected and rebuilt ----
+{
+  assert.deepStrictEqual(MIN, [3, 13]);
+  assert.strictEqual(meetsMin(3, 12), false);
+  assert.strictEqual(meetsMin(3, 9), false);
+  assert.strictEqual(meetsMin(3, 13), true);
+  assert.strictEqual(meetsMin(3, 14), true);
+  assert.strictEqual(meetsMin(4, 0), true);
+  assert.strictEqual(meetsMin(2, 99), false);
+  const src = fs.readFileSync(path.join(__dirname, "..", "setup_python.js"), "utf8");
+  const pbs = /const PBS_PY = "(\d+)\.(\d+)\.\d+"/.exec(src);
+  assert.ok(pbs && meetsMin(Number(pbs[1]), Number(pbs[2])),
+    "the downloaded standalone CPython must itself meet the minimum");
 }
 
 console.log("all setup-python tests passed");

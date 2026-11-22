@@ -29,6 +29,7 @@ const BINARY_KEYS = new Set(
     .map((e) => e.key)
 );
 const haSource = require("./ha_source.js");
+const setupPython = require("./setup_python.js");
 const sessions = require("./core/sessions.js");
 const trips = require("./core/trips.js");
 const analytics = require("./core/analytics.js");
@@ -91,6 +92,15 @@ function pinnedLibraryVersion() {
   } catch (e) {
     return "";
   }
+}
+
+/** This Python's [major, minor], or null if it can't be run. */
+function pythonVersion(pythonBin) {
+  const r = spawnSync(pythonBin, ["-c", "import sys; print('%d %d' % sys.version_info[:2])"],
+    { encoding: "utf8", timeout: 30000 });
+  if (r.status !== 0) return null;
+  const v = String(r.stdout || "").trim().split(/\s+/).map(Number);
+  return v.length === 2 && v.every(Number.isFinite) ? v : null;
 }
 
 /** The version installed for this Python ("" if missing / unknown). */
@@ -1238,13 +1248,25 @@ module.exports = NodeHelper.create({
   // pythonBin alone (their environment, their upgrades). Returns "ok",
   // "updating" (fetches wait) or "failed" (fetches carry on with whatever
   // is installed; the log says to run `npm install`).
-  _ensureLibrary(pythonBin) {
+  _ensureLibrary(pythonBin, venvPython = resolvePython(null)) {
     if (this._libState) return this._libState;
-    const venvPython = resolvePython(null);
     if (pythonBin !== venvPython || !fs.existsSync(venvPython)) return (this._libState = "ok");
     const want = pinnedLibraryVersion();
     const have = installedLibraryVersion(venvPython);
     if (!want || have === want) return (this._libState = "ok");
+    // hyundai_kia_connect_api 5.3+ needs Python 3.13: a venv built from an
+    // older Python can't install it, and pip's own error doesn't say why.
+    // npm install replaces the venv (downloading 3.13 if needed); until
+    // then fetches carry on with the installed library.
+    const pv = pythonVersion(venvPython);
+    if (pv && !setupPython.meetsMin(pv[0], pv[1])) {
+      this._libState = "failed";
+      Log.warn("[MMM-KiaAccess] hyundai_kia_connect_api " + want + " needs Python >= " +
+        setupPython.MIN.join(".") + ", but this module's venv uses Python " + pv.join(".") +
+        " — run `npm install` in the module folder to rebuild it (still using " +
+        (have || "the installed library") + " until then)");
+      return this._libState;
+    }
     Log.info("[MMM-KiaAccess] hyundai_kia_connect_api " + (have || "(missing)") + " installed, " +
       want + " needed — installing it now (this release's `npm install` step)");
     this._libState = "updating";

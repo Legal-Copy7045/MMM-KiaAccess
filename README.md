@@ -42,7 +42,7 @@ supports; built and tested on a Kia EV9 (Kia USA).
 | Mode | What runs | Car control | You need |
 |---|---|---|---|
 | **A — Home Assistant** | the HACS integration | ✅ | your Kia login; a one-time SMS/email code (Kia USA / CA) |
-| **B — MagicMirror, standalone** | the module + a bundled Python bridge | – read-only | your Kia login + one-time code; Python ≥ 3.12 (auto-provisioned) |
+| **B — MagicMirror, standalone** | the module + a bundled Python bridge | – read-only | your Kia login + one-time code; Python ≥ 3.13 (auto-provisioned) |
 | **C — MagicMirror, fed by Home Assistant** | HA polls the car; the mirror reads HA locally | ✅ via HA | mode A first, then a HA token on the mirror |
 
 Home Assistant user → **A** (add a mirror later with **C**). Mirror only → **B**.
@@ -458,13 +458,13 @@ Mode B needs two more things: a modern **Python** (auto-provisioned, below) and 
 
 #### Python version (mode B)
 
-`hyundai_kia_connect_api` requires **Python ≥ 3.12**. Older Python can only
-install ancient releases that no longer log in to Kia. Many current OS
-distributions still ship 3.11 or older by default, so `setup_python.js` (run
+`hyundai_kia_connect_api` requires **Python ≥ 3.13** (since 5.3.0; before that,
+3.12). Older Python can only install older releases that miss current fixes or no
+longer log in to Kia. Many current OS distributions still ship 3.12 or older by default, so `setup_python.js` (run
 automatically by `npm install`) sorts it out:
 
-1. Uses the system `python3` if it's ≥ 3.12 (or an earlier download, or `pyenv`).
-2. Otherwise, **on Linux**, downloads a self-contained CPython 3.12 for your CPU
+1. Uses the system `python3` if it's ≥ 3.13 (or an earlier download, or `pyenv`).
+2. Otherwise, **on Linux**, downloads a self-contained CPython 3.13 for your CPU
    architecture from
    [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
    into `./python-standalone/` — no compiler, ~2 min. The download's SHA-256 is
@@ -472,16 +472,18 @@ automatically by `npm install`) sorts it out:
    a mismatch discards the file and fails instead of silently installing it. On
    macOS / Windows without a new-enough Python it stops with instructions
    instead of downloading.
-3. Builds `./venv` and installs `hyundai_kia_connect_api`, pinned in
+3. Builds `./venv` (replacing one built from an older Python, such as the
+   3.12 earlier versions of this module used) and installs `hyundai_kia_connect_api`, pinned in
    `requirements.txt` to an exact, tested version (not a floor/range) — bump it
    deliberately, in the same commit as `manifest.json`'s matching pin.
 
 | Situation | Result |
 |---|---|
-| system Python ≥ 3.12 | used directly |
-| Linux, system Python ≤ 3.11 | standalone CPython 3.12 downloaded automatically |
-| macOS / Windows, system Python ≤ 3.11 | install Python ≥ 3.12 yourself, then re-run `npm install` |
-| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`, install Python ≥ 3.12 yourself, re-run |
+| system Python ≥ 3.13 | used directly |
+| Linux, system Python ≤ 3.12 | standalone CPython 3.13 downloaded automatically |
+| macOS / Windows, system Python ≤ 3.12 | install Python ≥ 3.13 yourself, then re-run `npm install` |
+| offline / download blocked | set `MMM_KIA_NO_DOWNLOAD=1`, install Python ≥ 3.13 yourself, re-run |
+| updated with `git pull` only, venv on 3.12 | keeps the previous library and logs a warning; run `npm install` |
 
 Overrides (env vars): `MMM_KIA_PYTHON=/abs/path/python3` to force an interpreter,
 `MMM_KIA_PBS_RELEASE=<tag>` to pin a different standalone release. Or set
