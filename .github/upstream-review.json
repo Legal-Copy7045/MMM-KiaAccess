@@ -3,5 +3,10 @@
   "kia_uvo": "v4.2.0",
   "hyundai_kia_connect_api": "5.4.2",
   "reviewed_at": "2026-11-23",
-  "open_alerts": []
+  "open_alerts": [
+    {
+      "version": "hyundai_kia_connect_api 5.4.0 (kia_uvo v4.2.0)",
+      "summary": "Canada EV charge schedule (#1615): our schedule_charging_and_climate / set_off_peak_charging commands are EU-region only; emailed 2026-11-23, recommended adding CA with tests."
+    }
+  ]
 }
