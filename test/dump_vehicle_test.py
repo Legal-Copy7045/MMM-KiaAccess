@@ -827,4 +827,14 @@ for _k in ("drive", "after_refuel", "accumulated"):
 _fv.average_fuel_economy_unit = None
 assert kia_client.dump_vehicle(_fv, "EU")["average_fuel_economy_drive_unit"] is None
 
+# library 5.4: EU DTE sentinels (4095 / 1023) and unknown distance-unit
+# codes now arrive as a None range with a None unit -- that must stay an
+# unknown range in every region, not become 0 or crash the mile conversion
+for _region in ("EU", "USA", "CA"):
+    _nv = _RealVehicle(id="R1")
+    _nv.ev_driving_range = (None, None)
+    _nv.total_driving_range = (None, None)
+    _nd = kia_client.dump_vehicle(_nv, _region)
+    assert _nd["ev_driving_range"] is None and _nd["total_driving_range"] is None, (_region, _nd)
+
 print("dump_vehicle tests passed")

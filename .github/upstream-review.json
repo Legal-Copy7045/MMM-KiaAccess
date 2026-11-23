@@ -1,7 +1,7 @@
 {
   "_comment": "Last upstream versions reviewed and accounted for. Updated by the weekly kia_uvo review task.",
-  "kia_uvo": "v4.1.0",
-  "hyundai_kia_connect_api": "5.3.1",
-  "reviewed_at": "2026-11-22",
+  "kia_uvo": "v4.2.0",
+  "hyundai_kia_connect_api": "5.4.2",
+  "reviewed_at": "2026-11-23",
   "open_alerts": []
 }
