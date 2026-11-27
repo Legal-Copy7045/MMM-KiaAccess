@@ -56,6 +56,29 @@ const HASS_TESTS = [
   "test/coordinator_geocode_test.py"
 ];
 
+// Options (CI uses them; with none it behaves as before):
+//   --group core|hass|all   which list to run (default all)
+//   --fail-fast             stop at the first failing file
+//   --require-hass          a missing `homeassistant` fails instead of skipping
+//   --list                  print the files (for regression/run.py) and exit
+const args = process.argv.slice(2);
+const opt = (name) => args.includes(name);
+const gi = args.indexOf("--group");
+const group = gi >= 0 ? args[gi + 1] : "all";
+if (!["core", "hass", "all"].includes(group)) {
+  process.stderr.write(`test-python: unknown --group ${group}\n`);
+  process.exit(2);
+}
+
+if (opt("--list")) {
+  const files = [
+    ...(group !== "hass" ? CORE_TESTS.map((f) => "core " + f) : []),
+    ...(group !== "core" ? HASS_TESTS.map((f) => "hass " + f) : [])
+  ];
+  process.stdout.write(files.join("\n") + "\n");
+  process.exit(0);
+}
+
 function run(file) {
   process.stdout.write(`-- ${file}\n`);
   const res = spawnSync(PY, [file], { stdio: "inherit" });
@@ -68,25 +91,34 @@ function hassAvailable() {
   return res.status === 0;
 }
 
-let ok = true;
-for (const file of CORE_TESTS) {
-  if (!run(file)) ok = false;
-}
-
-if (hassAvailable()) {
-  for (const file of HASS_TESTS) {
-    if (!run(file)) ok = false;
+const failed = [];
+function runAll(files) {
+  for (const file of files) {
+    if (!run(file)) {
+      failed.push(file);
+      if (opt("--fail-fast")) return;
+    }
   }
-} else {
-  process.stdout.write(
-    "\nSkipping the \"hass\" group (ha_import_check.py, coordinator_analytics_test.py, " +
-    "map_keys_test.py) -- `homeassistant` isn't installed. Run `pip install homeassistant` " +
-    "to include it, or see .github/workflows/ci.yml's \"hass\" job (this is what CI runs).\n"
-  );
 }
 
-if (!ok) {
-  process.stderr.write("\ntest-python: one or more Python tests failed\n");
+if (group !== "hass") runAll(CORE_TESTS);
+
+if (group !== "core" && !(failed.length && opt("--fail-fast"))) {
+  if (hassAvailable()) {
+    runAll(HASS_TESTS);
+  } else if (opt("--require-hass")) {
+    failed.push("(homeassistant is not installed -- pip install homeassistant)");
+  } else {
+    process.stdout.write(
+      "\nSkipping the \"hass\" group (ha_import_check.py, coordinator_analytics_test.py, " +
+      "map_keys_test.py) -- `homeassistant` isn't installed. Run `pip install homeassistant` " +
+      "to include it, or see .github/workflows/ci.yml's \"hass\" job (this is what CI runs).\n"
+    );
+  }
+}
+
+if (failed.length) {
+  process.stderr.write(`\ntest-python: failed: ${failed.join(", ")}\n`);
   process.exit(1);
 }
 process.stdout.write("\nall Python tests passed\n");

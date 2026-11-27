@@ -1,0 +1,21 @@
+# Feature -> the checks that cover it. match: regexes over "<stage>:<check key>". (standard section 3.1)
+# The shared engine: core/*.js for the card and MagicMirror, with Python ports for Home Assistant.
+- feature: Vehicle data flattening and state model (doors, lock, charge, battery, units)
+  match: ['^unit:js:test/(flatten|state)\.test\.js$', '^unit:py:test/(spec_check|dump_vehicle_test|region_map_test)\.py$']
+- feature: Same results from the JavaScript and Python engines (contract fixtures)
+  match: ['^unit:js:test/contract\.test\.js$', '^unit:py:test/contract_test\.py$']
+- feature: Alert conditions (low battery, doors, 12 V drain, tow/moved while parked, faults)
+  match: ['^unit:js:test/conditions\.test\.js$', '^unit:py:test/coordinator_(alerts|charger_alert)_test\.py$']
+- feature: Charging sessions and costs
+  match: ['^unit:js:test/sessions\.test\.js$', '^unit:py:test/sessions_test\.py$']
+- feature: Trips
+  match: ['^unit:js:test/trips\.test\.js$', '^unit:py:test/trips_test\.py$']
+- feature: Range, reachable destinations and drive times (straight-line, isolines, routing budget)
+  match: ['^unit:js:test/(range|routing|isoline|dest-planner)\.test\.js$', '^unit:py:test/(range|routing|route_budget)_test\.py$',
+          '^unit:py:test/coordinator_routing_budget_test\.py$']
+- feature: Calendar destinations and geocoding (online meetings skipped, failed lookups not retried for 24 h)
+  match: ['^unit:py:test/coordinator_geocode_test\.py$']
+- feature: Observed range and energy analytics
+  match: ['^unit:js:test/analytics\.test\.js$', '^unit:py:test/(analytics|coordinator_analytics)_test\.py$']
+- feature: Car diagram (every state the EV9-style diagram can show)
+  match: ['^unit:js:test/visuals\.test\.js$', '^ci:gallery-fresh$', '^page:chromium:page::.*:gallery:']

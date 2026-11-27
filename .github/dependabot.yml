@@ -1,0 +1,28 @@
+# Weekly on Sunday, one grouped PR per ecosystem for minor and patch updates (they merge themselves when ci-result
+# passes); each major update on its own PR for the weekly maintenance session to judge. Security updates arrive as
+# soon as an advisory is published.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly, day: sunday, time: "00:30"}
+    open-pull-requests-limit: 3
+    groups:
+      actions: {patterns: ["*"], update-types: [minor, patch]}
+  # hyundai_kia_connect_api is left out: it is pinned identically in requirements.txt and
+  # custom_components/kia_access/manifest.json, which Dependabot can't update together, and every bump needs the
+  # upstream review (.github/upstreams.yaml, .github/upstream-review.json).
+  - package-ecosystem: pip
+    directory: /
+    schedule: {interval: weekly, day: sunday, time: "00:30"}
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: hyundai_kia_connect_api
+    groups:
+      python: {patterns: ["*"], update-types: [minor, patch]}
+  - package-ecosystem: npm
+    directory: /
+    schedule: {interval: weekly, day: sunday, time: "00:30"}
+    open-pull-requests-limit: 3
+    groups:
+      npm: {patterns: ["*"], update-types: [minor, patch]}

@@ -1,0 +1,21 @@
+# Which slow CI groups a pull request starts (STANDARD.md 1.2). Regexes over changed paths.
+# A changed file that matches no rule starts every group (safe default).
+ignore: ['^docs/(?!build-gallery\.js$|car-states\.html$)', '\.md$', '^regression/(?!page/)', '^\.claude/', '^LICENSE$',
+         '^branding/', '^examples/', '^blueprints/', '^\.gitignore$', '^\.gitattributes$']
+shared: ['^\.github/workflows/', '^\.github/scripts/', '^\.github/changes\.yaml$']
+groups:
+  # Home Assistant integration tests (pip install homeassistant)
+  hass: ['^custom_components/', '^test/(ha_import_check|coordinator_|climate_entity|entity_gating|service_authorization|map_keys|fake_ha)',
+         '^scripts/test-python\.js$', '^requirements\.txt$']
+  # HACS manifest/structure validation
+  hacs: ['^custom_components/', '^hacs\.json$']
+  # the cards and the car-state gallery rendered in Chromium (regression page stage)
+  browser: ['^card/', '^custom_components/kia_access/frontend/', '^core/visuals\.js$', '^docs/build-gallery\.js$',
+            '^docs/car-states\.html$', '^fixtures/', '^regression/page/']
+  # dependency audits
+  lockfiles: ['^requirements.*\.txt$', '^package\.json$']
+  # MagicMirror module, bridge and shared engines: covered by the quick jobs, starts no slow group
+  module: ['^MMM-KiaAccess\.(js|css)$', '^node_helper\.js$', '^webhook\.js$', '^exporter\.js$', '^ha_source\.js$',
+           '^setup_python\.js$', '^[a-z_]+\.py$', '^core/', '^test/', '^scripts/', '^package\.json$', '^VERSION$',
+           '^\.github/versions\.yaml$', '^\.github/upstreams\.yaml$', '^\.github/standard\.yaml$', '^\.github/dependabot\.yml$',
+           '^\.github/upstream-review\.json$', '^\.github/SECURITY\.md$', '^\.gitleaks\.toml$', '^cache/', '^fixtures/']

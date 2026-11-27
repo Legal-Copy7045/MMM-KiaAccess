@@ -1,0 +1,29 @@
+# The Home Assistant integration (custom_components/kia_access).
+- feature: Integration loads in Home Assistant (config flow, manifest, platforms, frontend registration)
+  match: ['^unit:py:test/ha_import_check\.py$', '^ci:byte-compile$']
+  manual: ["install from HACS on a fresh Home Assistant"]
+- feature: Polling, stale data and the quick retry (coordinator)
+  match: ['^unit:py:test/coordinator_(stress|stale)_test\.py$', '^unit:py:test/account_poll_test\.py$']
+- feature: Car wake-ups only when allowed (poll directly, quiet hours, wake interval)
+  match: ['^unit:py:test/coordinator_wake_test\.py$']
+- feature: Climate entity (Fahrenheit/Celsius, hvac_mode with set_temperature)
+  match: ['^unit:py:test/climate_entity_test\.py$', '^unit:js:test/card-climate-region\.test\.js$']
+  manual: ["start and stop climate on the real car"]
+- feature: Entities per powertrain (EV-only buttons and numbers)
+  match: ['^unit:py:test/entity_gating_test\.py$', '^unit:js:test/card-powertrain-rows\.test\.js$']
+- feature: Domain services only for authorised users and their own entries
+  match: ['^unit:py:test/service_authorization_test\.py$']
+- feature: Range-map API keys reach the card without being exposed in state attributes
+  match: ['^unit:py:test/map_keys_test\.py$', '^unit:js:test/card-map-keys\.test\.js$']
+- feature: Kia/Hyundai login, token refresh and the failed-login pause
+  match: ['^unit:py:test/(auth_cooldown|token_file)_test\.py$', '^unit:js:test/requirements-pin\.test\.js$']
+  manual: ["sign in with a real account (US and Europe)"]
+- feature: Lock, unlock and other commands reach the car
+  match: ['^unit:py:test/dump_vehicle_test\.py$']
+  manual: ["lock and unlock the real car from Home Assistant"]
+- feature: Lovelace card (car diagram, alerts, climate, doors, charging, find the car, status rows)
+  match: ['^page:chromium:page::(desktop|phone):card:']
+- feature: Range map card (Leaflet served by Home Assistant, no code from the internet)
+  match: ['^page:chromium:page::(desktop|phone):range-map:', '^unit:js:test/card-leaflet-sri\.test\.js$']
+- feature: HA integration matches the shared engine (sync-core)
+  match: ['^ci:sync-core$']

@@ -1,41 +1,80 @@
+# CI per the project standard (github.com/Legal-Copy7045/project-standards, STANDARD.md section 1).
+#  - pull request: nothing while a draft; then the quick checks (node, python, versions, privacy, secrets) and each
+#    slow group (hass, hacs, browser) only when its files changed (.github/changes.yaml);
+#  - push to main: the private-terms check, and the release path when VERSION has no v<VERSION> tag yet
+#    (nothing is re-tested: the pull request already was);
+#  - weekly (Sunday 02:47 UTC) and by hand: everything, the full Node/Python matrix, full-history secret scan and
+#    dependency audits; publishes nothing (workflow_dispatch with release: true on main retries a release).
+# ci-result is the only required check.
 name: CI
-
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-  pull_request:
+  schedule:
+    - cron: "47 2 * * 0"        # Sunday: this project's slot (STANDARD.md 1.6)
   workflow_dispatch:
-  # release.yml runs the full suite before publishing a tag
-  workflow_call:
+    inputs:
+      release: {type: boolean, default: false, description: "Release VERSION if it has no tag yet (main only)"}
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  node:
+  changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: ["20", "22", "24"]
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.c.outputs.release }}
+      full: ${{ steps.c.outputs.full }}
+      hass: ${{ steps.c.outputs.hass }}
+      hacs: ${{ steps.c.outputs.hacs }}
+      browser: ${{ steps.c.outputs.browser }}
+      lockfiles: ${{ steps.c.outputs.lockfiles }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {fetch-depth: 0, persist-credentials: false}
+      - id: c
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          RELEASE_INPUT: ${{ inputs.release }}
+        run: python3 .github/scripts/changes.py
+
+  # ---------------------------------------------------------------- quick (every ready PR, and weekly)
+
+  node:
+    needs: changes
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # oldest and newest supported on pull requests, the full matrix weekly
+        node: ${{ fromJSON(needs.changes.outputs.full == 'true' && '["20", "22", "24"]' || '["20", "24"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-      # No package-lock.json (this module deliberately ships zero required
-      # deps -- MagicMirror runs `npm install` in the module folder on
-      # install anyway) so `npm ci` isn't available here; `npm install`
-      # still pulls in the optionalDependencies (mqtt) the node_helper.js
-      # mqtt tests need -- without this they fail on every CI run with
-      # "mqtt package is installed in this repo -- connect() must return a
-      # client object", since require("mqtt") has nothing to find.
+      # No package-lock.json: MagicMirror runs `npm install` in the module folder itself, and the module ships no
+      # required dependencies. `npm install` still pulls the optional mqtt package the node_helper tests need.
       - name: Install dependencies
-        run: npm install
+        run: npm install --no-package-lock --ignore-scripts
       - name: Syntax check
         run: |
-          for f in MMM-KiaAccess.js node_helper.js webhook.js exporter.js core/flatten.js core/visuals.js core/conditions.js core/state.js core/ha-discovery.js core/sessions.js core/range.js core/routing.js core/isoline.js core/trips.js core/dest-planner.js core/analytics.js ha_source.js setup_python.js docs/build-gallery.js scripts/sync-core.js card/kia-access-card.src.js card/kia-range-map-card.src.js custom_components/kia_access/frontend/kia-access-card.js; do
-            echo "node --check $f"
-            node --check "$f"
+          for f in MMM-KiaAccess.js node_helper.js webhook.js exporter.js core/*.js ha_source.js setup_python.js \
+                   docs/build-gallery.js scripts/*.js card/*.src.js custom_components/kia_access/frontend/kia-access-card.js; do
+            node --check "$f" || { echo "::error file=$f::syntax error"; exit 1; }
           done
       - name: Unit tests
         run: npm test
@@ -45,101 +84,147 @@ jobs:
         run: |
           node docs/build-gallery.js
           if ! git diff --quiet docs/car-states.html; then
-            echo "docs/car-states.html is out of date — run: node docs/build-gallery.js"
+            echo "::error::docs/car-states.html is out of date - run: node docs/build-gallery.js"
             git --no-pager diff docs/car-states.html | head -40
             exit 1
           fi
+      - name: Dependency audit (package.json changed, or weekly)
+        if: matrix.node == '24' && (needs.changes.outputs.lockfiles == 'true' || needs.changes.outputs.full == 'true')
+        run: |
+          npm install --package-lock-only --ignore-scripts --silent
+          npm audit --omit=dev --audit-level=high
 
   python:
+    needs: changes
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        python: ["3.13", "3.14"]
+        python: ${{ fromJSON(needs.changes.outputs.full == 'true' && '["3.13", "3.14"]' || '["3.13"]') }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      # test/dump_vehicle_test.py imports hyundai_kia_connect_api.exceptions
-      # directly (to exercise CommandUnconfirmed's RequestTimeoutError
-      # handling) -- without it installed here, that import fails before
-      # any assertion even runs.
+          cache: pip
+      # test/dump_vehicle_test.py imports hyundai_kia_connect_api.exceptions directly
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pyyaml
+      - name: Versions (VERSION, manifest.json, package.json, CHANGELOG.md)
+        run: python3 .github/scripts/check_versions.py
       - name: Byte-compile
         run: |
           python -m py_compile kia_bridge.py enroll.py kia_client.py conditions.py vehicle_state.py sessions.py analytics.py
           python -m py_compile custom_components/kia_access/*.py
-      - name: Spec sanity
-        run: python test/spec_check.py
-      - name: Contract fixtures (Python engine)
-        run: python test/contract_test.py
-      - name: kia_client.dump_vehicle
-        run: python test/dump_vehicle_test.py
-      - name: Region numbering matches the library
-        run: python test/region_map_test.py
-      - name: kia_client token file isolation
-        run: python test/token_file_test.py
-      - name: kia_client auth-failure cooldown
-        run: python test/auth_cooldown_test.py
-      - name: sessions engine
-        run: python test/sessions_test.py
+      - name: Python tests (stops at the first failing file and names it)
+        run: node scripts/test-python.js --group core --fail-fast
+      - name: Dependency audit (requirements changed, or weekly)
+        if: matrix.python == '3.13' && (needs.changes.outputs.lockfiles == 'true' || needs.changes.outputs.full == 'true')
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
 
-      - name: range parity
-        run: python test/range_test.py
-      - name: routing parity
-        run: python test/routing_test.py
-      - name: routing call budget
-        run: python test/route_budget_test.py
-      - name: trips parity
-        run: python test/trips_test.py
-      - name: analytics parity
-        run: python test/analytics_test.py
-      - name: AccountPoller / select_own_vehicle
-        run: python test/account_poll_test.py
+  privacy:
+    needs: changes
+    if: github.event_name != 'push'
+    uses: Legal-Copy7045/project-standards/.github/workflows/privacy.yml@1f5964bc45844dc0cefda0374af8f8128daa1b40 # v1.1.0
+
+  privacy-denylist:
+    needs: changes
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+    uses: Legal-Copy7045/project-standards/.github/workflows/privacy.yml@1f5964bc45844dc0cefda0374af8f8128daa1b40 # v1.1.0
+    with: {denylist: true}
+    secrets: inherit
+
+  secrets:
+    needs: changes
+    if: github.event_name != 'push'
+    uses: Legal-Copy7045/project-standards/.github/workflows/gitleaks.yml@1f5964bc45844dc0cefda0374af8f8128daa1b40 # v1.1.0
+    with: {full-history: "${{ needs.changes.outputs.full == 'true' }}"}
+
+  # ---------------------------------------------------------------- slow groups (only when their files changed)
 
   hass:
+    needs: changes
+    if: needs.changes.outputs.hass == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
-      - name: Validate config flow / manifest against Home Assistant
-        run: |
-          pip install --quiet homeassistant
-          python test/ha_import_check.py
-      - name: Coordinator analytics wiring
-        run: python test/coordinator_analytics_test.py
-      - name: Coordinator concurrency stress suite
-        run: python test/coordinator_stress_test.py
-      - name: Coordinator stale/fresh data-model suite
-        run: python test/coordinator_stale_test.py
-      - name: Wake gating (quiet hours / interval) + quick retry
-        run: python test/coordinator_wake_test.py
-      - name: Climate entity (hvac_mode with set_temperature)
-        run: python test/climate_entity_test.py
-      - name: Coordinator alert-splitting suite
-        run: python test/coordinator_alerts_test.py
-      - name: Charger-status start/stop alert suite
-        run: python test/coordinator_charger_alert_test.py
-      - name: EV-only entity gating (button/number)
-        run: python test/entity_gating_test.py
-      - name: Domain-service authorization
-        run: python test/service_authorization_test.py
-      - name: Range-map key wiring
-        run: python test/map_keys_test.py
-      - name: Coordinator routing budget
-        run: python test/coordinator_routing_budget_test.py
-      - name: Calendar geocoding (online meetings, miss cache)
-        run: python test/coordinator_geocode_test.py
+          cache: pip
+      - name: Install Home Assistant
+        run: pip install --quiet homeassistant -r requirements.txt
+      - name: Integration tests against Home Assistant (stops at the first failing file and names it)
+        run: node scripts/test-python.js --group hass --require-hass --fail-fast
 
   hacs:
+    needs: changes
+    if: needs.changes.outputs.hacs == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
       - name: HACS validation
-        uses: hacs/action@main
+        uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
         with:
           category: integration
           ignore: brands
+
+  browser:
+    needs: changes
+    if: needs.changes.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install Playwright and Chromium
+        run: |
+          pip install pyyaml
+          npm install --no-save --no-package-lock --ignore-scripts playwright
+          npx playwright install --with-deps chromium
+      - name: Cards and gallery in Chromium (desktop and phone)
+        run: python3 regression/run.py --stage page
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: page-logs
+          path: regression/out/
+          retention-days: 3
+
+  # ---------------------------------------------------------------- release (push to main with a new VERSION)
+
+  release:
+    needs: [changes, privacy-denylist]
+    if: needs.changes.outputs.release == 'true'
+    permissions:
+      contents: write
+    uses: Legal-Copy7045/project-standards/.github/workflows/release.yml@1f5964bc45844dc0cefda0374af8f8128daa1b40 # v1.1.0
+    with:
+      title: "Kia Access"
+
+  ci-result:
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [changes, node, python, privacy, privacy-denylist, secrets, hass, hacs, browser, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -qE '"(failure|cancelled)"'; then echo "A needed job failed or was cancelled."; exit 1; fi

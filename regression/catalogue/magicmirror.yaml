@@ -1,0 +1,8 @@
+# The MagicMirror module (MMM-KiaAccess.js, node_helper.js and the Python bridge).
+- feature: MagicMirror module renders the car (standalone and fed by Home Assistant)
+  match: ['^unit:js:test/mmm-kiaaccess\.test\.js$', '^unit:js:test/ha-(discovery|source)\.test\.js$']
+  manual: ["the module on a real mirror"]
+- feature: node_helper fetches through the Python bridge, keeps cached data, updates the library itself
+  match: ['^unit:js:test/(node_helper|stress-node-helper)\.test\.js$', '^unit:js:test/setup-python\.test\.js$']
+- feature: Webhook and Prometheus exporter outputs
+  match: ['^unit:js:test/(webhook|exporter)\.test\.js$']

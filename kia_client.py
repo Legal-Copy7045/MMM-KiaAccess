@@ -1295,7 +1295,8 @@ def _geocode(address):
     )
     req = urllib.request.Request(url, headers={"User-Agent": "MMM-KiaAccess (kia_client)"})
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        # nosec B310: the URL is the fixed https:// Nominatim endpoint above
+        with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310
             rows = _json.load(resp)
     except Exception as exc:  # noqa: BLE001
         raise ClientError(f"geocoding failed for {address!r}: {exc}") from exc

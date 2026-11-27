@@ -1,0 +1,13 @@
+# Repository, release and supply-chain checks.
+- feature: Code parses and compiles (JavaScript and Python)
+  match: ['^ci:(syntax|byte-compile)$']
+- feature: One version everywhere and a changelog section (VERSION, package.json, manifest.json, CHANGELOG.md)
+  match: ['^ci:versions$']
+- feature: No personal details or credentials in the public repository
+  match: ['^ci:privacy$']
+- feature: Dependency and code security scans
+  match: ['^ci:(bandit|pip-audit|npm-audit)$']
+- feature: The released version is published with notes
+  match: ['^live:release$']
+- feature: The integration is running on the owner's Home Assistant
+  match: ['^live:home-assistant$']

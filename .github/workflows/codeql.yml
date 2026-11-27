@@ -1,0 +1,18 @@
+# Weekly and on demand only (STANDARD.md 1.5). GitHub's CodeQL "default setup" must be switched off
+# (Settings -> Code security), or it keeps running on every push as well.
+name: CodeQL
+on:
+  schedule:
+    - cron: "47 4 * * 0"        # Sunday: two hours after this project's weekly CI slot
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  codeql:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    uses: Legal-Copy7045/project-standards/.github/workflows/codeql.yml@1f5964bc45844dc0cefda0374af8f8128daa1b40 # v1.1.0
+    with:
+      languages: '["actions", "python", "javascript-typescript"]'
