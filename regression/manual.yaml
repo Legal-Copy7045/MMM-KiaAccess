@@ -1,0 +1,16 @@
+# What only a person can check. Record results: python3 regression/run.py manual "<key>" pass|fail --note "..."
+- key: install from HACS on a fresh Home Assistant
+  area: install
+  steps: [Add the repository in HACS and install Kia Access, Restart Home Assistant, Add the integration and sign in, Check the entities and the card appear]
+- key: sign in with a real account (US and Europe)
+  area: login
+  steps: [Add the integration with a real Kia/Hyundai account, Check the first update succeeds, Check no failed-login pause starts]
+- key: lock and unlock the real car from Home Assistant
+  area: commands
+  steps: [Press Lock on the card, Confirm the car locks and the card shows locked, Press Unlock and confirm]
+- key: start and stop climate on the real car
+  area: commands
+  steps: [Start climate from the card at a set temperature, Confirm the car starts, Stop it and confirm]
+- key: the module on a real mirror
+  area: magicmirror
+  steps: [Update with git pull and npm install, Restart MagicMirror, Check the car diagram, range and alerts show and refresh]

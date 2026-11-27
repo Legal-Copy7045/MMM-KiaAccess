@@ -1,0 +1,52 @@
+# Kia Access's regression profile (standard section 3.1). The global /regression, /walkthrough and /full-check
+# skills read this file; nothing project-specific lives in the skills. See regression/README.md.
+name: Kia Access
+type: ha-integration        # and a MagicMirror module (same repository, same releases)
+ui: true                    # the Lovelace cards (the MagicMirror screen is a manual check)
+report_tz: Europe/London
+version_file: VERSION
+changelog: CHANGELOG.md
+security_tools: "bandit -ll -ii (Python), pip-audit -r requirements.txt, npm audit --omit=dev --audit-level=high, the privacy guard; gitleaks runs in CI"
+roles: [dashboard]          # a Home Assistant user looking at the cards (the cards have no roles of their own)
+
+stages:                     # standard names; the unit stage is run.py's own (one check per test file)
+  ci:
+    prefix: CI
+    commands:
+      - {key: syntax, run: "for f in MMM-KiaAccess.js node_helper.js webhook.js exporter.js core/*.js ha_source.js setup_python.js docs/build-gallery.js scripts/*.js card/*.src.js custom_components/kia_access/frontend/kia-access-card.js; do node --check \"$f\" || exit 1; done"}
+      - {key: byte-compile, run: "python3 -m py_compile kia_bridge.py enroll.py kia_client.py conditions.py vehicle_state.py sessions.py analytics.py custom_components/kia_access/*.py"}
+      - {key: sync-core, run: "node scripts/sync-core.js --check"}
+      - {key: gallery-fresh, run: "node docs/build-gallery.js && git diff --quiet docs/car-states.html"}
+      - {key: versions, run: "python3 .github/scripts/check_versions.py"}
+      - {key: privacy, run: "BASE=origin/main HEAD=HEAD python3 .github/scripts/privacy_guard.py"}
+      - {key: bandit, run: "command -v bandit >/dev/null || exit 77; bandit -q -ll -ii -r kia_client.py kia_bridge.py enroll.py conditions.py vehicle_state.py sessions.py analytics.py range.py routing.py trips.py custom_components/kia_access", skip_exit: 77}
+      - {key: pip-audit, run: "command -v pip-audit >/dev/null || exit 77; pip-audit -r requirements.txt", skip_exit: 77}
+      - {key: npm-audit, run: "d=$(mktemp -d) && cp package.json \"$d\" && cd \"$d\" && npm install --package-lock-only --ignore-scripts --silent && npm audit --omit=dev --audit-level=high"}
+  unit:
+    prefix: UNIT
+  page:
+    prefix: PAGE
+    commands:
+      - {key: chromium, run: "node regression/page/run.js --junit {junit}", junit: true}
+  live:
+    prefix: LIVE
+    env: [HA_URL, HA_TOKEN]   # read-only; skipped (exit 77) when GitHub or Home Assistant isn't reachable
+    commands:
+      - {key: release, run: "python3 regression/live.py release", skip_exit: 77}
+      - {key: home-assistant, run: "python3 regression/live.py ha", skip_exit: 77}
+  manual:
+    prefix: MAN
+  walkthrough:
+    prefix: WALK
+    commands:
+      - {key: crawl, run: "node regression/page/run.js --walkthrough"}   # out/walkthrough.json + walkthrough-checks.json
+
+walkthrough:
+  ui_paths: ['^card/', '^custom_components/kia_access/frontend/', '^core/visuals\.js$', '^MMM-KiaAccess\.(js|css)$']
+
+reviewers:                  # where this project's risk lives
+  bugs: "Risky paths: kia_client.py (login, token refresh, the auth-failure cooldown, commands that may or may not reach the car), custom_components/kia_access/coordinator.py (polling, wake gating, alerts), the shared engines in core/ and their Python ports, node_helper.js."
+  claims: "Claims are in .github/SECURITY.md, README.md and CLAUDE.md (see claims.yaml): local-only credentials and token, redacted diagnostics, read-only MagicMirror, no car wake-ups unless enabled, service authorization, no remote code in the dashboard, the public repository's privacy guard."
+  exposure: "Surface: the Lovelace card bundle and vendored Leaflet served by Home Assistant, the domain services, the MagicMirror webhook.js and exporter.js outputs, outbound calls (Kia/Hyundai APIs through the library, Nominatim, Geoapify, TomTom), .github/workflows (release path, reusable workflows pinned by SHA)."
+  desktop: "The cards on a desktop dashboard: the car diagram and alerts, climate, doors, charging, find-the-car, the status rows, and the range map."
+  phone: "The same cards in the Home Assistant phone app: tap targets, the climate steppers, long button rows."

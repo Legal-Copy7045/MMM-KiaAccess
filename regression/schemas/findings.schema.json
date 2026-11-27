@@ -1,0 +1,102 @@
+{
+ "type": "object",
+ "required": [
+  "reviewer",
+  "status",
+  "findings"
+ ],
+ "properties": {
+  "reviewer": {
+   "enum": [
+    "bugs",
+    "claims",
+    "exposure"
+   ]
+  },
+  "status": {
+   "enum": [
+    "done",
+    "failed"
+   ]
+  },
+  "scope": {
+   "type": "string",
+   "description": "what was reviewed, in one or two sentences"
+  },
+  "findings": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "severity",
+     "title",
+     "description",
+     "verified"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "BUG-001 / SEC-001 / EXP-001"
+     },
+     "severity": {
+      "enum": [
+       "critical",
+       "high",
+       "medium",
+       "low",
+       "info"
+      ]
+     },
+     "area": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "file": {
+      "type": "string"
+     },
+     "line": {
+      "type": "integer"
+     },
+     "description": {
+      "type": "string"
+     },
+     "scenario": {
+      "type": "string"
+     },
+     "recommendation": {
+      "type": "string"
+     },
+     "verified": {
+      "type": "boolean",
+      "description": "proved by running code or by quoting the exact code path"
+     }
+    }
+   }
+  },
+  "claims": {
+   "type": "array",
+   "description": "claims reviewer only",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "held"
+    ],
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "held": {
+      "type": "boolean"
+     },
+     "note": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ }
+}

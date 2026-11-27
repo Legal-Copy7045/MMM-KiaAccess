@@ -1,0 +1,3 @@
+# Every other place the version lives; check_versions.py checks each equals VERSION (STANDARD.md 2.1).
+- {file: package.json, json: version}
+- {file: custom_components/kia_access/manifest.json, json: version}

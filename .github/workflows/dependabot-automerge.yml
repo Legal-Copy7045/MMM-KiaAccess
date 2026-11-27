@@ -1,0 +1,14 @@
+# Dependabot updates merge themselves once ci-result passes, except new major versions (STANDARD.md 5).
+name: Dependabot auto-merge
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  automerge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: Legal-Copy7045/project-standards/.github/workflows/dependabot-automerge.yml@1f5964bc45844dc0cefda0374af8f8128daa1b40 # v1.1.0

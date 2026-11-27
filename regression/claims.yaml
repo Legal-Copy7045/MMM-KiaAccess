@@ -1,0 +1,37 @@
+# Every security and privacy claim the project makes (standard section 3.4). code: globs of the files that keep it.
+- id: CLM-001
+  claim: Kia/Hyundai credentials and the account token are stored only locally (the Home Assistant config entry, or the MagicMirror token file and config.js, which are git-ignored), each account in its own token file.
+  where: [.github/SECURITY.md, README.md]
+  code: ["kia_client.py", "custom_components/kia_access/config_flow.py", "custom_components/kia_access/__init__.py", ".gitignore", "node_helper.js"]
+- id: CLM-002
+  claim: Diagnostics and logs don't reveal credentials, tokens, the VIN or the car's location.
+  where: [.github/SECURITY.md]
+  code: ["custom_components/kia_access/diagnostics.py", "custom_components/kia_access/*.py", "kia_client.py", "node_helper.js"]
+- id: CLM-003
+  claim: The standalone MagicMirror module is read-only; it never sends commands to the car.
+  where: [README.md]
+  code: ["MMM-KiaAccess.js", "node_helper.js", "kia_bridge.py"]
+- id: CLM-004
+  claim: The car is only woken when "Poll the car directly" is on, or by a manual refresh; otherwise only Kia's server cache is read.
+  where: [README.md]
+  code: ["custom_components/kia_access/coordinator.py", "kia_client.py"]
+- id: CLM-005
+  claim: The integration's services act only for users allowed to control the entry they target.
+  where: [README.md]
+  code: ["custom_components/kia_access/__init__.py", "custom_components/kia_access/services.yaml"]
+- id: CLM-006
+  claim: The dashboard cards load no code from the internet; Leaflet ships with the integration and is checked against its published hash.
+  where: [CHANGELOG.md]
+  code: ["card/*.src.js", "custom_components/kia_access/frontend/**", "custom_components/kia_access/__init__.py"]
+- id: CLM-007
+  claim: Repeated failed sign-ins pause further attempts to avoid an account lockout; the stored attempt fingerprint is a salted, slow hash in an owner-only file.
+  where: [CHANGELOG.md]
+  code: ["kia_client.py"]
+- id: CLM-008
+  claim: Range-map API keys are passed to the card over the authenticated websocket, not exposed in entity attributes.
+  where: [README.md]
+  code: ["custom_components/kia_access/__init__.py", "custom_components/kia_access/sensor.py", "card/kia-range-map-card.src.js"]
+- id: CLM-009
+  claim: The public repository holds no personal details or credentials (privacy guard on every ready pull request, private terms on main).
+  where: [CLAUDE.md]
+  code: [".github/scripts/privacy_guard.py", ".github/workflows/ci.yml"]

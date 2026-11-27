@@ -1,0 +1,6 @@
+# Versions Dependabot doesn't track (STANDARD.md 5): the weekly maintenance session checks each for a newer release.
+# The Kia/Hyundai library and kia_uvo are also reviewed change-by-change by this project's own weekly upstream review
+# (.github/upstream-review.json); the maintenance session leaves their bumps to that review.
+- {name: hyundai_kia_connect_api, current: "5.4.2", source: "pypi:hyundai_kia_connect_api", where: "requirements.txt and custom_components/kia_access/manifest.json (same pin in both)"}
+- {name: kia_uvo, current: "4.2.0", source: "github:Hyundai-Kia-Connect/kia_uvo", where: ".github/upstream-review.json (the reference integration we review, not a dependency)"}
+- {name: Leaflet, current: "1.9.4", source: "npm:leaflet", where: "custom_components/kia_access/frontend/leaflet/ (vendored), LEAFLET_VER in card/kia-range-map-card.src.js, LEAFLET_URL in custom_components/kia_access/__init__.py, test/card-leaflet-sri.test.js"}

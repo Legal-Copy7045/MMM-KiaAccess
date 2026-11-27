@@ -1,0 +1,90 @@
+{
+ "type": "object",
+ "required": [
+  "reviewer",
+  "status",
+  "findings"
+ ],
+ "properties": {
+  "reviewer": {
+   "enum": [
+    "desktop",
+    "phone"
+   ]
+  },
+  "status": {
+   "enum": [
+    "done",
+    "failed"
+   ]
+  },
+  "findings": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "group",
+     "title",
+     "detail"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "WD-001 (desktop) / WP-001 (phone)"
+     },
+     "group": {
+      "enum": [
+       "duplicate",
+       "naming",
+       "placement",
+       "dead-end",
+       "long-flow",
+       "keep-separate",
+       "layout",
+       "other"
+      ]
+     },
+     "roles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "title": {
+      "type": "string"
+     },
+     "detail": {
+      "type": "string"
+     },
+     "pages": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "screenshots": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "proposal": {
+      "type": "string"
+     },
+     "value": {
+      "enum": [
+       "high",
+       "medium",
+       "low"
+      ]
+     }
+    }
+   }
+  },
+  "proposed_menus": {
+   "type": "object",
+   "description": "role -> list of menu sections with items"
+  }
+ }
+}
